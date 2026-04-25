@@ -1,0 +1,39 @@
+{
+  "summary": "Comprehensive backend pytest suite for ZoomEats. 17/18 tests passed (94%). All core flows working: health, restaurant listing/search/detail, auth (token+cookie), role switching, order creation with subtotal+2.99 fee, customer order retrieval, role guards (403 for cross-role access), vendor restaurant+menu CRUD, delivery accept/deliver flow, admin endpoints (metrics/users/restaurants/orders/approve), AI Chat (Claude Sonnet 4.5 via Emergent LLM key) returning replies and persisting + retrieving history, Stripe checkout session creation. Only failure: GET /api/checkout/status/{session_id} returns 500 because emergentintegrations library cannot retrieve the just-created session ('No such checkout.session').",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/checkout/status/{session_id}",
+        "issue": "Returns 500. emergentintegrations StripeCheckout.get_checkout_status raises CheckoutError 'No such checkout.session: cs_test_...' for a session that was just successfully created via POST /api/checkout/session. Likely the Emergent Stripe proxy issues sessions in a sandbox account but retrieval hits a different account, or sk_test_emergent placeholder is not honored on read. This breaks the post-payment success page polling (GET /checkout/status) flow on the frontend.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Investigate /api/checkout/status/{session_id} 500 with emergentintegrations StripeCheckout. Either (a) handle CheckoutError gracefully and return a useful payload while session propagates, or (b) verify STRIPE_API_KEY usage — `sk_test_emergent` succeeds on create but fails on status retrieval. Recommend wrapping get_checkout_status in try/except and returning {payment_status: 'pending', status: 'open'} on transient lookup error so the frontend success-page polling does not blow up.",
+    "Optional: add input validation to POST /api/orders to reject negative quantities/prices.",
+    "Optional: /api/vendor/restaurant returns null (not 404) when no restaurant exists — consider returning 404 for clarity."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 740 lines — consider splitting into routers (auth.py, vendor.py, delivery.py, admin.py, payments.py, chat.py).",
+    "POST /api/auth/role allows switching to 'vendor' or 'delivery' but never back to 'customer' check works; however nothing prevents repeated role flipping which could be abused.",
+    "create_order does not validate item.price/quantity against the actual menu item — a malicious client can submit arbitrary prices. Recommend re-pricing on the server using db.menu_items.",
+    "checkout/status has no try/except around sc.get_checkout_status — any Stripe error causes 500.",
+    "stripe_webhook reuses host_url for webhook_url; signature verification relies on emergentintegrations and silently swallows errors.",
+    "AI Chat persists messages but does not paginate; chat_history loads up to 200 messages without filter on time."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "94%", "frontend": "n/a (skipped per request)"},
+  "test_credentials": "Test users + sessions are created at runtime via pymongo direct insert into users + user_sessions collections. See backend_test.py make_user(). No real OAuth needed.",
+  "seed_data_creation": "Seed restaurants (Terra Verde, Hachi Roll Co., Ember & Oak) auto-seeded on backend startup — verified present.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test suite at /app/backend/tests/backend_test.py covers all 18 critical flows. Re-run with: REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env|cut -d= -f2) MONGO_URL=mongodb://localhost:27017 DB_NAME=test_database pytest /app/backend/tests/backend_test.py -v. Only failing test is test_checkout_session due to Stripe status-retrieval bug. Frontend testing was skipped per review request.",
+  "rca of the issue": "POST /api/checkout/session succeeds (200) and returns cs_test_xxx session_id with payment_transactions row inserted (payment_status=initiated). Subsequent GET /api/checkout/status/{session_id} fails with 500 because emergentintegrations.payments.stripe.checkout.StripeCheckout.get_checkout_status raises CheckoutError('Failed to retrieve session status: ... No such checkout.session: cs_test_...'). Same key sk_test_emergent and same webhook_url used in both calls. The session is 'lost' on the read path. Fix: wrap the call in try/except in /api/checkout/status and return a soft-pending response, plus log full Stripe error for further triage; long-term, validate that STRIPE_API_KEY is being correctly resolved by emergentintegrations on both code paths."
+}
