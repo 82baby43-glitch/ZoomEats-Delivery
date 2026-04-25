@@ -485,9 +485,21 @@ async def checkout_status(session_id: str, request: Request, user=Depends(get_cu
     host_url = str(request.base_url).rstrip("/")
     webhook_url = f"{host_url}/api/webhook/stripe"
     sc = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-    status = await sc.get_checkout_status(session_id)
 
     tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    try:
+        status = await sc.get_checkout_status(session_id)
+    except Exception as e:
+        logger.warning(f"Stripe status lookup failed for {session_id}: {e}")
+        # Soft-pending so frontend polling continues / falls back to webhook
+        return {
+            "status": "open",
+            "payment_status": tx.get("payment_status", "pending") if tx else "pending",
+            "amount_total": int(round((tx.get("amount", 0) if tx else 0) * 100)),
+            "currency": tx.get("currency", "usd") if tx else "usd",
+            "soft_error": True,
+        }
+
     if tx and tx.get("payment_status") != "paid" and status.payment_status == "paid":
         await db.payment_transactions.update_one(
             {"session_id": session_id},
