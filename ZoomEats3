@@ -1,0 +1,26 @@
+NEXT_PUBLIC_API_URL=http://localhost:5000
+{
+"name":"zoomeats-frontend",
+"private":true,
+"scripts":{"dev":"next dev","build":"next build","start":"next start"},
+"dependencies":{"socket.io-client":"^4.7.5"}
+}{
+"name":"zoomeats-backend",
+"type":"module",
+"scripts":{"start":"node server.js"},
+"dependencies":{
+"express":"^4.18.2",
+"cors":"^2.8.5",
+"socket.io":"^4.7.5"
+}
+}
+
+import app from './src/app.js';
+import http from 'http';
+import { initSocket } from './src/sockets/socket.js';
+
+const server = http.createServer(app);
+initSocket(server);
+
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, ()=>console.log("Backend running on",PORT));
