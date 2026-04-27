@@ -24,7 +24,9 @@ export default function AuthCallback() {
       try {
         const res = await api.post("/auth/session", { session_id });
         setUser(res.data.user);
-        if (!res.data.user.role || res.data.user.role === "customer") {
+        // Drivers, vendors, and admins ALWAYS land on the onboarding/role-picker
+        // so they can choose which mode to enter. Customers skip straight to the app.
+        if (res.data.user.role !== "customer") {
           navigate("/onboarding", { state: { user: res.data.user } });
         } else {
           navigate("/", { state: { user: res.data.user } });
