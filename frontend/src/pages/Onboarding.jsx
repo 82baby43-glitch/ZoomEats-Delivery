@@ -55,8 +55,8 @@ export default function Onboarding() {
                 data-testid={`role-${r.id}`}
               >
                 <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 text-white"
-                  style={{ background: "var(--accent)" }}
+                  className="w-12 h-12 rounded-xl flex items-center justify-center mb-4"
+                  style={{ background: "var(--primary)", color: "#0A0A0A" }}
                 >
                   <Icon size={22} />
                 </div>

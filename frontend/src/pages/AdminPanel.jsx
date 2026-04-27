@@ -78,7 +78,7 @@ export default function AdminPanel() {
           {tab === "users" && (
             <div className="card overflow-hidden">
               <table className="w-full text-sm">
-                <thead style={{ background: "var(--bg)" }}>
+                <thead style={{ background: "var(--surface-2)" }}>
                   <tr>
                     <th className="text-left p-3">Name</th>
                     <th className="text-left p-3">Email</th>
@@ -120,7 +120,7 @@ export default function AdminPanel() {
           {tab === "orders" && (
             <div className="card overflow-hidden">
               <table className="w-full text-sm">
-                <thead style={{ background: "var(--bg)" }}>
+                <thead style={{ background: "var(--surface-2)" }}>
                   <tr>
                     <th className="text-left p-3">Order</th>
                     <th className="text-left p-3">Restaurant</th>

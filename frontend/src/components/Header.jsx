@@ -20,18 +20,16 @@ export default function Header() {
   return (
     <header
       className="sticky top-0 z-40 backdrop-blur-xl border-b"
-      style={{ background: "rgba(244, 241, 234, 0.85)", borderColor: "var(--border)" }}
+      style={{ background: "rgba(10, 10, 10, 0.85)", borderColor: "var(--border)" }}
       data-testid="app-header"
     >
       <div className="max-w-7xl mx-auto px-6 md:px-12 lg:px-12 py-4 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2" data-testid="brand-logo">
-          <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center font-display font-black text-white text-lg"
-            style={{ background: "var(--primary)" }}
-          >
-            Z
-          </div>
-          <span className="font-display text-2xl font-black tracking-tight">ZoomEats</span>
+          <img
+            src="https://customer-assets.emergentagent.com/job_builder-hub-470/artifacts/ndtc6nc9_file_000000004a0471f792fc274e17837e5e.png"
+            alt="ZoomEats"
+            className="h-12 md:h-14 w-auto rounded-lg"
+          />
         </Link>
 
         <nav className="hidden md:flex items-center gap-6">
@@ -63,8 +61,8 @@ export default function Header() {
             <ShoppingBag size={20} />
             {itemCount > 0 && (
               <span
-                className="absolute -top-1 -right-1 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center text-white"
-                style={{ background: "var(--primary)" }}
+                className="absolute -top-1 -right-1 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center"
+                style={{ background: "var(--primary)", color: "#0A0A0A" }}
                 data-testid="cart-count"
               >
                 {itemCount}
@@ -88,8 +86,8 @@ export default function Header() {
               </button>
               {menuOpen && (
                 <div
-                  className="absolute right-0 mt-2 w-56 bg-white border rounded-xl shadow-lg overflow-hidden"
-                  style={{ borderColor: "var(--border)" }}
+                  className="absolute right-0 mt-2 w-56 border rounded-xl shadow-lg overflow-hidden"
+                  style={{ background: "var(--surface)", borderColor: "var(--border)" }}
                   data-testid="user-menu"
                 >
                   <div className="px-4 py-3 border-b" style={{ borderColor: "var(--border)" }}>
@@ -98,7 +96,7 @@ export default function Header() {
                     <div className="text-xs mt-1 label-eyebrow">Role: {user.role}</div>
                   </div>
                   <button
-                    className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-2 text-sm"
+                    className="w-full text-left px-4 py-3 flex items-center gap-2 text-sm hover:bg-black/40"
                     onClick={logout}
                     data-testid="logout-button"
                   >

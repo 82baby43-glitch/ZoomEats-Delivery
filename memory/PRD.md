@@ -46,5 +46,9 @@
 - **P2**: Split `server.py` (740 LOC) into routers per domain.
 - **P3**: Order ratings & reviews; tip-on-delivery.
 
-## Test credentials
-See `/app/memory/test_credentials.md`
+## Iteration 2 update (2026-01-27)
+- Replaced header logo with user-provided ZoomEats wordmark (black tile + neon-green swoosh).
+- Rebranded entire app to bold black + neon-green dark theme to match logo:
+  - `--bg #0A0A0A`, `--surface #141414`, `--primary #B6F127` (neon), white text
+  - All inline contrast issues fixed (chatbot bubbles, onboarding role icons, admin tables, cart count badge → black text on neon)
+- Stripe stays on `sk_test_emergent` (user has no Stripe key); soft-pending fallback on `/checkout/status` keeps frontend unbroken. To upgrade: replace `STRIPE_API_KEY=` in `/app/backend/.env` and restart backend.
