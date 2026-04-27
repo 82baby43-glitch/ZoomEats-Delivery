@@ -2,7 +2,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { useCart } from "@/lib/cart";
 import { ShoppingBag, User as UserIcon, LogOut, LayoutDashboard, Bike, Shield, Repeat } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import { api } from "@/lib/api";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 const startLogin = () => {
@@ -15,7 +17,25 @@ export default function Header() {
   const { cart } = useCart();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [attentionCount, setAttentionCount] = useState(0);
   const itemCount = cart.items.reduce((s, x) => s + x.quantity, 0);
+
+  useEffect(() => {
+    if (user?.role !== "admin") { setAttentionCount(0); return; }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await api.get("/admin/attention");
+        if (!cancelled) {
+          const c = r.data.counts;
+          setAttentionCount((c.pending || 0) + (c.stuck || 0) + (c.failed || 0));
+        }
+      } catch {}
+    };
+    load();
+    const t = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [user?.role]);
 
   return (
     <header
@@ -46,8 +66,17 @@ export default function Header() {
             </Link>
           )}
           {user?.role === "admin" && (
-            <Link to="/admin" className="btn-ghost flex items-center gap-2" data-testid="nav-admin">
+            <Link to="/admin" className="btn-ghost flex items-center gap-2 relative" data-testid="nav-admin">
               <Shield size={16} /> Admin
+              {attentionCount > 0 && (
+                <span
+                  className="text-xs font-bold rounded-full px-1.5 min-w-[20px] h-5 inline-flex items-center justify-center"
+                  style={{ background: "var(--primary)", color: "#0A0A0A" }}
+                  data-testid="nav-admin-badge"
+                >
+                  {attentionCount}
+                </span>
+              )}
             </Link>
           )}
         </nav>

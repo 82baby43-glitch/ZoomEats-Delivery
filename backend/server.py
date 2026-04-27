@@ -619,6 +619,152 @@ async def admin_orders(user=Depends(require_role("admin"))):
     return await db.orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
 
 
+@api.get("/admin/activity")
+async def admin_activity(user=Depends(require_role("admin"))):
+    """Latest 30 platform events — orders, signups, restaurants — sorted by time desc."""
+    def _to_iso(v):
+        if isinstance(v, datetime):
+            return v.replace(tzinfo=timezone.utc).isoformat() if v.tzinfo is None else v.isoformat()
+        return v or ""
+
+    events: List[Dict[str, Any]] = []
+
+    async for o in db.orders.find({}, {"_id": 0}).sort("created_at", -1).limit(30):
+        events.append({
+            "type": "order",
+            "title": f"Order ${o['total']:.2f} · {o['restaurant_name']}",
+            "description": f"{o['customer_name']} · {o['status']} · {o['payment_status']}",
+            "when": _to_iso(o.get("created_at")),
+            "id": o["order_id"],
+        })
+
+    async for u in db.users.find({}, {"_id": 0}).sort("created_at", -1).limit(15):
+        events.append({
+            "type": "signup",
+            "title": f"New {u.get('role','customer')}: {u['name']}",
+            "description": u.get("email", ""),
+            "when": _to_iso(u.get("created_at")),
+            "id": u["user_id"],
+        })
+
+    async for r in db.restaurants.find({}, {"_id": 0}).sort("created_at", -1).limit(15):
+        events.append({
+            "type": "restaurant",
+            "title": f"Restaurant: {r['name']}",
+            "description": f"{r.get('cuisine','')} · {'approved' if r.get('approved') else 'pending'}",
+            "when": _to_iso(r.get("created_at")),
+            "id": r["restaurant_id"],
+        })
+
+    events.sort(key=lambda e: e["when"], reverse=True)
+    return events[:30]
+
+
+@api.get("/admin/attention")
+async def admin_attention(user=Depends(require_role("admin"))):
+    """Things the platform owner needs to act on right now."""
+    pending = await db.restaurants.find({"approved": False}, {"_id": 0}).to_list(50)
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+    stuck = await db.orders.find(
+        {
+            "payment_status": "paid",
+            "status": {"$in": ["placed", "accepted", "preparing", "ready", "picked_up"]},
+            "created_at": {"$lt": cutoff},
+        },
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(50)
+
+    failed = await db.payment_transactions.find(
+        {"payment_status": {"$nin": ["paid", "initiated"]}},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(50)
+
+    return {
+        "pending_restaurants": pending,
+        "stuck_orders": stuck,
+        "failed_payments": failed,
+        "counts": {
+            "pending": len(pending),
+            "stuck": len(stuck),
+            "failed": len(failed),
+        },
+    }
+
+
+@api.get("/admin/digest")
+async def admin_digest(user=Depends(require_role("admin"))):
+    """Claude-generated 4-sentence summary of today's platform activity."""
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    todays_orders = await db.orders.find({"created_at": {"$gte": today_start}}, {"_id": 0}).to_list(1000)
+    todays_paid = [o for o in todays_orders if o.get("payment_status") == "paid"]
+    todays_users = await db.users.count_documents({"created_at": {"$gte": today_start}})
+    todays_vendors = await db.users.count_documents({"created_at": {"$gte": today_start}, "role": "vendor"})
+    todays_restaurants = await db.restaurants.count_documents({"created_at": {"$gte": today_start}})
+
+    gmv = round(sum(o.get("total", 0) for o in todays_paid), 2)
+
+    # Top restaurant by revenue today
+    by_rest: Dict[str, float] = {}
+    by_name: Dict[str, str] = {}
+    for o in todays_paid:
+        rid = o.get("restaurant_id")
+        by_rest[rid] = by_rest.get(rid, 0) + o.get("total", 0)
+        by_name[rid] = o.get("restaurant_name", rid)
+    top_id = max(by_rest, key=by_rest.get) if by_rest else None
+    top_line = f"{by_name[top_id]} (${by_rest[top_id]:.2f})" if top_id else "no orders yet"
+
+    pending_count = await db.restaurants.count_documents({"approved": False})
+
+    facts = (
+        f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}\n"
+        f"Orders today: {len(todays_orders)} (paid: {len(todays_paid)})\n"
+        f"GMV today: ${gmv:.2f}\n"
+        f"New users today: {todays_users} (vendors: {todays_vendors})\n"
+        f"New restaurants today: {todays_restaurants}\n"
+        f"Top performer today: {top_line}\n"
+        f"Restaurants awaiting approval: {pending_count}\n"
+    )
+
+    sys_msg = (
+        "You are Zoey, the ZoomEats platform analyst. Given today's facts, write a tight 4-sentence digest "
+        "for the platform owner: open with a one-line summary, then call out the top performer, then any "
+        "issues or items needing attention, then a forward-looking nudge. Friendly, executive tone. No emojis. "
+        "If GMV is $0 and orders are 0, frame it as 'quiet day so far' — not as a problem."
+    )
+
+    chat_client = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"digest_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}",
+        system_message=sys_msg,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    try:
+        text = await chat_client.send_message(UserMessage(text=facts))
+    except Exception as e:
+        logger.warning(f"Digest LLM error: {e}")
+        text = (
+            f"Quiet pulse today. {len(todays_orders)} orders placed, ${gmv:.2f} GMV, "
+            f"{todays_restaurants} new restaurant signup(s). "
+            f"{'Top performer: ' + top_line + '. ' if top_id else ''}"
+            f"{pending_count} restaurant(s) awaiting your approval."
+        )
+    return {
+        "digest": text,
+        "stats": {
+            "orders": len(todays_orders),
+            "paid_orders": len(todays_paid),
+            "gmv": gmv,
+            "new_users": todays_users,
+            "new_vendors": todays_vendors,
+            "new_restaurants": todays_restaurants,
+            "top_performer": top_line,
+            "pending_approvals": pending_count,
+        },
+    }
+
+
 # ---------- Health ----------
 @api.get("/")
 async def root():
