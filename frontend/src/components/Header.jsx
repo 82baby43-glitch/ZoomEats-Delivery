@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { useCart } from "@/lib/cart";
-import { ShoppingBag, User as UserIcon, LogOut, LayoutDashboard, Bike, Shield } from "lucide-react";
+import { ShoppingBag, User as UserIcon, LogOut, LayoutDashboard, Bike, Shield, Repeat } from "lucide-react";
 import { useState } from "react";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
@@ -95,6 +95,13 @@ export default function Header() {
                     <div className="text-xs" style={{ color: "var(--muted)" }}>{user.email}</div>
                     <div className="text-xs mt-1 label-eyebrow">Role: {user.role}</div>
                   </div>
+                  <button
+                    className="w-full text-left px-4 py-3 flex items-center gap-2 text-sm hover:bg-black/40"
+                    onClick={() => { setMenuOpen(false); navigate("/onboarding"); }}
+                    data-testid="switch-mode-button"
+                  >
+                    <Repeat size={16} /> Switch mode
+                  </button>
                   <button
                     className="w-full text-left px-4 py-3 flex items-center gap-2 text-sm hover:bg-black/40"
                     onClick={logout}
