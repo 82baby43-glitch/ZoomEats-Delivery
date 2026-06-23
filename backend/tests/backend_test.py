@@ -24,7 +24,7 @@ def _conn():
     return psycopg2.connect(DATABASE_URL)
 
 
-def _exec(sql: str, params: tuple = ()):
+def _run_sql(sql: str, params: tuple = ()):
     with _conn() as c:
         with c.cursor() as cur:
             cur.execute(sql, params)
@@ -45,11 +45,11 @@ def make_user(role="customer", email=None):
     now = datetime.now(timezone.utc)
     exp = now + timedelta(days=7)
     em = email or f"TEST_{uid}@example.com"
-    _exec(
+    _run_sql(
         "INSERT INTO users (user_id,email,name,picture,role,created_at) VALUES (%s,%s,%s,%s,%s,%s)",
         (uid, em, f"Test {role}", "", role, now),
     )
-    _exec(
+    _run_sql(
         "INSERT INTO user_sessions (session_token,user_id,expires_at,created_at) VALUES (%s,%s,%s,%s)",
         (token, uid, exp, now),
     )
@@ -253,7 +253,7 @@ def test_delivery_flow(delivery, cust):
     }).json()
     oid = o["order_id"]
     # Mark as paid+ready via direct SQL
-    _exec("UPDATE orders SET status='ready', payment_status='paid' WHERE order_id=%s", (oid,))
+    _run_sql("UPDATE orders SET status='ready', payment_status='paid' WHERE order_id=%s", (oid,))
 
     av = requests.get(f"{API}/delivery/available", headers=delivery["h"])
     assert av.status_code == 200

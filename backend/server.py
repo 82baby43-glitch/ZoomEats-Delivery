@@ -473,7 +473,8 @@ async def create_checkout(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    order_id = body.get("order_id"); origin_url = body.get("origin_url")
+    order_id = body.get("order_id")
+    origin_url = body.get("origin_url")
     if not order_id or not origin_url:
         raise HTTPException(400, "order_id & origin_url required")
     o = (await db.execute(
@@ -509,6 +510,7 @@ async def checkout_status(session_id: str, request: Request, user: User = Depend
     host_url = str(request.base_url).rstrip("/")
     sc = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
     tx = (await db.execute(select(PaymentTransaction).where(PaymentTransaction.session_id == session_id))).scalar_one_or_none()
+    status = None
     try:
         status = await sc.get_checkout_status(session_id)
     except Exception as e:
@@ -700,7 +702,8 @@ async def admin_digest(user: User = Depends(require_role("admin")), db: AsyncSes
     )).scalar() or 0
     gmv = round(sum(o.total for o in todays_paid), 2)
 
-    by_rest: Dict[str, float] = {}; by_name: Dict[str, str] = {}
+    by_rest: Dict[str, float] = {}
+    by_name: Dict[str, str] = {}
     for o in todays_paid:
         by_rest[o.restaurant_id] = by_rest.get(o.restaurant_id, 0) + o.total
         by_name[o.restaurant_id] = o.restaurant_name

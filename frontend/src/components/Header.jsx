@@ -30,7 +30,9 @@ export default function Header() {
           const c = r.data.counts;
           setAttentionCount((c.pending || 0) + (c.stuck || 0) + (c.failed || 0));
         }
-      } catch {}
+      } catch (e) {
+        if (!cancelled) console.warn("[header] attention poll failed:", e);
+      }
     };
     load();
     const t = setInterval(load, 15000);

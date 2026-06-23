@@ -10,7 +10,9 @@ export function CartProvider({ children }) {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) setCart(JSON.parse(saved));
-    } catch {}
+    } catch (e) {
+      console.warn("[cart] failed to load saved cart:", e);
+    }
   }, []);
 
   useEffect(() => {

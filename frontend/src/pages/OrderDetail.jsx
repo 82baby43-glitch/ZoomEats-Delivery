@@ -23,7 +23,9 @@ export default function OrderDetail() {
       try {
         const r = await api.get(`/orders/${oid}`);
         if (!cancelled) setOrder(r.data);
-      } catch {}
+      } catch (e) {
+        if (!cancelled) console.warn("[order-detail] poll failed:", e);
+      }
     };
     load();
     const t = setInterval(load, 5000);

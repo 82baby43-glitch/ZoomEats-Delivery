@@ -26,7 +26,9 @@ export default function Landing() {
       try {
         const res = await api.get("/restaurants", { params: q ? { q } : {} });
         setRestaurants(res.data);
-      } catch {}
+      } catch (e) {
+        console.warn("[landing] failed to load restaurants:", e);
+      }
     })();
   }, [q]);
 
