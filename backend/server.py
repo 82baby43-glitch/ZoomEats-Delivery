@@ -527,7 +527,7 @@ async def checkout_status(session_id: str, request: Request, user: User = Depend
             o = (await db.execute(select(Order).where(Order.order_id == tx.order_id))).scalar_one_or_none()
             if o:
                 o.payment_status = "paid"
-            o.status = "placed"
+                o.status = "placed"
         await db.commit()
     return {"status": status.status, "payment_status": status.payment_status, "amount_total": status.amount_total, "currency": status.currency}
 

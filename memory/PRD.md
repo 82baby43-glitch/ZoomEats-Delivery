@@ -46,7 +46,23 @@
 - **P2**: Split `server.py` (740 LOC) into routers per domain.
 - **P3**: Order ratings & reviews; tip-on-delivery.
 
-## Iteration 2 update (2026-01-27)
+## Iteration 3 update (2026-06-23) — Supabase migration
+- **MongoDB → Supabase Postgres** full migration. Backend now uses SQLAlchemy + asyncpg via the Supabase Transaction Pooler URI (`aws-1-us-west-2.pooler.supabase.com:6543`). 
+- New files: `database.py`, `models.py`, `alembic/` (initial schema migration applied to Supabase project `njrrhckegbfqhwkqkzvw`).
+- `server.py` fully rewritten using SQLAlchemy ORM (~852 LOC). Every endpoint preserved with identical request/response shapes — frontend zero changes.
+- Tables: `users`, `user_sessions`, `restaurants`, `menu_items`, `orders` (JSONB items), `payment_transactions` (JSONB metadata), `chat_messages`. Indexes on hot columns.
+- Seed (3 restaurants + 9 items + demo vendor) auto-runs on startup if `restaurants` table is empty — now in Postgres.
+- Backend test suite re-run on Postgres: **20/20 passing**. Stripe-status NoneType indent bug spotted by testing agent — fixed.
+- Old MongoDB stack still present in `requirements.txt` (motor) but unused; can be removed later.
+
+## Iteration 2 update (2026-04-27) — Admin Platform Pulse
+- Live Pulse view in `/admin`: auto-refreshing metrics (every 8s), Today's digest powered by Claude Sonnet 4.5, Needs-attention panel (pending approvals + stuck orders + failed payments), live activity feed (30 events) with color-coded type icons & relative timestamps.
+- Header now shows live attention badge count on the "Admin" nav link (polls every 15s).
+- New backend endpoints: `/api/admin/activity`, `/api/admin/attention`, `/api/admin/digest`.
+- "Switch mode" in user menu — re-triggers onboarding without sign-out.
+- Onboarding now shows for vendor/delivery/admin on EVERY sign-in (customer skips); admins see a 4-tile layout with Platform Owner highlighted as "Current".
+
+## Iteration 2 update (2026-01-27) — Rebrand
 - Replaced header logo with user-provided ZoomEats wordmark (black tile + neon-green swoosh).
 - Rebranded entire app to bold black + neon-green dark theme to match logo:
   - `--bg #0A0A0A`, `--surface #141414`, `--primary #B6F127` (neon), white text
