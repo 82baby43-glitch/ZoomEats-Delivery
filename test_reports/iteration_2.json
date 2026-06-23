@@ -1,0 +1,42 @@
+{
+  "summary": "Re-validated the full ZoomEats backend after migration from MongoDB to Supabase Postgres (SQLAlchemy async + asyncpg + Transaction Pooler). 20/20 pytest tests PASSED (100%). All critical flows verified end-to-end against the new Postgres backend: health (db=supabase-postgres), seeded restaurants (Terra Verde, Hachi Roll Co., Ember & Oak) with 3 menu items each, full-text search (?q=sushi -> Hachi Roll Co.), restaurant+menu detail, auth-me (unauth 401, with bearer token 200), role switch (customer<->vendor/delivery; admin frozen), order creation (subtotal+2.99 fee, items stored as JSONB, pending_payment/pending), /orders/my ordered desc, role guards (403 cross-role on /vendor/*, /delivery/*, /admin/*), forbidden order fetch by foreign customer, Stripe checkout session creation (payment_transactions row=initiated, orders.stripe_session_id set), Stripe status soft-fallback (now returns 200 with soft_error instead of 500 — iteration_1 bug fixed), vendor restaurant+menu CRUD, delivery accept->deliver flow with SQL paid+ready transition, admin metrics/users/restaurants/orders/approve, admin pulse (/activity 30-event merged feed, /attention with pending/stuck/failed counts, /digest with Claude Sonnet 4.5 generated narrative), AI chat (Claude reply + persistence to chat_messages table + history retrieval). Postgres JSONB round-trip for orders.items and payment_transactions.metadata verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/vendor/restaurant", "issue": "Returns JSON null with 200 when vendor has no restaurant yet — clients must null-check. 404 would be cleaner but current behavior is intentional and harmless."},
+      {"endpoint": "POST /api/orders", "issue": "No server-side re-pricing against menu_items — client-supplied price/quantity is trusted. A hostile client could submit price=0.01. Recommend hydrating items from DB in create_order."},
+      {"endpoint": "GET /api/admin/digest", "issue": "Calls Claude on every request (~3-8s). No caching; expensive if polled. Consider 5-min in-memory cache keyed by yyyymmddhhmm."},
+      {"endpoint": "POST /api/checkout/status/{sid}", "issue": "Order status assignment bug: `o.status = 'placed'` is OUTSIDE the `if o:` block (line 530 of server.py). When the order row is somehow missing, this will raise AttributeError on None. Indent fix needed."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix indentation bug in /api/checkout/status: `o.status = 'placed'` should be inside the `if o:` block (server.py line ~528-530). Will currently throw AttributeError if the order row was deleted while a Stripe session was outstanding.",
+    "(Hardening, not blocking) Re-price order.items server-side against menu_items table in POST /api/orders so a hostile client cannot submit forged prices.",
+    "(Optional) Return 404 from /api/vendor/restaurant when no restaurant exists, instead of 200 + null.",
+    "(Optional) Cache /api/admin/digest result for ~5 minutes to avoid hammering Claude on dashboard reloads."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 852 lines — should be split into routers (auth.py, restaurants.py, vendor.py, delivery.py, orders.py, payments.py, chat.py, admin.py) for maintainability.",
+    "server.py line 530: `o.status = 'placed'` is dedented one level out of `if o:` — latent NoneType bug. Same block also commits inside the conditional, masking the issue most of the time.",
+    "Seed data uses `@app.on_event('startup')` which is deprecated in FastAPI 0.110+; migrate to lifespan context manager.",
+    "database.py engine sets pool_pre_ping=False on a transaction pooler — long-lived connections can be silently killed; consider True or shorter pool_recycle.",
+    "create_order does not verify items belong to the given restaurant nor re-prices them server-side (client supplies price+quantity). Real money risk.",
+    "PaymentTransaction has no UNIQUE constraint on session_id beyond the PK (it IS the PK, fine) but no FK to orders, so orphan tx rows are possible if order is deleted.",
+    "/api/checkout/status updates payment_status on both PaymentTransaction and Order without a SELECT FOR UPDATE — concurrent webhook + poller could double-fire; rely on idempotency.",
+    "chat_history returns up to 200 messages unbounded by time; no pagination cursor.",
+    "All admin endpoints query without pagination (admin/users, admin/orders). admin/orders has limit(500) but users does not."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "n/a (skipped per request)"},
+  "test_credentials": "Test users + sessions are created at runtime via direct psycopg2 INSERT into users + user_sessions tables. See backend_test.py::make_user(). DATABASE_URL is read from /app/backend/.env. No real OAuth needed.",
+  "seed_data_creation": "Seed restaurants (Terra Verde, Hachi Roll Co., Ember & Oak) + 9 menu items + demo vendor user are auto-seeded on backend startup (server.py @app.on_event('startup')) — verified present in Postgres. Test fixture data (TEST_* prefixed users, restaurants, menu items, orders, payment_transactions, chat_messages) was cleaned up after the run via direct DELETE statements.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test suite at /app/backend/tests/backend_test.py is now Postgres-native: uses psycopg2 + DATABASE_URL (loaded from /app/backend/.env via python-dotenv). 20 tests cover health, restaurants, auth, role switching, orders (create/list/get/forbidden/unauth), Stripe checkout (creates session row + soft-fallback on status), vendor CRUD, delivery accept/deliver, admin metrics+approve, admin pulse (activity/attention/digest with Claude), role guards, AI chat persistence. Re-run with: `cd /app && pytest backend/tests/backend_test.py -v`. The iteration_1 Stripe-status 500 bug is now resolved — server.py returns a soft-pending payload on Stripe lookup failure.",
+  "rca of the issue": "N/A — no failures this iteration. Note: the previously reported /api/checkout/status 500 is now fixed in server.py lines 512-522 via try/except returning a soft fallback. Verified end-to-end."
+}
