@@ -688,37 +688,65 @@ async def admin_attention(user: User = Depends(require_role("admin")), db: Async
     }
 
 
+async def _compute_daily_stats(db: AsyncSession, today_start: datetime) -> Dict[str, Any]:
+    """Aggregates today's platform stats — pure data layer (no LLM)."""
+    todays_orders = (await db.execute(select(Order).where(Order.created_at >= today_start))).scalars().all()
+    todays_paid = [o for o in todays_orders if o.payment_status == "paid"]
+    new_users = (await db.execute(
+        select(func.count()).select_from(User).where(User.created_at >= today_start)
+    )).scalar() or 0
+    new_vendors = (await db.execute(
+        select(func.count()).select_from(User).where(and_(User.created_at >= today_start, User.role == "vendor"))
+    )).scalar() or 0
+    new_restaurants = (await db.execute(
+        select(func.count()).select_from(Restaurant).where(Restaurant.created_at >= today_start)
+    )).scalar() or 0
+    pending = (await db.execute(
+        select(func.count()).select_from(Restaurant).where(Restaurant.approved.is_(False))
+    )).scalar() or 0
+    return {
+        "todays_orders": todays_orders, "todays_paid": todays_paid,
+        "gmv": round(sum(o.total for o in todays_paid), 2),
+        "new_users": new_users, "new_vendors": new_vendors,
+        "new_restaurants": new_restaurants, "pending_approvals": pending,
+    }
+
+
+def _top_performer(paid_orders: List[Order]) -> str:
+    if not paid_orders:
+        return "no orders yet"
+    by_rest: Dict[str, float] = {}
+    by_name: Dict[str, str] = {}
+    for o in paid_orders:
+        by_rest[o.restaurant_id] = by_rest.get(o.restaurant_id, 0) + o.total
+        by_name[o.restaurant_id] = o.restaurant_name
+    top_id = max(by_rest, key=by_rest.get)
+    return f"{by_name[top_id]} (${by_rest[top_id]:.2f})"
+
+
+def _digest_fallback(stats: Dict[str, Any], top_line: str) -> str:
+    return (
+        f"Quiet pulse today. {len(stats['todays_orders'])} orders placed, ${stats['gmv']:.2f} GMV, "
+        f"{stats['new_restaurants']} new restaurant signup(s). "
+        f"{'Top performer: ' + top_line + '. ' if stats['todays_paid'] else ''}"
+        f"{stats['pending_approvals']} restaurant(s) awaiting your approval."
+    )
+
+
 @api.get("/admin/digest")
 async def admin_digest(user: User = Depends(require_role("admin")), db: AsyncSession = Depends(get_db)):
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    todays_orders = (await db.execute(select(Order).where(Order.created_at >= today_start))).scalars().all()
-    todays_paid = [o for o in todays_orders if o.payment_status == "paid"]
-    todays_users = (await db.execute(select(func.count()).select_from(User).where(User.created_at >= today_start))).scalar() or 0
-    todays_vendors = (await db.execute(
-        select(func.count()).select_from(User).where(and_(User.created_at >= today_start, User.role == "vendor"))
-    )).scalar() or 0
-    todays_restaurants = (await db.execute(
-        select(func.count()).select_from(Restaurant).where(Restaurant.created_at >= today_start)
-    )).scalar() or 0
-    gmv = round(sum(o.total for o in todays_paid), 2)
-
-    by_rest: Dict[str, float] = {}
-    by_name: Dict[str, str] = {}
-    for o in todays_paid:
-        by_rest[o.restaurant_id] = by_rest.get(o.restaurant_id, 0) + o.total
-        by_name[o.restaurant_id] = o.restaurant_name
-    top_id = max(by_rest, key=by_rest.get) if by_rest else None
-    top_line = f"{by_name[top_id]} (${by_rest[top_id]:.2f})" if top_id else "no orders yet"
-    pending_count = (await db.execute(select(func.count()).select_from(Restaurant).where(Restaurant.approved.is_(False)))).scalar() or 0
+    stats = await _compute_daily_stats(db, today_start)
+    top_line = _top_performer(stats["todays_paid"])
 
     facts = (
         f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}\n"
-        f"Orders today: {len(todays_orders)} (paid: {len(todays_paid)})\n"
-        f"GMV today: ${gmv:.2f}\n"
-        f"New users today: {todays_users} (vendors: {todays_vendors})\n"
-        f"New restaurants today: {todays_restaurants}\n"
+        f"Orders today: {len(stats['todays_orders'])} (paid: {len(stats['todays_paid'])})\n"
+        f"GMV today: ${stats['gmv']:.2f}\n"
+        f"New users today: {stats['new_users']} (vendors: {stats['new_vendors']})\n"
+        f"New restaurants today: {stats['new_restaurants']}\n"
         f"Top performer today: {top_line}\n"
-        f"Restaurants awaiting approval: {pending_count}\n"
+        f"Restaurants awaiting approval: {stats['pending_approvals']}\n"
     )
     sys_msg = (
         "You are Zoey, the ZoomEats platform analyst. Given today's facts, write a tight 4-sentence digest "
@@ -735,19 +763,15 @@ async def admin_digest(user: User = Depends(require_role("admin")), db: AsyncSes
         text = await chat_client.send_message(UserMessage(text=facts))
     except Exception as e:
         logger.warning(f"Digest LLM error: {e}")
-        text = (
-            f"Quiet pulse today. {len(todays_orders)} orders placed, ${gmv:.2f} GMV, "
-            f"{todays_restaurants} new restaurant signup(s). "
-            f"{'Top performer: ' + top_line + '. ' if top_id else ''}"
-            f"{pending_count} restaurant(s) awaiting your approval."
-        )
+        text = _digest_fallback(stats, top_line)
+
     return {
         "digest": text,
         "stats": {
-            "orders": len(todays_orders), "paid_orders": len(todays_paid), "gmv": gmv,
-            "new_users": todays_users, "new_vendors": todays_vendors,
-            "new_restaurants": todays_restaurants, "top_performer": top_line,
-            "pending_approvals": pending_count,
+            "orders": len(stats["todays_orders"]), "paid_orders": len(stats["todays_paid"]),
+            "gmv": stats["gmv"], "new_users": stats["new_users"], "new_vendors": stats["new_vendors"],
+            "new_restaurants": stats["new_restaurants"], "top_performer": top_line,
+            "pending_approvals": stats["pending_approvals"],
         },
     }
 
