@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import { useRealtimeRow } from "@/lib/useRealtime";
 import { useWebPush } from "@/lib/useWebPush";
+import { primeChime, playChime } from "@/lib/chime";
 import { Plus, Trash2, Wifi, Bell, BellOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -54,6 +55,8 @@ export default function VendorDashboard() {
               { tag: `order-${x.order_id}` }
             );
           });
+          // One chime per refresh — even if 3 new orders land at once, we only beep once.
+          playChime();
         }
         // Mark every currently-placed order as "seen" so we never re-fire for it.
         o.data.forEach((x) => {
@@ -143,7 +146,7 @@ export default function VendorDashboard() {
           </span>
           {permission !== "granted" ? (
             <button
-              onClick={request}
+              onClick={() => { primeChime(); request(); }}
               className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-md transition-colors"
               style={{
                 background: "var(--surface-2)",
@@ -152,20 +155,31 @@ export default function VendorDashboard() {
               }}
               disabled={permission === "denied"}
               data-testid="enable-notifications-btn"
-              title={permission === "denied" ? "Notifications blocked — re-enable in browser settings" : "Get a desktop ping when new orders arrive"}
+              title={permission === "denied" ? "Notifications blocked — re-enable in browser settings" : "Get a desktop ping + chime when new orders arrive"}
             >
               {permission === "denied" ? <BellOff size={12} /> : <Bell size={12} />}
               {permission === "denied" ? "Notifications blocked" : "Enable notifications"}
             </button>
           ) : (
-            <span
-              className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-md"
-              style={{ background: "var(--surface-2)", color: "var(--primary)" }}
-              data-testid="notifications-on-indicator"
-              title="Desktop notifications are on"
-            >
-              <Bell size={12} /> Pings on
-            </span>
+            <>
+              <span
+                className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-md"
+                style={{ background: "var(--surface-2)", color: "var(--primary)" }}
+                data-testid="notifications-on-indicator"
+                title="Desktop notifications + chime are on"
+              >
+                <Bell size={12} /> Pings on
+              </span>
+              <button
+                onClick={() => { primeChime(); playChime(); }}
+                className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-md transition-colors"
+                style={{ background: "var(--surface-2)", color: "var(--muted)" }}
+                data-testid="test-chime-btn"
+                title="Play the new-order chime"
+              >
+                Test sound
+              </button>
+            </>
           )}
         </div>
         <p className="mt-2" style={{ color: "var(--muted)" }}>Vendor dashboard</p>

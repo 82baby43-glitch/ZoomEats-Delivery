@@ -50,6 +50,12 @@
 - **P3**: Order ratings & reviews; tip-on-delivery.
 - **P3**: (Future) Supabase JWT minting for re-enabling per-user Realtime broadcasts under RLS.
 
+## Iteration 5c update (2026-06-24) — Kitchen chime
+- New `/app/frontend/src/lib/chime.js` — Web Audio synth, two-note motif (A5 → E6, ~300ms with quick exponential fade). No audio file, no network dep.
+- `primeChime()` is called inside the "Enable notifications" click handler so the AudioContext is created under a real user gesture (browser autoplay rules). After that, `playChime()` plays whenever a new paid order arrives — fired once per refresh, even if multiple orders land at once.
+- Added a **"Test sound"** chip next to the "Pings on" indicator so vendors can verify the chime works before the rush hits.
+- Verified — AudioContext is available, bundle compiles, 0 chime-related console errors. Real browser: clicking "Enable notifications" primes + permission-prompts in one gesture, then every new paid order = OS toast + chime.
+
 ## Iteration 5b update (2026-06-24) — Web Push wired into VendorDashboard
 - Wired `useWebPush` hook into `/app/frontend/src/pages/VendorDashboard.jsx`:
   - "Enable notifications" pill next to the Live indicator (states: enable / blocked / pings on).
