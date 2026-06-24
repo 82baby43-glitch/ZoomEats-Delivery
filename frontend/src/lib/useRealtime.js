@@ -20,7 +20,13 @@ export function useRealtimeRow(table, column, value, onChange) {
         { event: "*", schema: "public", table, filter: `${column}=eq.${value}` },
         onChange
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        // RLS denies anon access → channel goes CHANNEL_ERROR. Polling fallback
+        // (already wired in callers) keeps the UI live. Don't spam the console.
+        if (err && process.env.NODE_ENV !== "production") {
+          console.debug(`[realtime] ${table}/${value} status=${status}`);
+        }
+      });
     return () => { supabase.removeChannel(channel); };
   }, [table, column, value, onChange]);
 }

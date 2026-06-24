@@ -44,6 +44,7 @@ INSERT INTO orders  ─▶  pg_trigger (after_order_insert)
 Open Supabase Dashboard → SQL Editor and paste / run:
 1. `migrations/20260101_realtime.sql`
 2. `migrations/20260101_dispatch_trigger.sql`
+3. `migrations/20260201_rls.sql` — enables Row Level Security on all public tables (deny-all for anon/authenticated). The backend connects as the table-owner `postgres` role and bypasses RLS, so SQLAlchemy queries continue to work. Frontend Realtime subscriptions will no longer broadcast row changes to anon — the 5-10s polling fallback already in `OrderDetail.jsx` and `VendorDashboard.jsx` keeps the UI live.
 
 ### 2. Deploy the Edge Function
 ```

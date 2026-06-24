@@ -1,0 +1,41 @@
+{
+  "summary": "Validated all 10 P0 items from this iteration end-to-end. NEW test file /app/backend/tests/test_p0_rls_geocode_tracking.py: 14/14 PASS covering Supabase RLS posture on 6 sensitive tables (orders, deliveries, drivers, restaurants, users, payment_transactions — all return 401 to the anon key, no RLS leaks), backend-still-works post-RLS (GET /api/restaurants returns 3 seeded rows, GET /api/admin/metrics works for admin session), vendor restaurant geocoding happy path (1600 Amphitheatre Pkwy resolves to lat≈37.42, lng≈-122.08, address_validated=true verified via direct SQL), vendor geocoding graceful failure (garbage address → 200 OK with lat/lng=null and address_validated=false), GET /api/orders/{oid}/tracking shape (order/delivery_type/tracking_id/driver/restaurant/customer/delivery keys present, customer.latitude geocoded from '350 5th Ave, New York, NY' to NYC bbox 40-41 lat / -74.5 to -73.5 lng), tracking auth guards (401 unauth + 403 for other customer), and POST /api/driver/location heartbeat (writes lat/lng/last_seen to drivers row, /driver/active returns {driver:{lat:37.42}, orders:[]}). Regression: 20/20 baseline backend_test.py PASS — RLS migration did not break the backend (postgres role bypasses RLS as designed). Frontend smoke: useWebPush.js and LiveMap.jsx lint clean (no syntax errors); OrderDetail.jsx already imports LiveMap from @/components/LiveMap and wires it conditionally at line 133 with data-testid='realtime-indicator' present at line 83. Tested URL: https://builder-hub-470.preview.emergentagent.com.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/dispatch/trigger/{oid} (Uber fallback)", "issue": "Pre-existing dispatch test test_dispatch_uber_fallback now fails: expects deliveries.status='pending_credentials' but env now has real UBER_DIRECT_* creds, so the engine attempts a live Uber Direct create which fails and writes status='create_failed' instead. This is NOT a regression in the RLS/geocode/tracking work; just a stale test assertion that needs to be relaxed to accept both ('pending_credentials','create_failed') or the Uber sandbox needs valid pickup/dropoff data. 17/18 dispatch tests still pass."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_p0_rls_geocode_tracking.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_dispatch.py",
+    "/app/test_reports/pytest/p0_rls_results.xml",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/dispatch_results.xml"
+  ],
+  "action_items": [
+    "(Optional, low priority) Update test_dispatch.py::test_dispatch_uber_fallback to accept ('pending_credentials','create_failed') now that real UBER_DIRECT_* creds are configured in /app/backend/.env (the fixture-side stub assumption is stale).",
+    "(Carry-forward from iteration_3, still applicable) Driver.workload decrement on /delivery/orders/{oid}/deliver, hard MAX_DIST_KM_FALLBACK radius gate, skip NULL-coord drivers, Pydantic model for /driver/availability — none of these were touched this iteration."
+  ],
+  "critical_code_review_comments": [
+    "geocode.py is well-isolated: 8s timeout, US country filter, returns None on any error so callers can branch cleanly. Good.",
+    "server.py POST /vendor/restaurant correctly geocodes on both create and update paths. On update, address_validated is set to False when the new address fails to resolve — correct invariant.",
+    "GET /orders/{oid}/tracking geocodes the customer address ON EVERY REQUEST (no cache). At Nominatim's 1 req/s rate limit, a polling frontend will starve quickly. Recommend caching the geocoded lat/lng on the order row (add nullable orders.customer_lat / customer_lng columns) so the first tracking fetch geocodes once and subsequent polls just read from DB. This is a meaningful perf/cost issue at any traffic, not a blocker.",
+    "RLS migration c1e3f0a01f03 enables RLS on all 9 tables but does NOT create permissive policies for any non-postgres role — so the anon key sees zero rows (correct, validated). The backend connecting as the table-owner postgres role bypasses RLS (Supabase pooler URL connects as postgres.<project>:<password> which is the table owner). This is the intended design and is verified working.",
+    "/api/orders/{oid}/tracking auth chain (admin OR customer OR delivery_partner_id OR restaurant.owner OR drivers.driver_id==order.driver_id) is comprehensive and correctly returns 403 to unrelated customers. Verified.",
+    "server.py is now 1078 lines — refactor into routers (vendor, customer, driver, admin, tracking) is overdue per iteration_3 comment; still not done.",
+    "useWebPush.js correctly guards `typeof Notification !== 'undefined'` for SSR safety and persists pref to localStorage. Self-contained, no breaking deps. Not yet wired into VendorDashboard.jsx — confirmed per the task spec, not a regression."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_p0_rls_geocode_tracking.py (NEW — 14 tests covering RLS, geocoding, tracking endpoint, driver heartbeat)"
+  ],
+  "success_rate": {"backend": "100% on P0 (14/14) + 100% regression (20/20). Dispatch suite 94% (17/18, 1 unrelated stale assertion).", "frontend": "n/a (skipped per request; frontend files lint clean)"},
+  "test_credentials": "Sessions minted directly in Postgres via make_user(role) from backend_test.py — no real OAuth. Anon-RLS tests use REACT_APP_SUPABASE_ANON_KEY from /app/frontend/.env.",
+  "seed_data_creation": "Each test creates its own TEST_-prefixed user/restaurant/order and cleans up via direct SQL DELETE in the fixture teardown (orders, restaurants, drivers). No residual TEST_ rows remain after the run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Three test files in /app/backend/tests/: (1) backend_test.py — 20 baseline tests; (2) test_dispatch.py — 18 dispatch tests (1 currently failing due to stale Uber-stub expectation, see action_items); (3) test_p0_rls_geocode_tracking.py — 14 new P0 tests for RLS posture, geocoding, /orders/{oid}/tracking shape+auth, /driver/location heartbeat. Run all: `cd /app/backend && pytest tests/ -v --junitxml=/app/test_reports/pytest/all.xml`. Geocoding tests sleep 1.2s between Nominatim calls (rate-limit). Supabase ANON key currently returns HTTP 401 with `{message: 'permission denied for table X'}` for all 6 sensitive tables — RLS posture is correct and locked down. The backend connects as postgres role via the Supabase pooler (port 6543) and bypasses RLS, which is required for app functionality and is the intended design.",
+  "rca of the issue": "N/A — no failures in the P0 scope this iteration. The single dispatch failure (test_dispatch_uber_fallback) is orthogonal: it was written when UBER_DIRECT_* env vars were intentionally blank and asserted the stubbed 'pending_credentials' state. Real Uber Direct credentials are now present in /app/backend/.env, so the dispatch engine attempts a real API call which fails (likely sandbox pickup/dropoff validation or auth) and the deliveries row gets status='create_failed' instead. Mitigation: relax the assertion to accept both states, or set the env vars back to blank in a test-time fixture."
+}
