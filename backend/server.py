@@ -20,6 +20,7 @@ from models import (
     Driver, Delivery,
 )
 from dispatch import dispatch_order as run_dispatch
+from geocode import geocode_address
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -100,6 +101,8 @@ def rest_dict(r: Restaurant) -> dict:
         "image_url": r.image_url or "", "cover_url": r.cover_url or "",
         "address": r.address or "", "rating": r.rating, "delivery_time_min": r.delivery_time_min,
         "approved": r.approved, "created_at": to_iso(r.created_at),
+        "latitude": r.latitude, "longitude": r.longitude,
+        "address_validated": r.address_validated,
     }
 
 
@@ -284,13 +287,27 @@ async def vendor_create_or_update(
     db: AsyncSession = Depends(get_db),
 ):
     existing = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id))).scalar_one_or_none()
+    # Geocode the address if provided
+    coords = await geocode_address(payload.address) if payload.address else None
     if existing:
         for k, v in payload.model_dump().items():
             setattr(existing, k, v)
+        if coords:
+            existing.latitude, existing.longitude = coords
+            existing.address_validated = True
+        else:
+            existing.address_validated = False
         await db.commit()
         await db.refresh(existing)
         return rest_dict(existing)
-    r = Restaurant(restaurant_id=f"rest_{uuid.uuid4().hex[:10]}", owner_id=user.user_id, **payload.model_dump())
+    r = Restaurant(
+        restaurant_id=f"rest_{uuid.uuid4().hex[:10]}",
+        owner_id=user.user_id,
+        latitude=coords[0] if coords else None,
+        longitude=coords[1] if coords else None,
+        address_validated=bool(coords),
+        **payload.model_dump(),
+    )
     db.add(r)
     await db.commit()
     await db.refresh(r)
