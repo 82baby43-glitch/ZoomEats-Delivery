@@ -76,6 +76,10 @@ class Order(Base):
     payment_status = Column(String(32), nullable=False, default="pending", index=True)
     delivery_partner_id = Column(String(64), nullable=True, index=True)
     stripe_session_id = Column(Text, nullable=True)
+    # Dispatch layer (additive, nullable for backward-compat)
+    delivery_type = Column(String(16), nullable=True)   # 'internal' | 'uber' | None
+    driver_id = Column(String(64), nullable=True, index=True)
+    tracking_id = Column(String(128), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, index=True)
 
 
@@ -104,3 +108,29 @@ class ChatMessage(Base):
 
 Index("ix_orders_status_created", Order.status, Order.created_at)
 Index("ix_orders_customer_created", Order.customer_id, Order.created_at)
+
+
+class Driver(Base):
+    __tablename__ = "drivers"
+    driver_id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    availability = Column(Boolean, nullable=False, default=True, index=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    workload = Column(Integer, nullable=False, default=0, index=True)
+    last_seen = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class Delivery(Base):
+    __tablename__ = "deliveries"
+    delivery_id = Column(String(64), primary_key=True)
+    order_id = Column(String(64), ForeignKey("orders.order_id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(16), nullable=False)  # 'internal' | 'uber'
+    tracking_id = Column(String(128), nullable=True)
+    eta = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(32), nullable=False, default="pending")
+    driver_id = Column(String(64), nullable=True, index=True)
+    meta = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)

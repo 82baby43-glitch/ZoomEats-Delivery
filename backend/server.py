@@ -17,7 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import AsyncSessionLocal, get_db
 from models import (
     User, UserSession, Restaurant, MenuItem, Order, PaymentTransaction, ChatMessage,
+    Driver, Delivery,
 )
+from dispatch import dispatch_order as run_dispatch
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -463,6 +465,135 @@ async def delivery_action(
     return {"ok": True}
 
 
+# ---------- Dispatch / driver tracking (additive) ----------
+class DriverLocation(BaseModel):
+    latitude: float
+    longitude: float
+
+
+async def _get_or_create_driver_row(db: AsyncSession, user: User) -> Driver:
+    d = (await db.execute(select(Driver).where(Driver.user_id == user.user_id))).scalar_one_or_none()
+    if d:
+        return d
+    d = Driver(driver_id=f"drv_{uuid.uuid4().hex[:10]}", user_id=user.user_id, availability=True, workload=0)
+    db.add(d)
+    await db.flush()
+    return d
+
+
+@api.post("/driver/location")
+async def driver_location(
+    payload: DriverLocation,
+    user: User = Depends(require_role("delivery")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Driver heartbeat — call every 5-10s with current GPS. Updates last_seen + coords.
+    Supabase Realtime broadcasts the row change automatically to subscribed clients."""
+    d = await _get_or_create_driver_row(db, user)
+    d.latitude = payload.latitude
+    d.longitude = payload.longitude
+    d.last_seen = datetime.now(timezone.utc)
+    d.availability = True
+    await db.commit()
+    return {"ok": True, "driver_id": d.driver_id, "last_seen": d.last_seen.isoformat()}
+
+
+@api.post("/driver/availability")
+async def driver_availability(
+    body: Dict[str, Any],
+    user: User = Depends(require_role("delivery")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Toggle online/offline. {available: true|false}"""
+    d = await _get_or_create_driver_row(db, user)
+    d.availability = bool(body.get("available", True))
+    d.last_seen = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True, "available": d.availability}
+
+
+@api.get("/driver/active")
+async def driver_active(
+    user: User = Depends(require_role("delivery")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Driver's current active dispatch (assigned_internal/picked_up)."""
+    d = (await db.execute(select(Driver).where(Driver.user_id == user.user_id))).scalar_one_or_none()
+    if not d:
+        return {"driver": None, "orders": []}
+    rows = (await db.execute(
+        select(Order).where(and_(
+            Order.driver_id == d.driver_id,
+            Order.status.in_(["assigned_internal", "picked_up"]),
+        )).order_by(desc(Order.created_at))
+    )).scalars().all()
+    return {
+        "driver": {
+            "driver_id": d.driver_id, "availability": d.availability,
+            "latitude": d.latitude, "longitude": d.longitude,
+            "workload": d.workload,
+            "last_seen": d.last_seen.isoformat() if d.last_seen else None,
+        },
+        "orders": [order_dict(o) for o in rows],
+    }
+
+
+@api.get("/orders/{oid}/tracking")
+async def order_tracking(oid: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Display-only tracking payload: order + delivery row + driver coords if internal."""
+    o = (await db.execute(select(Order).where(Order.order_id == oid))).scalar_one_or_none()
+    if not o:
+        raise HTTPException(404, "Not found")
+    allowed = (user.role == "admin"
+               or o.customer_id == user.user_id
+               or o.delivery_partner_id == user.user_id)
+    if not allowed and o.restaurant_id:
+        rest = (await db.execute(select(Restaurant).where(Restaurant.restaurant_id == o.restaurant_id))).scalar_one_or_none()
+        if rest and rest.owner_id == user.user_id:
+            allowed = True
+    if not allowed:
+        d = (await db.execute(select(Driver).where(Driver.user_id == user.user_id))).scalar_one_or_none()
+        if d and d.driver_id == o.driver_id:
+            allowed = True
+    if not allowed:
+        raise HTTPException(403, "Forbidden")
+    delivery = (await db.execute(
+        select(Delivery).where(Delivery.order_id == oid).order_by(desc(Delivery.created_at))
+    )).scalars().first()
+    driver_payload = None
+    if o.driver_id:
+        drv = (await db.execute(select(Driver).where(Driver.driver_id == o.driver_id))).scalar_one_or_none()
+        if drv:
+            driver_payload = {
+                "driver_id": drv.driver_id,
+                "latitude": drv.latitude, "longitude": drv.longitude,
+                "last_seen": drv.last_seen.isoformat() if drv.last_seen else None,
+            }
+    return {
+        "order": order_dict(o),
+        "delivery_type": o.delivery_type,
+        "tracking_id": o.tracking_id,
+        "driver": driver_payload,
+        "delivery": ({
+            "delivery_id": delivery.delivery_id, "provider": delivery.provider,
+            "tracking_id": delivery.tracking_id,
+            "eta": delivery.eta.isoformat() if delivery.eta else None,
+            "status": delivery.status, "meta": delivery.meta,
+        } if delivery else None),
+    }
+
+
+@api.post("/dispatch/trigger/{oid}")
+async def dispatch_trigger(
+    oid: str,
+    user: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin/system endpoint — called by the Supabase Edge Function (or admin UI) to
+    force-run the dispatch engine for a specific order. Idempotent."""
+    return await run_dispatch(db, oid)
+
+
 # ---------- Stripe Payments ----------
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest  # noqa: E402
 
@@ -531,6 +662,12 @@ async def checkout_status(session_id: str, request: Request, user: User = Depend
                 o.payment_status = "paid"
                 o.status = "placed"
         await db.commit()
+        # ---- Autonomous dispatch hook (additive) ----
+        if tx.order_id:
+            try:
+                await run_dispatch(db, tx.order_id)
+            except Exception as e:
+                logger.warning(f"[dispatch] failed for order {tx.order_id}: {e}")
     return {"status": status.status, "payment_status": status.payment_status, "amount_total": status.amount_total, "currency": status.currency}
 
 
@@ -553,6 +690,11 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         if tx:
             tx.payment_status = "paid"
         await db.commit()
+        # ---- Autonomous dispatch hook (additive) ----
+        try:
+            await run_dispatch(db, evt.metadata["order_id"])
+        except Exception as e:
+            logger.warning(f"[dispatch] failed for order {evt.metadata['order_id']}: {e}")
     return {"received": True}
 
 

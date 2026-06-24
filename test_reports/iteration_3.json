@@ -1,0 +1,48 @@
+{
+  "summary": "Validated the additive Autonomous Dispatch Layer end-to-end on top of the existing ZoomEats Supabase Postgres backend. All 20 previous regression tests PASS unchanged + 18 new dispatch tests PASS (38/38, 100%). Verified: driver heartbeat creates/updates row with lat/lng/last_seen and auto-creates a Driver on first call; availability toggle; /driver/active returns driver coords + active orders; /orders/{oid}/tracking enforces role guard (customer/admin/restaurant owner/assigned driver) and returns order+delivery+driver payload; /dispatch/trigger/{oid} is admin-only, idempotent, returns {ok, already:true} on second call without state change; unpaid-order guard returns {ok:false, reason:'not_paid'}; internal assignment picks the lowest-score driver, sets order.delivery_type='internal', order.status='assigned_internal', tracking_id 'int_*', creates a Delivery row provider='internal', and increments the chosen driver's workload by 1; Uber fallback (with all drivers offline) sets delivery_type='uber', status='assigned_uber', tracking_id 'stub_*' (UBER_DIRECT_* env vars intentionally blank), Delivery row provider='uber' status='pending_credentials'. Schemas verified: drivers table has driver_id/user_id(unique)/availability/latitude/longitude/workload/last_seen/created_at; deliveries table has delivery_id/order_id/provider/tracking_id/eta/status/driver_id/meta(jsonb)/created_at/updated_at; orders table additive cols delivery_type/driver_id/tracking_id (nullable, backward compatible). Auth guards verified — 401 unauth, 403 wrong role.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/driver/availability", "issue": "Body typed as `Dict[str, Any]` rather than a Pydantic model — silently accepts any payload; only `available` is read. Recommend a `DriverAvailability(BaseModel)` for validation parity with /driver/location."},
+      {"endpoint": "dispatch._select_best_driver", "issue": "Naming/behaviour mismatch: `MAX_DIST_KM_FALLBACK=25km` is used only as a score-normalization cap, not as an actual radius gate. A driver 500km away will still be picked over Uber if it's the only one online. If the design intent was 'fall back to Uber when no driver within 25 km of restaurant', add a hard filter `dist_to_rest <= MAX_DIST_KM_FALLBACK` before returning the winner."},
+      {"endpoint": "dispatch.score_driver", "issue": "If a driver row has NULL latitude/longitude (e.g., availability toggled before first heartbeat), _resolve_coords returns CoMo defaults, so the driver gets a near-zero dist score and may win unfairly. Recommend skipping drivers with NULL coords or treating them as max distance."},
+      {"endpoint": "dispatch (workload lifecycle)", "issue": "Driver.workload is incremented on assignment but never decremented when an order moves to 'delivered' (see /delivery/orders/{oid}/deliver). Long-running drivers will eventually saturate at workload>=5 and be excluded forever. Add `d.workload = max(0, d.workload-1)` on delivery completion."},
+      {"endpoint": "POST /api/dispatch/trigger/{oid}", "issue": "When the order_id does not exist, returns 200 with `{ok:false, reason:'order_not_found'}`. A 404 would be more REST-ful but current is harmless and matches the idempotent style."},
+      {"endpoint": "POST /api/webhook/stripe", "issue": "Calls `run_dispatch(db, order_id)` in the same request session right after committing — if dispatch fails the warning is logged but Stripe is still acked with `{received:true}`. Consider enqueueing dispatch on a background task to avoid blocking webhook ack."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_dispatch.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/dispatch_results.xml"
+  ],
+  "action_items": [
+    "(Optional, low priority) Add Pydantic model for /driver/availability body instead of Dict[str, Any].",
+    "(Design clarification) Decide whether MAX_DIST_KM_FALLBACK should be a hard radius gate — if yes, filter out drivers further than 25km from restaurant before selection so far-away drivers fall back to Uber.",
+    "(Hardening) Skip drivers with NULL latitude/longitude in _select_best_driver to avoid CoMo-default unfair winners.",
+    "(Bug, medium) Decrement Driver.workload when an order is delivered (in /delivery/orders/{oid}/deliver) so drivers do not saturate at 5 active jobs forever.",
+    "(Optional) Move post-payment run_dispatch invocation to a background task (fastapi.BackgroundTasks) so Stripe webhook ack is not coupled to dispatch latency."
+  ],
+  "critical_code_review_comments": [
+    "server.py has grown to 1021 lines — splitting into routers (driver.py, dispatch.py, payments.py, etc.) is overdue; dispatch layer adds ~130 lines that belong in a dedicated module.",
+    "Driver.workload has no concurrency guard. Two simultaneous dispatch_order calls on different orders could both pick the same driver and both increment workload from N to N+1 (lost update). Use SELECT ... FOR UPDATE on the chosen driver row inside dispatch_order or rely on a UNIQUE constraint on (driver_id, active_order).",
+    "dispatch_order writes order updates and Delivery insert in one commit — correct. But run_dispatch is invoked from /checkout/status AFTER a prior commit on the same session; sharing the AsyncSession across two logical units is fine here but fragile. Consider opening a fresh session for dispatch background work.",
+    "Uber Direct stub path is well-isolated — _uber_configured() guards real HTTP calls and returns deterministic stub tokens. Good.",
+    "Delivery.meta is JSONB nullable — fine, but no schema discipline; consider a TypedDict or Pydantic model for the meta payloads (score, tracking_url, raw uber response) so downstream consumers can rely on shape.",
+    "Driver model uses ForeignKey to users.user_id with ondelete=CASCADE — correct. But Order.driver_id has no FK to drivers.driver_id, so a stale order can point to a deleted driver. Add an FK with ondelete=SET NULL.",
+    "_resolve_coords falling back to CoMo means restaurants in other cities with NULL lat/lng will all score against CoMo — fine for MVP but document this so it's not surprising in production.",
+    "Existing iteration_2 finding still applies: /api/checkout/status had a latent indentation bug for o.status='placed' outside the `if o:` block — verified now correctly nested at server.py line 661-663. Resolved."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_dispatch.py (NEW — 18 dispatch-layer tests)"
+  ],
+  "success_rate": {"backend": "100% (38/38 — 20 regression + 18 dispatch)", "frontend": "n/a (skipped per request)"},
+  "test_credentials": "Test users + sessions inserted via direct psycopg2 INSERT into users + user_sessions. DATABASE_URL from /app/backend/.env. REACT_APP_BACKEND_URL pulled from /app/frontend/.env. No real OAuth needed.",
+  "seed_data_creation": "Tests create TEST_-prefixed users (customer/delivery/admin), test orders, test driver rows, and Delivery rows via direct SQL or via the actual /driver/location heartbeat endpoint. Module-scope teardown deletes all created deliveries -> orders -> drivers -> user_sessions -> users (FK order respected). Verified zero residual TEST_ rows after run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Two test files now live in /app/backend/tests/: (1) backend_test.py — 20 baseline tests (health/restaurants/auth/orders/stripe/vendor/delivery/admin/chat). (2) test_dispatch.py — 18 dispatch-layer tests (schemas, /driver/*, /dispatch/trigger, /orders/{oid}/tracking, internal-vs-uber selection, idempotency, paid-guard, workload increment, role guards). Run all: `cd /app && pytest backend/tests/ -v`. JUnit outputs at /app/test_reports/pytest/. The Uber Direct integration is stubbed via blank UBER_DIRECT_* env vars — when real keys are added, the test_dispatch_uber_fallback assertion `tracking_id.startswith('stub_')` will need to be relaxed. The dispatch engine fires from /checkout/status and /webhook/stripe on payment confirmation; tests trigger it directly via the admin /dispatch/trigger/{oid} endpoint to keep tests deterministic and offline from Stripe.",
+  "rca of the issue": "N/A — no failures this iteration. Dispatch layer is functionally correct and additively layered without breaking any existing endpoint. The minor recommendations (workload decrement on delivered, hard radius gate, NULL-coord driver skip, Pydantic validation on /driver/availability, FK on orders.driver_id) are quality-hardening items, not blockers."
+}
