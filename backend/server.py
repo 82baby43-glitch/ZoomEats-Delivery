@@ -1,6 +1,8 @@
 """ZoomEats backend — Supabase Postgres edition."""
 import os
 import uuid
+import json
+import hashlib
 import logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -122,8 +124,22 @@ def order_dict(o: Order) -> dict:
         "address": o.address or "", "notes": o.notes or "",
         "status": o.status, "payment_status": o.payment_status,
         "delivery_partner_id": o.delivery_partner_id, "stripe_session_id": o.stripe_session_id,
+        "price_hash": o.price_hash,
         "created_at": to_iso(o.created_at),
     }
+
+
+def compute_price_hash(items: List[dict]) -> str:
+    """Tamper-evident sha256 of canonical cart items. Field order is fixed and
+    items are sorted by item_id so the hash is deterministic regardless of insert order.
+    Includes the same fields the customer was billed on: item_id, name, price, quantity."""
+    snapshot = [
+        {"item_id": it["item_id"], "name": it["name"],
+         "price": float(it["price"]), "quantity": int(it["quantity"])}
+        for it in sorted(items, key=lambda x: x["item_id"])
+    ]
+    blob = json.dumps(snapshot, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
 
 
 # ---------- Auth dependency ----------
@@ -453,6 +469,7 @@ async def create_order(
         subtotal=subtotal, delivery_fee=delivery_fee, total=total,
         address=payload.address, notes=payload.notes,
         status="pending_payment", payment_status="pending",
+        price_hash=compute_price_hash(repriced_items),
     )
     db.add(o)
     await db.commit()
@@ -872,6 +889,36 @@ async def admin_approve(rid: str, user: User = Depends(require_role("admin")), d
 async def admin_orders(user: User = Depends(require_role("admin")), db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(Order).order_by(desc(Order.created_at)).limit(500))
     return [order_dict(o) for o in res.scalars().all()]
+
+
+@api.get("/admin/orders/{oid}/verify-receipt")
+async def admin_verify_receipt(
+    oid: str,
+    user: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-hash the stored items JSONB and compare it to orders.price_hash.
+    If anyone tampered with the items column directly in Postgres after order-create,
+    the hashes won't match — useful for refund disputes and audit trails."""
+    o = (await db.execute(select(Order).where(Order.order_id == oid))).scalar_one_or_none()
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if not o.price_hash:
+        # Legacy order created before price_hash was added — no receipt to verify
+        return {
+            "order_id": o.order_id,
+            "stored_hash": None,
+            "recomputed_hash": None,
+            "match": None,
+            "note": "Order pre-dates price_hash column; cannot verify.",
+        }
+    recomputed = compute_price_hash(o.items or [])
+    return {
+        "order_id": o.order_id,
+        "stored_hash": o.price_hash,
+        "recomputed_hash": recomputed,
+        "match": recomputed == o.price_hash,
+    }
 
 
 @api.get("/admin/activity")

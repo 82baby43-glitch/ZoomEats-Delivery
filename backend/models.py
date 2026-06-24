@@ -79,6 +79,9 @@ class Order(Base):
     payment_status = Column(String(32), nullable=False, default="pending", index=True)
     delivery_partner_id = Column(String(64), nullable=True, index=True)
     stripe_session_id = Column(Text, nullable=True)
+    # Tamper-evident sha256 snapshot of canonical (repriced) cart items at order-create time.
+    # Nullable for rows created before this column existed.
+    price_hash = Column(String(64), nullable=True)
     # Dispatch layer (additive, nullable for backward-compat)
     delivery_type = Column(String(16), nullable=True)   # 'internal' | 'uber' | None
     driver_id = Column(String(64), nullable=True, index=True)

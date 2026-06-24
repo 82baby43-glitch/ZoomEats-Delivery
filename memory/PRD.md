@@ -50,6 +50,15 @@
 - **P3**: Order ratings & reviews; tip-on-delivery.
 - **P3**: (Future) Supabase JWT minting for re-enabling per-user Realtime broadcasts under RLS.
 
+## Iteration 5e update (2026-06-24) — Tamper-evident order receipts (audit trail)
+- New alembic migration `d2f4e0a01f04` adds nullable `orders.price_hash VARCHAR(64)`.
+- `compute_price_hash()` in `server.py` — deterministic sha256 over the canonical (repriced) cart items, sorted by `item_id` so item order doesn't affect the hash.
+- Wired into `POST /api/orders` — every new order gets a 64-char hex snapshot of what the customer was billed for.
+- New endpoint `GET /api/admin/orders/{oid}/verify-receipt` — re-hashes the stored items JSONB and reports `{stored_hash, recomputed_hash, match}`. If anyone tampers with the `items` column post-checkout, `match=False` exposes it. Legacy rows with NULL hash return `match=null` (no false-positive failures).
+- `price_hash` is exposed in every `order_dict()` response so customers/admins can reference it for support cases.
+- **Tests**: `/app/backend/tests/test_price_hash_audit.py` — 7 tests covering: hash set on create, match=True on clean orders, match=False on tampered orders (direct UPDATE on `items` JSONB), legacy NULL handling, 403 for non-admin, 404 for missing order, order-independent determinism. All 7 pass.
+- **Regression**: 48/48 across baseline + RLS + repricing + audit (`backend_test.py` + `test_p0_rls_geocode_tracking.py` + `test_repricing_security.py` + `test_price_hash_audit.py`).
+
 ## Iteration 5d update (2026-06-24) — P0 server-side menu re-pricing
 - **Vulnerability closed**: `POST /api/orders` previously trusted client-supplied `price` on every cart line — a user could edit prices in DevTools / localStorage and pay $0.01 for a $50 order.
 - **Fix** (`server.py`): every `item_id` in the cart is looked up against `menu_items` filtered by `restaurant_id == request.restaurant_id AND available = true`. Missing/unavailable/cross-restaurant items → HTTP 400. Canonical `price`, `name`, `image_url` overwrite whatever the client sent. Quantity clamped to `[1, 99]`. Subtotal/total recomputed from canonical prices.
