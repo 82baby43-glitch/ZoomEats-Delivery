@@ -459,6 +459,18 @@ async def delivery_action(
         if o.delivery_partner_id != user.user_id:
             raise HTTPException(403, "Not your delivery")
         o.status = "delivered"
+        # ---- Dispatch: decrement workload of the assigned internal driver (if any) ----
+        if o.driver_id:
+            drv = (await db.execute(select(Driver).where(Driver.driver_id == o.driver_id))).scalar_one_or_none()
+            if drv:
+                drv.workload = max(0, (drv.workload or 0) - 1)
+        # Update the Delivery row status too
+        dlv = (await db.execute(
+            select(Delivery).where(Delivery.order_id == o.order_id).order_by(desc(Delivery.created_at))
+        )).scalars().first()
+        if dlv:
+            dlv.status = "delivered"
+            dlv.updated_at = datetime.now(timezone.utc)
     else:
         raise HTTPException(400, "Bad action")
     await db.commit()

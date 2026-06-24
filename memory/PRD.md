@@ -46,6 +46,18 @@
 - **P2**: Split `server.py` (740 LOC) into routers per domain.
 - **P3**: Order ratings & reviews; tip-on-delivery.
 
+## Iteration 4 update (2026-06-24) — Autonomous Dispatch Layer (additive)
+- **Goal**: when an order is paid, auto-pick the best internal driver or fall back to Uber Direct. ZERO changes to existing functionality.
+- **New tables**: `drivers` (driver_id, user_id unique, availability, lat/lng, workload, last_seen) + `deliveries` (delivery_id, order_id, provider, tracking_id, eta, status, driver_id, meta jsonb).
+- **Additive columns on `orders`**: `delivery_type`, `driver_id`, `tracking_id` — all nullable, backward compatible.
+- **New module `dispatch.py`**: scoring engine (40% dist-to-restaurant + 40% dist-to-customer + 20% workload, lowest wins), Haversine distance, internal-driver selector, Uber Direct integration with clean stub fallback when keys are blank.
+- **Hook**: `run_dispatch()` is auto-called from `/checkout/status` and `/webhook/stripe` on payment confirmation. Idempotent — safe to call multiple times.
+- **New endpoints**: `POST /api/driver/location`, `POST /api/driver/availability`, `GET /api/driver/active`, `GET /api/orders/{oid}/tracking`, `POST /api/dispatch/trigger/{oid}` (admin).
+- **Bug fix**: workload decrement on delivery completion (`/delivery/orders/{oid}/deliver`) so drivers don't saturate forever.
+- **Supabase deliverables** at `/app/supabase/` (Edge Function + trigger SQL + Realtime SQL + README) ready to deploy.
+- **Tests**: 38/38 pass — 20 regression (no breakage) + 18 new dispatch-layer tests.
+- **Stub mode**: Uber Direct env vars (`UBER_DIRECT_CLIENT_ID/SECRET/CUSTOMER_ID`) intentionally blank in `.env` — the fallback path creates a delivery row with `status='pending_credentials'` so the flow is end-to-end testable. Drop real keys in to go live.
+
 ## Iteration 3 update (2026-06-23) — Supabase migration
 - **MongoDB → Supabase Postgres** full migration. Backend now uses SQLAlchemy + asyncpg via the Supabase Transaction Pooler URI (`aws-1-us-west-2.pooler.supabase.com:6543`). 
 - New files: `database.py`, `models.py`, `alembic/` (initial schema migration applied to Supabase project `njrrhckegbfqhwkqkzvw`).
