@@ -276,7 +276,9 @@ async def get_restaurant(rid: str, db: AsyncSession = Depends(get_db)):
 # ---------- Vendor ----------
 @api.get("/vendor/restaurant")
 async def vendor_get_restaurant(user: User = Depends(require_role("vendor")), db: AsyncSession = Depends(get_db)):
-    r = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id))).scalar_one_or_none()
+    r = (await db.execute(
+        select(Restaurant).where(Restaurant.owner_id == user.user_id).order_by(desc(Restaurant.created_at)).limit(1)
+    )).scalars().first()
     return rest_dict(r) if r else None
 
 
@@ -286,7 +288,9 @@ async def vendor_create_or_update(
     user: User = Depends(require_role("vendor")),
     db: AsyncSession = Depends(get_db),
 ):
-    existing = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id))).scalar_one_or_none()
+    existing = (await db.execute(
+        select(Restaurant).where(Restaurant.owner_id == user.user_id).order_by(desc(Restaurant.created_at)).limit(1)
+    )).scalars().first()
     # Geocode the address if provided
     coords = await geocode_address(payload.address) if payload.address else None
     if existing:
@@ -316,7 +320,9 @@ async def vendor_create_or_update(
 
 @api.get("/vendor/menu-items")
 async def vendor_list_menu(user: User = Depends(require_role("vendor")), db: AsyncSession = Depends(get_db)):
-    rest = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id))).scalar_one_or_none()
+    rest = (await db.execute(
+        select(Restaurant).where(Restaurant.owner_id == user.user_id).order_by(desc(Restaurant.created_at)).limit(1)
+    )).scalars().first()
     if not rest:
         return []
     res = await db.execute(select(MenuItem).where(MenuItem.restaurant_id == rest.restaurant_id))
@@ -329,7 +335,9 @@ async def vendor_add_menu(
     user: User = Depends(require_role("vendor")),
     db: AsyncSession = Depends(get_db),
 ):
-    rest = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id))).scalar_one_or_none()
+    rest = (await db.execute(
+        select(Restaurant).where(Restaurant.owner_id == user.user_id).order_by(desc(Restaurant.created_at)).limit(1)
+    )).scalars().first()
     if not rest:
         raise HTTPException(400, "Create restaurant first")
     m = MenuItem(item_id=f"item_{uuid.uuid4().hex[:10]}", restaurant_id=rest.restaurant_id, **payload.model_dump())
@@ -341,7 +349,7 @@ async def vendor_add_menu(
 
 @api.delete("/vendor/menu-items/{item_id}")
 async def vendor_del_menu(item_id: str, user: User = Depends(require_role("vendor")), db: AsyncSession = Depends(get_db)):
-    rest = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id))).scalar_one_or_none()
+    rest = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id).order_by(desc(Restaurant.created_at)).limit(1))).scalars().first()
     if not rest:
         raise HTTPException(404, "No restaurant")
     await db.execute(
@@ -355,7 +363,7 @@ async def vendor_del_menu(item_id: str, user: User = Depends(require_role("vendo
 
 @api.get("/vendor/orders")
 async def vendor_orders(user: User = Depends(require_role("vendor")), db: AsyncSession = Depends(get_db)):
-    rest = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id))).scalar_one_or_none()
+    rest = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id).order_by(desc(Restaurant.created_at)).limit(1))).scalars().first()
     if not rest:
         return []
     res = await db.execute(
@@ -374,7 +382,7 @@ async def vendor_update_status(
     new_status = body.get("status")
     if new_status not in {"accepted", "preparing", "ready"}:
         raise HTTPException(400, "Invalid status")
-    rest = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id))).scalar_one_or_none()
+    rest = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id).order_by(desc(Restaurant.created_at)).limit(1))).scalars().first()
     if not rest:
         raise HTTPException(404, "No restaurant")
     o = (await db.execute(

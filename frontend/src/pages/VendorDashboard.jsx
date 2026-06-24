@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
-import { Plus, Trash2 } from "lucide-react";
+import { useRealtimeRow } from "@/lib/useRealtime";
+import { Plus, Trash2, Wifi } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
 const STATUS_NEXT = {
   placed: "accepted",
@@ -18,23 +20,42 @@ export default function VendorDashboard() {
   const [form, setForm] = useState({ name: "", description: "", cuisine: "", image_url: "", cover_url: "", address: "" });
   const [item, setItem] = useState({ name: "", description: "", price: "", image_url: "", category: "Mains" });
   const [tab, setTab] = useState("orders");
+  const [livePulse, setLivePulse] = useState(0);
 
-  const load = async () => {
-    const r = await api.get("/vendor/restaurant");
-    setRestaurant(r.data);
-    if (r.data) {
-      setForm({
-        name: r.data.name, description: r.data.description, cuisine: r.data.cuisine,
-        image_url: r.data.image_url, cover_url: r.data.cover_url, address: r.data.address,
-      });
-      const m = await api.get("/vendor/menu-items");
-      setMenu(m.data);
-      const o = await api.get("/vendor/orders");
-      setOrders(o.data);
+  const load = useCallback(async () => {
+    try {
+      const r = await api.get("/vendor/restaurant");
+      setRestaurant(r.data);
+      if (r.data) {
+        setForm({
+          name: r.data.name, description: r.data.description, cuisine: r.data.cuisine,
+          image_url: r.data.image_url, cover_url: r.data.cover_url, address: r.data.address,
+        });
+        const m = await api.get("/vendor/menu-items");
+        setMenu(m.data);
+        const o = await api.get("/vendor/orders");
+        setOrders(o.data);
+      }
+    } catch (e) {
+      console.warn("[vendor] load failed:", e);
     }
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // ---- Realtime: subscribe to orders for this restaurant ----
+  const onRealtime = useCallback(() => {
+    setLivePulse((p) => p + 1);
+    load();
+  }, [load]);
+  useRealtimeRow("orders", "restaurant_id", restaurant?.restaurant_id, onRealtime);
+
+  // Fallback polling every 10s so reloads aren't realtime-only
+  useEffect(() => {
+    if (!restaurant) return;
+    const t = setInterval(load, 10000);
+    return () => clearInterval(t);
+  }, [restaurant, load]);
 
   const saveRestaurant = async () => {
     await api.post("/vendor/restaurant", form);
@@ -85,7 +106,17 @@ export default function VendorDashboard() {
     <div>
       <Header />
       <div className="max-w-6xl mx-auto px-6 md:px-12 py-12">
-        <h1 className="font-display text-4xl font-black tracking-tighter">{restaurant.name}</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="font-display text-4xl font-black tracking-tighter">{restaurant.name}</h1>
+          <span
+            className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-md"
+            style={{ background: "var(--surface-2)", color: livePulse > 0 ? "var(--primary)" : "var(--muted)" }}
+            data-testid="vendor-live-indicator"
+            title={livePulse > 0 ? `${livePulse} realtime events` : "Awaiting events"}
+          >
+            <Wifi size={12} /> Live
+          </span>
+        </div>
         <p className="mt-2" style={{ color: "var(--muted)" }}>Vendor dashboard</p>
         <div className="flex gap-2 mt-6 border-b" style={{ borderColor: "var(--border)" }}>
           {["orders", "menu", "profile"].map((t) => (
@@ -107,16 +138,26 @@ export default function VendorDashboard() {
         {tab === "orders" && (
           <div className="mt-6 space-y-3">
             {orders.length === 0 && <div className="card p-8 text-center" style={{ color: "var(--muted)" }}>No orders yet.</div>}
-            {orders.map((o) => (
-              <div key={o.order_id} className="card p-5" data-testid={`vendor-order-${o.order_id}`}>
-                <div className="flex justify-between items-start gap-4">
-                  <div>
-                    <div className="font-display text-lg font-bold">{o.customer_name}</div>
-                    <div className="text-sm" style={{ color: "var(--muted)" }}>{o.address}</div>
-                    <div className="mt-2 text-sm">
-                      {o.items.map((it) => `${it.quantity}× ${it.name}`).join(", ")}
+            <AnimatePresence initial={false}>
+              {orders.map((o) => (
+                <motion.div
+                  key={o.order_id}
+                  layout
+                  initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  transition={{ duration: 0.25 }}
+                  className="card p-5"
+                  data-testid={`vendor-order-${o.order_id}`}
+                >
+                  <div className="flex justify-between items-start gap-4">
+                    <div>
+                      <div className="font-display text-lg font-bold">{o.customer_name}</div>
+                      <div className="text-sm" style={{ color: "var(--muted)" }}>{o.address}</div>
+                      <div className="mt-2 text-sm">
+                        {o.items.map((it) => `${it.quantity}× ${it.name}`).join(", ")}
+                      </div>
                     </div>
-                  </div>
                   <div className="text-right">
                     <div className="font-display font-bold">${o.total.toFixed(2)}</div>
                     <div className="badge mt-2">{o.status}</div>
@@ -131,8 +172,9 @@ export default function VendorDashboard() {
                     Mark as {STATUS_NEXT[o.status]}
                   </button>
                 )}
-              </div>
-            ))}
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         )}
 
