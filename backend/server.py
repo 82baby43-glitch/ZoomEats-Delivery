@@ -1,5 +1,6 @@
 """ZoomEats backend — Supabase Postgres edition."""
 import os
+import re
 import uuid
 import json
 import hashlib
@@ -7,11 +8,13 @@ import logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Cookie, Header, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 from sqlalchemy import select, func, and_, or_, desc, asc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,19 +26,80 @@ from models import (
 )
 from dispatch import dispatch_order as run_dispatch
 from geocode import geocode_address
+from rate_limit import TokenBucket
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "sk_test_emergent")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")  # SEC-001: signature secret
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
+
+# SEC-002: explicit CORS allowlist + optional regex (e.g. preview subdomains)
+_RAW_CORS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
+CORS_ORIGINS = [o for o in _RAW_CORS if o != "*"]
+CORS_ORIGIN_REGEX = os.environ.get("CORS_ORIGIN_REGEX", "") or None
+ALLOW_CREDENTIALS = bool(CORS_ORIGINS or CORS_ORIGIN_REGEX)
+
+# Pre-compute the set of origin hosts we trust for `origin_url` (open-redirect guard)
+def _origin_hosts() -> List[str]:
+    hosts = set()
+    for o in CORS_ORIGINS:
+        try:
+            hosts.add(urlparse(o).netloc.lower())
+        except Exception:
+            continue
+    return [h for h in hosts if h]
+TRUSTED_HOSTS = _origin_hosts()
+TRUSTED_HOST_REGEX = re.compile(CORS_ORIGIN_REGEX) if CORS_ORIGIN_REGEX else None
+
+
+def _validate_origin_url(url: str) -> None:
+    """SEC-P3: Reject attacker-controlled origin_url values in /checkout/session."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        raise HTTPException(400, "Invalid origin_url")
+    if parsed.scheme not in ("https",) or not parsed.netloc:
+        raise HTTPException(400, "origin_url must be a https:// URL")
+    host = parsed.netloc.lower()
+    if host in TRUSTED_HOSTS:
+        return
+    if TRUSTED_HOST_REGEX and TRUSTED_HOST_REGEX.fullmatch(f"{parsed.scheme}://{host}"):
+        return
+    raise HTTPException(400, f"origin_url host '{host}' is not in the trusted allowlist")
+
+
+# SEC-004: per-user rate limiters for cost-sensitive endpoints
+chat_limiter = TokenBucket(max_tokens=20, refill_per_minute=4, name="chat")        # ~20 burst, 4/min sustained
+tracking_limiter = TokenBucket(max_tokens=30, refill_per_minute=30, name="tracking")  # 30/min — matches polling cadence
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("zoomeats")
 
+if not CORS_ORIGINS and not CORS_ORIGIN_REGEX:
+    logger.warning("SEC-002: No CORS_ORIGINS configured — credentialed CORS is DISABLED.")
+if not STRIPE_WEBHOOK_SECRET:
+    logger.warning("SEC-001: STRIPE_WEBHOOK_SECRET not set — /api/webhook/stripe will reject all events (HTTP 503).")
+
 app = FastAPI(title="ZoomEats API")
 api = APIRouter(prefix="/api")
+
+
+# SEC-P3: security headers middleware
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(self), camera=(), microphone=()"
+        # CSP intentionally pragmatic — Leaflet + Supabase Realtime + inline styles need flexibility.
+        # Tightening to a strict policy is a follow-up after measuring violations in prod.
+        response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+        return response
 
 
 # ---------- Pydantic request bodies ----------
@@ -628,6 +692,8 @@ async def driver_active(
 @api.get("/orders/{oid}/tracking")
 async def order_tracking(oid: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Display-only tracking payload: order + delivery row + driver coords if internal."""
+    # SEC-004: throttle per-user — tracking is polled aggressively from the frontend.
+    tracking_limiter.check_or_raise(user.user_id)
     o = (await db.execute(select(Order).where(Order.order_id == oid))).scalar_one_or_none()
     if not o:
         raise HTTPException(404, "Not found")
@@ -665,15 +731,21 @@ async def order_tracking(oid: str, user: User = Depends(get_current_user), db: A
                 "latitude": rest.latitude, "longitude": rest.longitude,
                 "address": rest.address,
             }
-    # Best-effort: geocode the customer dropoff address on demand (cached on the order via tracking_id? Not stored — small cost per fetch)
+    # SEC-004 / Nominatim: cache the geocoded customer coords on the order row.
+    # First lookup geocodes; subsequent polls reuse the cached values for free.
     cust_payload = None
     if o.address:
-        try:
-            coords = await geocode_address(o.address)
+        if o.customer_lat is not None and o.customer_lng is not None:
+            cust_payload = {"latitude": o.customer_lat, "longitude": o.customer_lng, "address": o.address}
+        else:
+            try:
+                coords = await geocode_address(o.address)
+            except Exception:
+                coords = None
             if coords:
+                o.customer_lat, o.customer_lng = coords
+                await db.commit()
                 cust_payload = {"latitude": coords[0], "longitude": coords[1], "address": o.address}
-        except Exception:
-            cust_payload = None
     return {
         "order": order_dict(o),
         "delivery_type": o.delivery_type,
@@ -715,6 +787,8 @@ async def create_checkout(
     origin_url = body.get("origin_url")
     if not order_id or not origin_url:
         raise HTTPException(400, "order_id & origin_url required")
+    # SEC-P3: validate origin_url against CORS allowlist to prevent open-redirect.
+    _validate_origin_url(origin_url)
     o = (await db.execute(
         select(Order).where(and_(Order.order_id == order_id, Order.customer_id == user.user_id))
     )).scalar_one_or_none()
@@ -780,14 +854,30 @@ async def checkout_status(session_id: str, request: Request, user: User = Depend
 
 @api.post("/webhook/stripe")
 async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    # SEC-001 CRITICAL: reject every webhook unless a signing secret is configured AND
+    # the request carries a valid Stripe-Signature header. Without this, an attacker can
+    # POST a forged "paid" event for any order_id and fire dispatch at platform cost.
+    if not STRIPE_WEBHOOK_SECRET:
+        logger.warning("Stripe webhook rejected: STRIPE_WEBHOOK_SECRET not configured.")
+        raise HTTPException(503, "Webhook endpoint not configured")
+    sig = request.headers.get("Stripe-Signature")
+    if not sig:
+        logger.warning("Stripe webhook rejected: missing Stripe-Signature header.")
+        raise HTTPException(400, "Missing Stripe-Signature header")
+
     host_url = str(request.base_url).rstrip("/")
-    sc = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=f"{host_url}/api/webhook/stripe")
+    sc = StripeCheckout(
+        api_key=STRIPE_API_KEY,
+        webhook_url=f"{host_url}/api/webhook/stripe",
+        webhook_secret=STRIPE_WEBHOOK_SECRET,
+    )
     body = await request.body()
     try:
-        evt = await sc.handle_webhook(body, request.headers.get("Stripe-Signature"))
+        evt = await sc.handle_webhook(body, sig)
     except Exception as e:
-        logger.warning(f"Webhook error: {e}")
-        return {"received": True}
+        # Signature verification or parse failure → reject. Do NOT return 200 here.
+        logger.warning(f"Stripe webhook signature verification failed: {e}")
+        raise HTTPException(400, "Invalid webhook signature")
     if evt.payment_status == "paid" and evt.metadata.get("order_id"):
         o = (await db.execute(select(Order).where(Order.order_id == evt.metadata["order_id"]))).scalar_one_or_none()
         if o:
@@ -811,6 +901,8 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage  # noqa: E402
 
 @api.post("/chat")
 async def chat(payload: ChatPayload, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    # SEC-004: throttle per-user to bound LLM cost.
+    chat_limiter.check_or_raise(user.user_id)
     session_id = payload.session_id or f"chat_{user.user_id}"
     rests = (await db.execute(
         select(Restaurant.name, Restaurant.cuisine).where(Restaurant.approved.is_(True)).limit(15)
@@ -1148,10 +1240,14 @@ async def seed_data():
 
 # ---------- App wiring ----------
 app.include_router(api)
+app.add_middleware(SecurityHeadersMiddleware)
+# SEC-002: never combine credentials with `*`. If no explicit origins are configured,
+# we drop credentials entirely (cookie-auth requests will fail cross-origin — by design).
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=ALLOW_CREDENTIALS,
+    allow_origins=CORS_ORIGINS or [],
+    allow_origin_regex=CORS_ORIGIN_REGEX,
+    allow_methods=["GET", "POST", "DELETE", "PUT", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )

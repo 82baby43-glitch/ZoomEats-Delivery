@@ -46,7 +46,7 @@ class Restaurant(Base):
     address_validated = Column(Boolean, default=False, nullable=False)
     rating = Column(Float, default=4.6)
     delivery_time_min = Column(Integer, default=30)
-    approved = Column(Boolean, default=True, index=True)
+    approved = Column(Boolean, default=False, index=True)  # SEC-003: new restaurants require admin approval
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
@@ -82,6 +82,9 @@ class Order(Base):
     # Tamper-evident sha256 snapshot of canonical (repriced) cart items at order-create time.
     # Nullable for rows created before this column existed.
     price_hash = Column(String(64), nullable=True)
+    # Cached customer dropoff coords — populated on first /tracking lookup, then reused.
+    customer_lat = Column(Float, nullable=True)
+    customer_lng = Column(Float, nullable=True)
     # Dispatch layer (additive, nullable for backward-compat)
     delivery_type = Column(String(16), nullable=True)   # 'internal' | 'uber' | None
     driver_id = Column(String(64), nullable=True, index=True)

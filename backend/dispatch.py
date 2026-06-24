@@ -181,8 +181,14 @@ async def dispatch_order(db: AsyncSession, order_id: str) -> Dict[str, Any]:
 
     Safe to call multiple times — if the order is already dispatched (status in
     {assigned_internal, assigned_uber, picked_up, delivered}) it's a no-op.
+
+    SEC-P3: locks the order row with SELECT ... FOR UPDATE so concurrent callers
+    (webhook + /checkout/status polling can both fire) cannot double-dispatch.
     """
-    order = (await db.execute(select(Order).where(Order.order_id == order_id))).scalar_one_or_none()
+    # Lock the order row for the duration of this transaction.
+    order = (await db.execute(
+        select(Order).where(Order.order_id == order_id).with_for_update()
+    )).scalar_one_or_none()
     if not order:
         return {"ok": False, "reason": "order_not_found"}
 

@@ -50,6 +50,34 @@
 - **P3**: Order ratings & reviews; tip-on-delivery.
 - **P3**: (Future) Supabase JWT minting for re-enabling per-user Realtime broadcasts under RLS.
 
+## Iteration 5f update (2026-06-24) — Full security hardening pass (P0 + P2 + P3)
+
+Addressed every finding from the security audit (SEC-001 critical, SEC-002 high, SEC-003/SEC-004 medium, plus four P3 hardening items).
+
+**SEC-001 CRITICAL — Stripe webhook signature enforcement.** `POST /api/webhook/stripe` now requires `STRIPE_WEBHOOK_SECRET` and a valid `Stripe-Signature` header. Without the secret it returns HTTP 503; without the header it returns HTTP 400. No more `{received:true}` on failure. Adversary can no longer forge `payment_status=paid` events.
+
+**SEC-002 HIGH — CORS credentialed wildcard removed.** Replaced `allow_origins=["*"]` + `allow_credentials=True` with an explicit allowlist (`CORS_ORIGINS`) + optional regex (`CORS_ORIGIN_REGEX` for `*.preview.emergentagent.com`). If no origins are configured, credentials are auto-disabled. Verified: FastAPI no longer echoes `Allow-Origin` for evil.example.com. (Note: the Kubernetes preview ingress still wildcards CORS at the L7 layer — that's a deployment concern outside the application code.)
+
+**SEC-003 MEDIUM — Restaurant moderation gate.** `Restaurant.approved` default flipped from `True` → `False`. New vendor restaurants are hidden from `/api/restaurants` until an admin hits `/api/admin/restaurants/{rid}/approve` (existing endpoint). Seed data continues to set `approved=True` explicitly.
+
+**SEC-004 MEDIUM — Per-user rate limiting.** New `rate_limit.py` token-bucket module. `/api/chat`: 20 burst / 4 sustained per minute (caps LLM cost). `/api/orders/{oid}/tracking`: 30 per minute (matches frontend polling cadence). Returns HTTP 429 with `Retry-After`.
+
+**P3 — Geocode caching for tracking endpoint.** New alembic migration `e3f5e0a01f05` adds `orders.customer_lat / customer_lng`. The tracking endpoint geocodes once on first lookup and caches the result on the row — subsequent polls are free. Eliminates the Nominatim 1 req/s ban risk completely.
+
+**P3 — Open-redirect guard.** `POST /api/checkout/session` now validates `origin_url`: must be `https://`, host must be in `CORS_ORIGINS` allowlist or match `CORS_ORIGIN_REGEX`. Otherwise → HTTP 400. Prevents attackers from steering post-payment redirects to attacker-controlled URLs.
+
+**P3 — Dispatch race condition.** `dispatch_order()` now opens with `SELECT ... FOR UPDATE` on the order row. Even if `/checkout/status` polling and the webhook fire concurrently, the second caller blocks and sees `delivery_type` already set → no-op.
+
+**P3 — Security headers middleware.** Added `SecurityHeadersMiddleware`: HSTS (2yr), X-Content-Type-Options:nosniff, X-Frame-Options:DENY, Referrer-Policy:strict-origin-when-cross-origin, Permissions-Policy disables camera/microphone.
+
+**Tests (new):** `/app/backend/tests/test_security_hardening.py` — 10 tests covering: webhook unsigned-rejection, webhook signature missing, checkout untrusted-origin redirect, checkout non-https, new vendor restaurant defaults to unapproved, admin approval flow, chat rate limit 429, tracking rate limit 429, security headers present, FastAPI CORS doesn't echo untrusted origins. **All 10 pass.** Full regression: 48/48 prior tests still green. **Total: 58 backend tests pass.**
+
+**Deferred (P3, not done):** Session token hashing at rest. The cost/benefit was poor given RLS already blocks anon-key DB reads and the threat model relies on backend compromise → if attacker has DB access, hashed tokens add little. Tracked in backlog.
+
+**Required action from operator before going live:**
+- Set `STRIPE_WEBHOOK_SECRET` in `/app/backend/.env` to the `whsec_...` value from Stripe Dashboard → Developers → Webhooks (currently the webhook endpoint will reject all traffic — by design, fail-closed).
+- Update `CORS_ORIGINS` in `/app/backend/.env` to your production domain(s) before deploying.
+
 ## Iteration 5e update (2026-06-24) — Tamper-evident order receipts (audit trail)
 - New alembic migration `d2f4e0a01f04` adds nullable `orders.price_hash VARCHAR(64)`.
 - `compute_price_hash()` in `server.py` — deterministic sha256 over the canonical (repriced) cart items, sorted by `item_id` so item order doesn't affect the hash.
