@@ -38,17 +38,24 @@
 - Backend tests: 18/18 passing (after soft-pending fix on checkout/status)
 
 ## Backlog / next priorities
-- **P0**: Server-side menu re-pricing in `POST /api/orders` from `db.menu_items` (security hardening — trust user-supplied prices currently).
-- **P1**: Wire `useWebPush` into `VendorDashboard.jsx` — call `request()` once per session and `fire()` on realtime new-order events (currently the hook exists but isn't invoked).
+- **P1**: Wire `useWebPush` into `VendorDashboard.jsx` — DONE in iteration 5b/5c (Bell pill + chime).
 - **P1**: Cache geocoded customer coords on `orders.customer_lat / customer_lng` so `/orders/{oid}/tracking` doesn't re-hit Nominatim on every poll (rate-limit risk at 1 req/s).
 - **P1**: Admin trend charts (orders/revenue over 7/30 days) + user search + role editor.
+- **P1**: Vendor SLA timer — visually highlight orders sitting in `placed`/`accepted` longer than N minutes.
 - **P1**: Replace soft-pending checkout/status with real Stripe key once user provides one (currently `sk_test_emergent`).
 - **P2**: Restaurant filters (cuisine chips, delivery time slider).
 - **P2**: Image uploads for vendor menu items (currently URL paste).
 - **P2**: CSV export of users/orders/restaurants.
-- **P2**: Split `server.py` (1078 LOC) into routers per domain (`/app/backend/routes/`).
+- **P2**: Split `server.py` (~1100 LOC) into routers per domain (`/app/backend/routes/`).
 - **P3**: Order ratings & reviews; tip-on-delivery.
 - **P3**: (Future) Supabase JWT minting for re-enabling per-user Realtime broadcasts under RLS.
+
+## Iteration 5d update (2026-06-24) — P0 server-side menu re-pricing
+- **Vulnerability closed**: `POST /api/orders` previously trusted client-supplied `price` on every cart line — a user could edit prices in DevTools / localStorage and pay $0.01 for a $50 order.
+- **Fix** (`server.py`): every `item_id` in the cart is looked up against `menu_items` filtered by `restaurant_id == request.restaurant_id AND available = true`. Missing/unavailable/cross-restaurant items → HTTP 400. Canonical `price`, `name`, `image_url` overwrite whatever the client sent. Quantity clamped to `[1, 99]`. Subtotal/total recomputed from canonical prices.
+- **`CartLine` pydantic model** marks `name`, `price`, `image_url` as optional with defaults — comments make it clear they're ignored server-side. Frontend can keep sending the existing shape unchanged (backward compatible).
+- **New tests**: `/app/backend/tests/test_repricing_security.py` — 7 tests cover tampered-price rejection, fake/cross-restaurant/unavailable item rejection, name+image overwrite, quantity clamping (negative → 1, 9999 → 99), multi-line cart canonical subtotal. All 7 pass.
+- **Regression**: full suite **59/59 pass** (20 baseline + 14 P0 RLS/geocode + 18 dispatch + 7 new repricing).
 
 ## Iteration 5c update (2026-06-24) — Kitchen chime
 - New `/app/frontend/src/lib/chime.js` — Web Audio synth, two-note motif (A5 → E6, ~300ms with quick exponential fade). No audio file, no network dep.

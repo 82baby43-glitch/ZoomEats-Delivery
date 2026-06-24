@@ -60,10 +60,10 @@ class MenuItemCreate(BaseModel):
 
 class CartLine(BaseModel):
     item_id: str
-    name: str
-    price: float
+    name: str = ""        # ignored server-side; canonical name is looked up
+    price: float = 0.0    # ignored server-side; canonical price is looked up
     quantity: int
-    image_url: str = ""
+    image_url: str = ""   # ignored server-side; canonical image is looked up
 
 
 class OrderCreate(BaseModel):
@@ -407,16 +407,49 @@ async def create_order(
     rest = (await db.execute(select(Restaurant).where(Restaurant.restaurant_id == payload.restaurant_id))).scalar_one_or_none()
     if not rest:
         raise HTTPException(404, "Restaurant not found")
-    subtotal = round(sum(i.price * i.quantity for i in payload.items), 2)
+
+    # ---- Server-side re-pricing (security): never trust client-supplied prices. ----
+    # Look up the canonical menu_item rows for every item_id in the cart and verify:
+    #   (a) the item exists, (b) it belongs to the requested restaurant,
+    #   (c) it is currently available. Reject the order if anything is off.
+    requested_ids = [i.item_id for i in payload.items]
+    rows = (await db.execute(
+        select(MenuItem).where(and_(
+            MenuItem.item_id.in_(requested_ids),
+            MenuItem.restaurant_id == rest.restaurant_id,
+            MenuItem.available.is_(True),
+        ))
+    )).scalars().all()
+    canonical = {m.item_id: m for m in rows}
+    missing = [iid for iid in requested_ids if iid not in canonical]
+    if missing:
+        raise HTTPException(400, f"Unavailable item(s): {', '.join(missing)}")
+
+    # Rebuild the items list using canonical prices/names/images and clamped quantities.
+    repriced_items: List[dict] = []
+    subtotal = 0.0
+    for line in payload.items:
+        m = canonical[line.item_id]
+        qty = max(1, min(int(line.quantity), 99))  # clamp to a sane positive range
+        repriced_items.append({
+            "item_id": m.item_id,
+            "name": m.name,
+            "price": float(m.price),
+            "quantity": qty,
+            "image_url": m.image_url or "",
+        })
+        subtotal += float(m.price) * qty
+    subtotal = round(subtotal, 2)
     delivery_fee = 2.99
     total = round(subtotal + delivery_fee, 2)
+
     o = Order(
         order_id=f"ord_{uuid.uuid4().hex[:10]}",
         customer_id=user.user_id,
         customer_name=user.name,
         restaurant_id=rest.restaurant_id,
         restaurant_name=rest.name,
-        items=[i.model_dump() for i in payload.items],
+        items=repriced_items,
         subtotal=subtotal, delivery_fee=delivery_fee, total=total,
         address=payload.address, notes=payload.notes,
         status="pending_payment", payment_status="pending",
