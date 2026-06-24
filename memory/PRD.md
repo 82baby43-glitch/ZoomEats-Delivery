@@ -38,13 +38,24 @@
 - Backend tests: 18/18 passing (after soft-pending fix on checkout/status)
 
 ## Backlog / next priorities
-- **P1**: Replace soft-pending checkout/status with real Stripe key once user provides one (current `sk_test_emergent` placeholder fails on session retrieval).
-- **P1**: Server-side re-pricing in `POST /api/orders` from `db.menu_items` (security hardening).
+- **P0**: Server-side menu re-pricing in `POST /api/orders` from `db.menu_items` (security hardening — trust user-supplied prices currently).
+- **P1**: Wire `useWebPush` into `VendorDashboard.jsx` — call `request()` once per session and `fire()` on realtime new-order events (currently the hook exists but isn't invoked).
+- **P1**: Cache geocoded customer coords on `orders.customer_lat / customer_lng` so `/orders/{oid}/tracking` doesn't re-hit Nominatim on every poll (rate-limit risk at 1 req/s).
+- **P1**: Admin trend charts (orders/revenue over 7/30 days) + user search + role editor.
+- **P1**: Replace soft-pending checkout/status with real Stripe key once user provides one (currently `sk_test_emergent`).
 - **P2**: Restaurant filters (cuisine chips, delivery time slider).
 - **P2**: Image uploads for vendor menu items (currently URL paste).
-- **P2**: Real-time order updates via WebSocket instead of 5s polling.
-- **P2**: Split `server.py` (740 LOC) into routers per domain.
+- **P2**: CSV export of users/orders/restaurants.
+- **P2**: Split `server.py` (1078 LOC) into routers per domain (`/app/backend/routes/`).
 - **P3**: Order ratings & reviews; tip-on-delivery.
+- **P3**: (Future) Supabase JWT minting for re-enabling per-user Realtime broadcasts under RLS.
+
+## Iteration 5 update (2026-06-24) — Live Map + Web Push + RLS
+- **Customer live tracking map** (`/app/frontend/src/components/LiveMap.jsx`) — react-leaflet on a CARTO dark tile layer with neon SVG pins for restaurant / customer / driver. Auto-fit bounds; updates whenever `drivers.latitude/longitude` mutates via the existing Supabase Realtime row hook.
+- **Vendor web push** (`/app/frontend/src/lib/useWebPush.js`) — minimal wrapper around the browser Notification API. Persists user choice to localStorage; ready to wire into VendorDashboard alongside the existing realtime pulse.
+- **Order address geocoding on-demand** — `GET /api/orders/{oid}/tracking` geocodes `orders.address` via Nominatim and returns a `customer` payload `{lat,lng,address}`. The LiveMap consumes it. (Performance note: not yet cached — see backlog.)
+- **🛡️ Supabase RLS posture (the previously-skipped item)** — new alembic migration `c1e3f0a01f03` + `/app/supabase/migrations/20260201_rls.sql` enables Row Level Security on all 9 public tables (`users`, `user_sessions`, `restaurants`, `menu_items`, `orders`, `payment_transactions`, `chat_messages`, `drivers`, `deliveries`). All grants to `anon` and `authenticated` revoked → anon-key access returns HTTP 401 `permission denied`. The backend connects as the `postgres` (table-owner) role via the Supabase pooler and bypasses RLS, so SQLAlchemy queries are unaffected. Frontend Realtime broadcasts to anon no longer leak — the 8-10s polling fallback in `OrderDetail.jsx` / `VendorDashboard.jsx` keeps the UI live. `useRealtime.js` silently swallows the expected `CHANNEL_ERROR`.
+- **Tests**: 14 new P0 tests (`/app/backend/tests/test_p0_rls_geocode_tracking.py`) — RLS lockdown on 6 sensitive tables via anon HTTP, geocoding happy path (1600 Amphitheatre Pkwy → lat≈37.42), geocoding graceful failure, tracking endpoint shape + auth guards, driver heartbeat. 20/20 regression in `backend_test.py` + 18/18 dispatch (after relaxing one stale Uber-stub assertion now that real Uber Direct creds are live). **52 tests passing.**
 
 ## Iteration 4 update (2026-06-24) — Autonomous Dispatch Layer (additive)
 - **Goal**: when an order is paid, auto-pick the best internal driver or fall back to Uber Direct. ZERO changes to existing functionality.
