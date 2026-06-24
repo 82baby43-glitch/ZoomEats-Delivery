@@ -50,6 +50,14 @@
 - **P3**: Order ratings & reviews; tip-on-delivery.
 - **P3**: (Future) Supabase JWT minting for re-enabling per-user Realtime broadcasts under RLS.
 
+## Iteration 5b update (2026-06-24) — Web Push wired into VendorDashboard
+- Wired `useWebPush` hook into `/app/frontend/src/pages/VendorDashboard.jsx`:
+  - "Enable notifications" pill next to the Live indicator (states: enable / blocked / pings on).
+  - `notifiedRef` Set tracks already-pinged order_ids → never double-fire.
+  - `primedRef` ensures the first load on mount is silent (no ping for orders that existed before the vendor opened the page).
+  - On every refresh (realtime tick or 10s poll), any **newly-placed paid order** triggers `fire("New order · $X", "<customer> — <items>")` with a unique `tag` per order so the OS dedupes.
+- Verified via screenshot — Smoke Test Kitchen renders the new "Enable notifications" button with the correct disabled-blocked state under Playwright (headless browsers deny notifications by default).
+
 ## Iteration 5 update (2026-06-24) — Live Map + Web Push + RLS
 - **Customer live tracking map** (`/app/frontend/src/components/LiveMap.jsx`) — react-leaflet on a CARTO dark tile layer with neon SVG pins for restaurant / customer / driver. Auto-fit bounds; updates whenever `drivers.latitude/longitude` mutates via the existing Supabase Realtime row hook.
 - **Vendor web push** (`/app/frontend/src/lib/useWebPush.js`) — minimal wrapper around the browser Notification API. Persists user choice to localStorage; ready to wire into VendorDashboard alongside the existing realtime pulse.

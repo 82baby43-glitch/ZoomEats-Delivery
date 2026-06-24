@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import { useRealtimeRow } from "@/lib/useRealtime";
-import { Plus, Trash2, Wifi } from "lucide-react";
+import { useWebPush } from "@/lib/useWebPush";
+import { Plus, Trash2, Wifi, Bell, BellOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const STATUS_NEXT = {
@@ -21,6 +22,11 @@ export default function VendorDashboard() {
   const [item, setItem] = useState({ name: "", description: "", price: "", image_url: "", category: "Mains" });
   const [tab, setTab] = useState("orders");
   const [livePulse, setLivePulse] = useState(0);
+  const { permission, request, fire } = useWebPush("ZoomEats Kitchen");
+  // Track which "placed" orders have already been notified so we don't ping on every poll.
+  const notifiedRef = useRef(new Set());
+  // First load is silent — only orders that *arrive* after mount trigger a notification.
+  const primedRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -35,11 +41,30 @@ export default function VendorDashboard() {
         setMenu(m.data);
         const o = await api.get("/vendor/orders");
         setOrders(o.data);
+
+        // ---- OS notification for new "placed" orders that we haven't seen yet ----
+        const fresh = o.data.filter(
+          (x) => x.status === "placed" && x.payment_status === "paid" && !notifiedRef.current.has(x.order_id)
+        );
+        if (primedRef.current && fresh.length > 0) {
+          fresh.forEach((x) => {
+            fire(
+              `New order · $${x.total.toFixed(2)}`,
+              `${x.customer_name} — ${x.items.map((i) => `${i.quantity}× ${i.name}`).join(", ")}`,
+              { tag: `order-${x.order_id}` }
+            );
+          });
+        }
+        // Mark every currently-placed order as "seen" so we never re-fire for it.
+        o.data.forEach((x) => {
+          if (x.status === "placed") notifiedRef.current.add(x.order_id);
+        });
+        primedRef.current = true;
       }
     } catch (e) {
       console.warn("[vendor] load failed:", e);
     }
-  }, []);
+  }, [fire]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -106,7 +131,7 @@ export default function VendorDashboard() {
     <div>
       <Header />
       <div className="max-w-6xl mx-auto px-6 md:px-12 py-12">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <h1 className="font-display text-4xl font-black tracking-tighter">{restaurant.name}</h1>
           <span
             className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-md"
@@ -116,6 +141,32 @@ export default function VendorDashboard() {
           >
             <Wifi size={12} /> Live
           </span>
+          {permission !== "granted" ? (
+            <button
+              onClick={request}
+              className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-md transition-colors"
+              style={{
+                background: "var(--surface-2)",
+                color: permission === "denied" ? "var(--muted)" : "var(--primary)",
+                cursor: permission === "denied" ? "not-allowed" : "pointer",
+              }}
+              disabled={permission === "denied"}
+              data-testid="enable-notifications-btn"
+              title={permission === "denied" ? "Notifications blocked — re-enable in browser settings" : "Get a desktop ping when new orders arrive"}
+            >
+              {permission === "denied" ? <BellOff size={12} /> : <Bell size={12} />}
+              {permission === "denied" ? "Notifications blocked" : "Enable notifications"}
+            </button>
+          ) : (
+            <span
+              className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-md"
+              style={{ background: "var(--surface-2)", color: "var(--primary)" }}
+              data-testid="notifications-on-indicator"
+              title="Desktop notifications are on"
+            >
+              <Bell size={12} /> Pings on
+            </span>
+          )}
         </div>
         <p className="mt-2" style={{ color: "var(--muted)" }}>Vendor dashboard</p>
         <div className="flex gap-2 mt-6 border-b" style={{ borderColor: "var(--border)" }}>
