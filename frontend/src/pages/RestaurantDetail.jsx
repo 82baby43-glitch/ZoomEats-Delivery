@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
@@ -22,10 +22,19 @@ export default function RestaurantDetail() {
     })();
   }, [rid]);
 
-  if (!data) return <div><Header /><div className="p-12 text-center">Loading…</div></div>;
-  const { restaurant: r, menu } = data;
+  // Group menu items by category once per data change instead of filtering inside JSX on every render.
+  const groupedMenu = useMemo(() => {
+    if (!data?.menu) return [];
+    const map = new Map();
+    for (const m of data.menu) {
+      if (!map.has(m.category)) map.set(m.category, []);
+      map.get(m.category).push(m);
+    }
+    return Array.from(map.entries()); // [[category, items[]], ...]
+  }, [data?.menu]);
 
-  const categories = [...new Set(menu.map((m) => m.category))];
+  if (!data) return <div><Header /><div className="p-12 text-center">Loading…</div></div>;
+  const { restaurant: r } = data;
 
   return (
     <div>
@@ -54,11 +63,11 @@ export default function RestaurantDetail() {
           </div>
         </div>
 
-        {categories.map((cat) => (
+        {groupedMenu.map(([cat, items]) => (
           <div key={cat} className="mb-12">
             <h2 className="font-display text-2xl font-bold mb-5">{cat}</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {menu.filter((m) => m.category === cat).map((m) => (
+              {items.map((m) => (
                 <div
                   key={m.item_id}
                   className="card flex flex-col"

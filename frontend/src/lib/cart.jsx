@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 const CartContext = createContext(null);
 const STORAGE_KEY = "zoomeats_cart_v1";
@@ -59,8 +59,14 @@ export function CartProvider({ children }) {
 
   const subtotal = cart.items.reduce((s, x) => s + x.price * x.quantity, 0);
 
+  // Memoize the context value so consumers don't re-render on every parent render.
+  const value = useMemo(
+    () => ({ cart, addItem, updateQty, clear, subtotal }),
+    [cart, subtotal]
+  );
+
   return (
-    <CartContext.Provider value={{ cart, addItem, updateQty, clear, subtotal }}>
+    <CartContext.Provider value={value}>
       {children}
     </CartContext.Provider>
   );

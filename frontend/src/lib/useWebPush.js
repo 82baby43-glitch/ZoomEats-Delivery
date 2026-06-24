@@ -2,10 +2,9 @@ import { useEffect, useState, useCallback } from "react";
 
 /**
  * Tiny wrapper around the Notification API.
- * - Persists user choice in localStorage (so we don't nag on every reload)
  * - Returns { permission, request, fire } so callers can prompt + send
+ * - No localStorage — `Notification.permission` is already persisted by the browser.
  */
-const KEY = "zoomeats_notif_pref";
 
 export function useWebPush(appName = "ZoomEats") {
   const [permission, setPermission] = useState(() =>
@@ -23,7 +22,6 @@ export function useWebPush(appName = "ZoomEats") {
     if (Notification.permission === "denied") return "denied";
     const p = await Notification.requestPermission();
     setPermission(p);
-    localStorage.setItem(KEY, p);
     return p;
   }, []);
 

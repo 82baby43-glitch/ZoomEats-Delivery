@@ -6,7 +6,7 @@ export default function DigestCard({ digest, loading, onGenerate }) {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Sparkles size={18} style={{ color: "var(--primary)" }} />
-          <h3 className="font-display text-xl font-bold">Today's digest by Zoey</h3>
+          <h3 className="font-display text-xl font-bold">Today&apos;s digest by Zoey</h3>
         </div>
         <button
           className="btn-secondary !py-2 !px-3 flex items-center gap-2 text-sm"
@@ -20,7 +20,7 @@ export default function DigestCard({ digest, loading, onGenerate }) {
       </div>
       {!digest && !loading && (
         <p className="text-sm" style={{ color: "var(--muted)" }}>
-          Click "Generate" for an AI summary of today's platform activity (orders, GMV, top performers, items needing attention).
+          Click &quot;Generate&quot; for an AI summary of today&apos;s platform activity (orders, GMV, top performers, items needing attention).
         </p>
       )}
       {loading && (

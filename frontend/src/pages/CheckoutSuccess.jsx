@@ -51,7 +51,7 @@ export default function CheckoutSuccess() {
             <CheckCircle2 size={56} className="mx-auto" style={{ color: "var(--accent)" }} />
             <h1 className="font-display text-4xl font-black mt-4" data-testid="payment-success">Order placed!</h1>
             <p className="mt-2" style={{ color: "var(--muted)" }}>
-              We've notified the kitchen. Track your order in real time.
+              We&apos;ve notified the kitchen. Track your order in real time.
             </p>
             <div className="mt-8 flex justify-center gap-3">
               <button className="btn-primary" onClick={() => navigate(`/orders/${order?.order_id || ""}`)} data-testid="track-order-btn">
