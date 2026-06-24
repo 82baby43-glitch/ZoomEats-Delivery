@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useRealtimeRow } from "@/lib/useRealtime";
 import Header from "@/components/Header";
+import LiveMap from "@/components/LiveMap";
 import { CheckCircle2, Circle, ExternalLink, MapPin, Truck, Clock, Wifi } from "lucide-react";
 
 const TIMELINE = [
@@ -123,6 +124,13 @@ export default function OrderDetail() {
                 Track on Uber <ExternalLink size={14} />
               </a>
             )}
+          </div>
+        )}
+
+        {/* Live map (shown only when we have at least one geocoded point) */}
+        {(data.restaurant?.latitude || data.customer?.latitude || data.driver?.latitude) && (
+          <div className="mt-6">
+            <LiveMap restaurant={data.restaurant} customer={data.customer} driver={data.driver} />
           </div>
         )}
 

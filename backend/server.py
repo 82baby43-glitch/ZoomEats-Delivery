@@ -606,11 +606,31 @@ async def order_tracking(oid: str, user: User = Depends(get_current_user), db: A
                 "latitude": drv.latitude, "longitude": drv.longitude,
                 "last_seen": drv.last_seen.isoformat() if drv.last_seen else None,
             }
+    rest_payload = None
+    if o.restaurant_id:
+        rest = (await db.execute(select(Restaurant).where(Restaurant.restaurant_id == o.restaurant_id))).scalar_one_or_none()
+        if rest:
+            rest_payload = {
+                "name": rest.name,
+                "latitude": rest.latitude, "longitude": rest.longitude,
+                "address": rest.address,
+            }
+    # Best-effort: geocode the customer dropoff address on demand (cached on the order via tracking_id? Not stored — small cost per fetch)
+    cust_payload = None
+    if o.address:
+        try:
+            coords = await geocode_address(o.address)
+            if coords:
+                cust_payload = {"latitude": coords[0], "longitude": coords[1], "address": o.address}
+        except Exception:
+            cust_payload = None
     return {
         "order": order_dict(o),
         "delivery_type": o.delivery_type,
         "tracking_id": o.tracking_id,
         "driver": driver_payload,
+        "restaurant": rest_payload,
+        "customer": cust_payload,
         "delivery": ({
             "delivery_id": delivery.delivery_id, "provider": delivery.provider,
             "tracking_id": delivery.tracking_id,
