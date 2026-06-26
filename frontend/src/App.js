@@ -13,6 +13,9 @@ import OrderDetail from "@/pages/OrderDetail";
 import VendorDashboard from "@/pages/VendorDashboard";
 import DeliveryDashboard from "@/pages/DeliveryDashboard";
 import AdminPanel from "@/pages/AdminPanel";
+import AgreementCenter from "@/pages/AgreementCenter";
+import DisclosureForm from "@/pages/DisclosureForm";
+import AdminCompliance from "@/pages/AdminCompliance";
 import AuthCallback from "@/pages/AuthCallback";
 
 function Protected({ children, roles }) {
@@ -55,11 +58,14 @@ function AppRouter() {
       <Route path="/cart" element={<Cart />} />
       <Route path="/checkout/success" element={<Protected><CheckoutSuccess /></Protected>} />
       <Route path="/onboarding" element={<Protected><Onboarding /></Protected>} />
+      <Route path="/agreements" element={<Protected><AgreementCenter /></Protected>} />
+      <Route path="/disclosure" element={<Protected roles={["delivery"]}><DisclosureForm /></Protected>} />
       <Route path="/orders" element={<Protected><MyOrders /></Protected>} />
       <Route path="/orders/:oid" element={<Protected><OrderDetail /></Protected>} />
       <Route path="/vendor" element={<Protected roles={["vendor"]}><VendorDashboard /></Protected>} />
       <Route path="/delivery" element={<Protected roles={["delivery"]}><DeliveryDashboard /></Protected>} />
       <Route path="/admin" element={<Protected roles={["admin"]}><AdminPanel /></Protected>} />
+      <Route path="/admin/compliance" element={<Protected roles={["admin"]}><AdminCompliance /></Protected>} />
     </Routes>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { api } from "@/lib/api";
+import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import { useRealtimeRow } from "@/lib/useRealtime";
 import { useWebPush } from "@/lib/useWebPush";
@@ -22,6 +22,8 @@ export default function VendorDashboard() {
   const [form, setForm] = useState({ name: "", description: "", cuisine: "", image_url: "", cover_url: "", address: "" });
   const [item, setItem] = useState({ name: "", description: "", price: "", image_url: "", category: "Mains" });
   const [tab, setTab] = useState("orders");
+  const [wallet, setWallet] = useState({ available: 0.0, pending: 0.0 });
+  const [payoutAmt, setPayoutAmt] = useState(0.0);
   const [livePulse, setLivePulse] = useState(0);
   const { permission, request, fire } = useWebPush("ZoomEats Kitchen");
   // Track which "placed" orders have already been notified so we don't ping on every poll.
@@ -41,6 +43,8 @@ export default function VendorDashboard() {
         const m = await api.get("/vendor/menu-items");
         setMenu(m.data);
         const o = await api.get("/vendor/orders");
+        const wb = await getWalletBalance();
+        setWallet(wb.data);
         setOrders(o.data);
 
         // ---- OS notification for new "placed" orders that we haven't seen yet ----
@@ -68,6 +72,17 @@ export default function VendorDashboard() {
       console.warn("[vendor] load failed:", e);
     }
   }, [fire]);
+
+  const doPayout = async () => {
+    try {
+      const res = await requestWalletPayout(parseFloat(payoutAmt));
+      alert(`Payout requested: ${res.data.payout_id} · ${res.data.status}`);
+      const wb = await getWalletBalance();
+      setWallet(wb.data);
+    } catch (e) {
+      alert("Payout failed: " + (e.response?.data || e.message));
+    }
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -277,6 +292,19 @@ export default function VendorDashboard() {
 
         {tab === "profile" && (
           <div className="card p-6 mt-6 space-y-4 max-w-2xl">
+            <div className="card p-4 mb-2">
+              <div className="flex justify-between items-center">
+                <div>
+                  <div className="label-eyebrow">Wallet</div>
+                  <div className="font-display text-xl font-bold">${wallet.available.toFixed(2)}</div>
+                  <div className="text-sm" style={{ color: "var(--muted)" }}>Pending: ${wallet.pending.toFixed(2)}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input className="input-field" type="number" step="0.01" value={payoutAmt} onChange={(e) => setPayoutAmt(e.target.value)} style={{ width: 140 }} />
+                  <button className="btn-primary" onClick={doPayout}>Payout</button>
+                </div>
+              </div>
+            </div>
             <input className="input-field" placeholder="Restaurant name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <input className="input-field" placeholder="Cuisine" value={form.cuisine} onChange={(e) => setForm({ ...form, cuisine: e.target.value })} />
             <textarea className="input-field" rows={3} placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />

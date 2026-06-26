@@ -129,6 +129,7 @@ class Driver(Base):
     workload = Column(Integer, nullable=False, default=0, index=True)
     last_seen = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    stripe_account_id = Column(String(128), nullable=True)
 
 
 class Delivery(Base):
@@ -143,3 +144,126 @@ class Delivery(Base):
     meta = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class Wallet(Base):
+    __tablename__ = "wallets"
+    wallet_id = Column(String(64), primary_key=True)
+    owner_user_id = Column(String(64), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    owner_type = Column(String(32), nullable=False)  # 'driver' | 'restaurant' | 'platform'
+    available = Column(Float, nullable=False, default=0.0)
+    pending = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class WalletTransaction(Base):
+    __tablename__ = "wallet_transactions"
+    tx_id = Column(String(64), primary_key=True)
+    wallet_id = Column(String(64), ForeignKey("wallets.wallet_id", ondelete="CASCADE"), nullable=False, index=True)
+    order_id = Column(String(64), nullable=True, index=True)
+    amount = Column(Float, nullable=False)
+    currency = Column(String(8), nullable=False, default="usd")
+    type = Column(String(32), nullable=False)  # 'credit' | 'debit' | 'payout'
+    status = Column(String(32), nullable=False, default="pending")  # 'pending' | 'available' | 'completed' | 'failed'
+    metadata = Column(JSONB, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class WalletPayout(Base):
+    __tablename__ = "wallet_payouts"
+    payout_id = Column(String(64), primary_key=True)
+    wallet_id = Column(String(64), ForeignKey("wallets.wallet_id", ondelete="SET NULL"), nullable=True, index=True)
+    amount = Column(Float, nullable=False)
+    currency = Column(String(8), nullable=False, default="usd")
+    stripe_payout_id = Column(String(128), nullable=True)
+    status = Column(String(32), nullable=False, default="initiated")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+# ------------------ Agreement & Compliance Models ------------------
+class Agreement(Base):
+    __tablename__ = "agreements"
+    agreement_id = Column(String(64), primary_key=True)
+    agreement_type = Column(String(64), nullable=False)  # e.g., driver, restaurant, privacy, terms, sms
+    version = Column(String(32), nullable=False)
+    title = Column(String(255), nullable=False)
+    body = Column(Text, nullable=False)
+    effective_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class AgreementAcceptance(Base):
+    __tablename__ = "agreement_acceptances"
+    acceptance_id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    agreement_id = Column(String(64), ForeignKey("agreements.agreement_id", ondelete="CASCADE"), nullable=False, index=True)
+    agreement_type = Column(String(64), nullable=False)
+    agreement_version = Column(String(32), nullable=False)
+    accepted = Column(Boolean, nullable=False, default=True)
+    ip_address = Column(String(128), nullable=True)
+    device_info = Column(Text, nullable=True)
+    signature = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class ElectronicSignature(Base):
+    __tablename__ = "electronic_signatures"
+    signature_id = Column(String(64), primary_key=True)
+    acceptance_id = Column(String(64), ForeignKey("agreement_acceptances.acceptance_id", ondelete="CASCADE"), nullable=False, index=True)
+    typed_name = Column(String(255), nullable=False)
+    consent_checkbox = Column(Boolean, nullable=False, default=True)
+    ip_address = Column(String(128), nullable=True)
+    device_fingerprint = Column(String(256), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class CriminalDisclosure(Base):
+    __tablename__ = "criminal_disclosures"
+    disclosure_id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    has_conviction = Column(Boolean, nullable=False)
+    offense_type = Column(String(255), nullable=True)
+    severity = Column(String(32), nullable=True)  # felony | misdemeanor
+    conviction_date = Column(DateTime(timezone=True), nullable=True)
+    state = Column(String(64), nullable=True)
+    explanation = Column(Text, nullable=True)
+    rehabilitation = Column(Text, nullable=True)
+    attachments = Column(JSONB, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class ComplianceReview(Base):
+    __tablename__ = "compliance_reviews"
+    review_id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True, index=True)
+    disclosure_id = Column(String(64), ForeignKey("criminal_disclosures.disclosure_id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(32), nullable=False, default="pending")  # pending | in_review | approved | rejected
+    notes = Column(Text, nullable=True)
+    assigned_to = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class Investigation(Base):
+    __tablename__ = "investigations"
+    investigation_id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True, index=True)
+    type = Column(String(64), nullable=False)
+    evidence = Column(JSONB, nullable=True)
+    notes = Column(Text, nullable=True)
+    outcome = Column(String(64), nullable=True)
+    status = Column(String(32), nullable=False, default="open")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    log_id = Column(String(64), primary_key=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    user_id = Column(String(64), nullable=True)
+    actor_id = Column(String(64), nullable=True)
+    action_type = Column(String(128), nullable=False)
+    before_state = Column(JSONB, nullable=True)
+    after_state = Column(JSONB, nullable=True)
+    meta = Column(JSONB, nullable=True)
+    chained_hash = Column(String(128), nullable=True, index=True)

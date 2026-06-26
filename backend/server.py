@@ -22,9 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import AsyncSessionLocal, get_db
 from models import (
     User, UserSession, Restaurant, MenuItem, Order, PaymentTransaction, ChatMessage,
-    Driver, Delivery,
+    Driver, Delivery, Wallet, WalletTransaction, WalletPayout,
 )
 from dispatch import dispatch_order as run_dispatch
+from wallet import credit_pending_for_order, settle_pending_on_delivery, _get_or_create_wallet, request_payout  # noqa: E402
+from agreements import router as agreements_router, admin_router as compliance_admin_router, has_required_acceptances  # noqa: E402
+from audit_exporter import start_background_snapshot, stop_background_snapshot, create_and_upload_snapshot  # noqa: E402
 from geocode import geocode_address
 from rate_limit import TokenBucket
 
@@ -85,6 +88,23 @@ if not STRIPE_WEBHOOK_SECRET:
 
 app = FastAPI(title="ZoomEats API")
 api = APIRouter(prefix="/api")
+
+
+# Start background tasks on app startup/shutdown
+@app.on_event("startup")
+async def _start_tasks():
+    try:
+        start_background_snapshot()
+    except Exception:
+        logger.exception("Failed to start audit snapshot task")
+
+
+@app.on_event("shutdown")
+async def _stop_tasks():
+    try:
+        stop_background_snapshot()
+    except Exception:
+        logger.exception("Failed to stop audit snapshot task")
 
 
 # SEC-P3: security headers middleware
@@ -384,6 +404,14 @@ async def vendor_create_or_update(
         await db.commit()
         await db.refresh(existing)
         return rest_dict(existing)
+    # Enforce required agreement acceptances before allowing restaurant activation
+    try:
+        ok = await has_required_acceptances(db, user.user_id, "vendor")
+    except Exception:
+        ok = False
+    if not ok:
+        raise HTTPException(403, "Restaurant activation requires accepting all required agreements via the Agreement Center")
+
     r = Restaurant(
         restaurant_id=f"rest_{uuid.uuid4().hex[:10]}",
         owner_id=user.user_id,
@@ -610,10 +638,63 @@ async def delivery_action(
         if dlv:
             dlv.status = "delivered"
             dlv.updated_at = datetime.now(timezone.utc)
+        # Settle pending wallet credits for this order (move pending -> available)
+        try:
+            await settle_pending_on_delivery(db, o)
+        except Exception as e:
+            logger.warning(f"[wallet] settle_pending failed for {o.order_id}: {e}")
     else:
         raise HTTPException(400, "Bad action")
     await db.commit()
     return {"ok": True}
+
+
+# ---------- Wallet APIs ----------
+@api.get("/wallet/balance")
+async def wallet_balance(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    w = (await db.execute(select(Wallet).where(Wallet.owner_user_id == user.user_id))).scalar_one_or_none()
+    if not w:
+        return {"available": 0.0, "pending": 0.0}
+    return {"available": float(w.available or 0.0), "pending": float(w.pending or 0.0)}
+
+
+@api.get("/wallet/transactions")
+async def wallet_transactions(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    w = (await db.execute(select(Wallet).where(Wallet.owner_user_id == user.user_id))).scalar_one_or_none()
+    if not w:
+        return []
+    res = await db.execute(select(WalletTransaction).where(WalletTransaction.wallet_id == w.wallet_id).order_by(desc(WalletTransaction.created_at)).limit(200))
+    return [dict(tx_id=t.tx_id, amount=float(t.amount), type=t.type, status=t.status, order_id=t.order_id, created_at=t.created_at.isoformat()) for t in res.scalars().all()]
+
+
+class PayoutRequest(BaseModel):
+    amount: float
+
+
+@api.post("/wallet/payout")
+async def wallet_payout(req: PayoutRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    # Determine wallet and connected account id
+    w = (await db.execute(select(Wallet).where(Wallet.owner_user_id == user.user_id))).scalar_one_or_none()
+    if not w:
+        raise HTTPException(400, "No wallet found")
+    connected_account = None
+    if user.role == "delivery":
+        drv = (await db.execute(select(Driver).where(Driver.user_id == user.user_id))).scalar_one_or_none()
+        if drv:
+            connected_account = drv.stripe_account_id
+    elif user.role == "vendor":
+        rest = (await db.execute(select(Restaurant).where(Restaurant.owner_id == user.user_id).order_by(desc(Restaurant.created_at)).limit(1))).scalars().first()
+        if rest:
+            connected_account = rest.stripe_account_id
+    # attempt payout
+    try:
+        payout = await request_payout(db, w, float(req.amount), connected_account)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.warning(f"[wallet] payout request failed: {e}")
+        raise HTTPException(500, "payout failed")
+    return {"payout_id": payout.payout_id, "status": payout.status}
 
 
 # ---------- Dispatch / driver tracking (additive) ----------
@@ -626,6 +707,13 @@ async def _get_or_create_driver_row(db: AsyncSession, user: User) -> Driver:
     d = (await db.execute(select(Driver).where(Driver.user_id == user.user_id))).scalar_one_or_none()
     if d:
         return d
+    # Enforce required agreement acceptances before provisioning driver activation
+    try:
+        ok = await has_required_acceptances(db, user.user_id, "delivery")
+    except Exception:
+        ok = False
+    if not ok:
+        raise HTTPException(403, "Driver activation requires accepting all required agreements via the Agreement Center")
     d = Driver(driver_id=f"drv_{uuid.uuid4().hex[:10]}", user_id=user.user_id, availability=True, workload=0)
     db.add(d)
     await db.flush()
@@ -842,6 +930,11 @@ async def checkout_status(session_id: str, request: Request, user: User = Depend
             if o:
                 o.payment_status = "paid"
                 o.status = "placed"
+                # Credit pending wallet balances for this order (payments captured)
+                try:
+                    await credit_pending_for_order(db, o)
+                except Exception as e:
+                    logger.warning(f"[wallet] credit_pending failed for {tx.order_id}: {e}")
         await db.commit()
         # ---- Autonomous dispatch hook (additive) ----
         if tx.order_id:
@@ -886,6 +979,12 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         tx = (await db.execute(select(PaymentTransaction).where(PaymentTransaction.session_id == evt.session_id))).scalar_one_or_none()
         if tx:
             tx.payment_status = "paid"
+        # Credit pending wallet balances for this order (payments captured via webhook)
+        try:
+            if o:
+                await credit_pending_for_order(db, o)
+        except Exception as e:
+            logger.warning(f"[wallet] credit_pending failed for {evt.metadata.get('order_id')}: {e}")
         await db.commit()
         # ---- Autonomous dispatch hook (additive) ----
         try:
@@ -1057,6 +1156,28 @@ async def admin_attention(user: User = Depends(require_role("admin")), db: Async
                              "created_at": to_iso(p.created_at)} for p in failed_rows],
         "counts": {"pending": len(pending_rows), "stuck": len(stuck_rows), "failed": len(failed_rows)},
     }
+
+
+@api.get("/metrics")
+async def metrics_endpoint():
+    """Expose Prometheus metrics if prometheus_client is installed."""
+    try:
+        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    except Exception:
+        raise HTTPException(status_code=404, detail="Metrics not available")
+    data = generate_latest()
+    return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
+@api.post("/admin/audit/snapshot")
+async def admin_audit_snapshot(user: User = Depends(require_role("admin"))):
+    """Trigger an on-demand audit snapshot upload to S3 and return metadata."""
+    try:
+        res = await create_and_upload_snapshot()
+        return res
+    except Exception as e:
+        logger.exception("on-demand snapshot failed: %s", e)
+        raise HTTPException(500, "snapshot failed")
 
 
 async def _compute_daily_stats(db: AsyncSession, today_start: datetime) -> Dict[str, Any]:
@@ -1240,6 +1361,10 @@ async def seed_data():
 
 # ---------- App wiring ----------
 app.include_router(api)
+app.include_router(agreements_router)
+app.include_router(compliance_admin_router)
+from uploads import router as uploads_router  # noqa: E402
+app.include_router(uploads_router)
 app.add_middleware(SecurityHeadersMiddleware)
 # SEC-002: never combine credentials with `*`. If no explicit origins are configured,
 # we drop credentials entirely (cookie-auth requests will fail cross-origin — by design).

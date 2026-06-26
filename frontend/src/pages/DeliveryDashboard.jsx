@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { api } from "@/lib/api";
+import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import { MapPin, Power, Truck } from "lucide-react";
 
@@ -25,6 +25,8 @@ export default function DeliveryDashboard() {
   const [available, setAvailable] = useState([]);
   const [mine, setMine] = useState([]);
   const [activeDispatch, setActiveDispatch] = useState({ driver: null, orders: [] });
+  const [wallet, setWallet] = useState({ available: 0.0, pending: 0.0 });
+  const [payoutAmt, setPayoutAmt] = useState(0.0);
   const { coords, err: geoErr } = useGeolocation(online);
   const lastSentRef = useRef(0);
 
@@ -38,6 +40,12 @@ export default function DeliveryDashboard() {
       setAvailable(a.data);
       setMine(m.data);
       setActiveDispatch(act.data);
+      try {
+        const wb = await getWalletBalance();
+        setWallet(wb.data);
+      } catch (e) {
+        console.warn("wallet load failed", e);
+      }
     } catch (e) {
       console.warn("[delivery] refresh failed:", e);
     }
@@ -122,6 +130,24 @@ export default function DeliveryDashboard() {
           <div className="card p-5">
             <div className="label-eyebrow">Active deliveries</div>
             <div className="font-display text-3xl font-black mt-1">{mine.filter((o) => o.status !== "delivered").length}</div>
+          </div>
+          <div className="card p-5">
+            <div className="label-eyebrow">Wallet</div>
+            <div className="font-display text-3xl font-black mt-1">${wallet.available.toFixed(2)}</div>
+            <div className="text-sm" style={{ color: "var(--muted)" }}>Pending: ${wallet.pending.toFixed(2)}</div>
+            <div className="mt-3 flex gap-2">
+              <input className="input-field" type="number" step="0.01" value={payoutAmt} onChange={(e) => setPayoutAmt(e.target.value)} style={{ width: 120 }} />
+              <button className="btn-primary" onClick={async () => {
+                try {
+                  const r = await requestWalletPayout(parseFloat(payoutAmt));
+                  alert(`Payout requested: ${r.data.payout_id}`);
+                  const wb = await getWalletBalance();
+                  setWallet(wb.data);
+                } catch (e) {
+                  alert('Payout failed');
+                }
+              }}>Payout</button>
+            </div>
           </div>
           <div className="card p-5">
             <div className="label-eyebrow">Completed today</div>
