@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 import "@/App.css";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { CartProvider } from "@/lib/cart";
@@ -20,6 +21,14 @@ import AuthCallback from "@/pages/AuthCallback";
 
 function Protected({ children, roles }) {
   const { user, loading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!loading && !user) {
+      navigate("/");
+    }
+  }, [loading, user, navigate]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -28,7 +37,6 @@ function Protected({ children, roles }) {
     );
   }
   if (!user) {
-    window.location.href = "/";
     return null;
   }
   if (roles && !roles.includes(user.role)) {
