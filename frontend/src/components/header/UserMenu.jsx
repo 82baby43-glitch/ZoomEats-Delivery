@@ -1,12 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { User as UserIcon, LogOut, Repeat } from "lucide-react";
-
-// REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-const startLogin = () => {
-  const redirectUrl = window.location.origin + "/auth/callback";
-  window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
-};
+import { startLogin } from "@/lib/supabaseAuth";
 
 export default function UserMenu({ user, logout }) {
   const [open, setOpen] = useState(false);

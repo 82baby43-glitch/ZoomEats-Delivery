@@ -56,7 +56,7 @@ supabase functions deploy dispatch-order --no-verify-jwt
 
 ### 3. Set the secrets
 ```
-supabase secrets set FASTAPI_BASE_URL=https://builder-hub-470.preview.emergentagent.com
+supabase secrets set FASTAPI_BASE_URL=https://your-backend.example.com
 supabase secrets set DISPATCH_TRIGGER_TOKEN=zoomeats_dispatch_change_me_in_prod
 ```
 (Match `DISPATCH_TRIGGER_TOKEN` to `/app/backend/.env`.)

@@ -6,12 +6,7 @@ import { useAuth } from "@/lib/auth";
 import Header from "@/components/Header";
 import { Search, Star, Clock, Sparkles } from "lucide-react";
 import Chatbot from "@/components/Chatbot";
-
-// REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-const startLogin = () => {
-  const redirectUrl = window.location.origin + "/auth/callback";
-  window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
-};
+import { startLogin } from "@/lib/supabaseAuth";
 
 const HERO_IMG =
   "https://images.pexels.com/photos/5732798/pexels-photo-5732798.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";

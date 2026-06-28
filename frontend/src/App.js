@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import "@/App.css";
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -53,11 +53,6 @@ function Protected({ children, roles }) {
 }
 
 function AppRouter() {
-  const location = useLocation();
-  // Synchronous detection of OAuth callback (URL fragment) - prevents race conditions.
-  if (location.hash?.includes("session_id=")) {
-    return <AuthCallback />;
-  }
   return (
     <Routes>
       <Route path="/" element={<Landing />} />

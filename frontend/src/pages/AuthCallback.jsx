@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { supabase } from "@/lib/supabaseClient";
+import { syncBackendSession } from "@/lib/supabaseAuth";
+import { api } from "@/lib/api";
 
 export default function AuthCallback() {
   const navigate = useNavigate();
@@ -12,28 +14,48 @@ export default function AuthCallback() {
     if (processed.current) return;
     processed.current = true;
 
-    const hash = window.location.hash;
-    const m = hash.match(/session_id=([^&]+)/);
-    if (!m) {
-      navigate("/");
-      return;
-    }
-    const session_id = m[1];
-
-    (async () => {
+    let settled = false;
+    const finish = async (accessToken) => {
+      if (settled) return;
+      settled = true;
       try {
-        const res = await api.post("/auth/session", { session_id });
-        setUser(res.data.user);
-        // Drivers, vendors, and admins ALWAYS land on the onboarding/role-picker
-        // so they can choose which mode to enter. Customers skip straight to the app.
-        if (res.data.user.role !== "customer") {
-          navigate("/onboarding", { state: { user: res.data.user } });
+        const appUser = await syncBackendSession(api, accessToken);
+        setUser(appUser);
+        if (appUser.role !== "customer") {
+          navigate("/onboarding", { state: { user: appUser } });
         } else {
-          navigate("/", { state: { user: res.data.user } });
+          navigate("/", { state: { user: appUser } });
         }
-      } catch (e) {
+      } catch {
         navigate("/?error=auth_failed");
       }
+    };
+
+    (async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (!error && session?.access_token) {
+        await finish(session.access_token);
+        return;
+      }
+
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+        if (event === "SIGNED_IN" && nextSession?.access_token) {
+          subscription.unsubscribe();
+          await finish(nextSession.access_token);
+        }
+      });
+
+      setTimeout(async () => {
+        if (settled) return;
+        const { data: { session: retrySession } } = await supabase.auth.getSession();
+        if (retrySession?.access_token) {
+          subscription.unsubscribe();
+          await finish(retrySession.access_token);
+        } else if (!settled) {
+          subscription.unsubscribe();
+          navigate("/?error=auth_failed");
+        }
+      }, 3000);
     })();
   }, [navigate, setUser]);
 

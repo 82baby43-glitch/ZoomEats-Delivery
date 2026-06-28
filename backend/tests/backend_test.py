@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 # Load backend .env for DATABASE_URL
 load_dotenv(Path("/app/backend/.env"))
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://builder-hub-470.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8000").rstrip("/")
 API = f"{BASE_URL}/api"
 DATABASE_URL = os.environ["DATABASE_URL"]
 
