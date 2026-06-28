@@ -15,6 +15,12 @@ export async function POST(req: NextRequest) {
     const authHeader = req.headers.get("authorization") || "";
     const userToken = authHeader.replace(/^Bearer\s+/i, "").trim();
 
+    const ip =
+      (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() ||
+      req.headers.get("x-real-ip") ||
+      undefined;
+    const userAgent = req.headers.get("user-agent") || undefined;
+
     const db = getSupabaseAdmin();
     const data = await handleApiRequest(db, {
       path,
@@ -22,6 +28,8 @@ export async function POST(req: NextRequest) {
       body,
       params,
       userToken: userToken || undefined,
+      ip,
+      userAgent,
     });
 
     return NextResponse.json(data);

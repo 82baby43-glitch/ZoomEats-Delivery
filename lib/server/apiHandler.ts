@@ -35,6 +35,8 @@ export async function handleApiRequest(
     body?: Record<string, unknown>;
     params?: Record<string, string>;
     userToken?: string;
+    ip?: string;
+    userAgent?: string;
   }
 ) {
   const stripeKey = process.env.STRIPE_API_KEY || "";
@@ -42,10 +44,18 @@ export async function handleApiRequest(
   const adminEmails = (process.env.ADMIN_EMAILS || process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
     .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
 
-  const path = opts.path || "/";
+  let path = opts.path || "/";
   const method = (opts.method || "GET").toUpperCase();
   const body = opts.body || {};
-  const params = opts.params || {};
+  const params: Record<string, string> = { ...(opts.params || {}) };
+  const qIdx = path.indexOf("?");
+  if (qIdx >= 0) {
+    const qs = new URLSearchParams(path.slice(qIdx + 1));
+    qs.forEach((v, k) => {
+      params[k] = v;
+    });
+    path = path.slice(0, qIdx);
+  }
   const token = opts.userToken || "";
   let user: Record<string, unknown> | null = null;
 
@@ -80,6 +90,36 @@ export async function handleApiRequest(
     const u = requireAuth();
     if (!roles.includes(u.role as string)) throw { status: 403, message: `Requires role: ${roles}` };
     return u;
+  };
+
+  // Append-only compliance audit logging (best-effort; never blocks the request).
+  const audit = async (entry: {
+    user_id?: string;
+    reviewer_id?: string;
+    action_type: string;
+    entity?: string;
+    entity_id?: string;
+    previous_value?: unknown;
+    new_value?: unknown;
+    metadata?: unknown;
+  }) => {
+    try {
+      await db.from("compliance_audit_log").insert({ ts: new Date().toISOString(), ...entry });
+    } catch (e) {
+      console.error("[audit] failed:", (e as Error).message);
+    }
+  };
+
+  const setComplianceStatus = async (userId: string, status: string, notes?: string, userType?: string) => {
+    const { data: existing } = await db.from("compliance_records").select("compliance_id").eq("user_id", userId).maybeSingle();
+    if (existing) {
+      await db.from("compliance_records").update({ status, notes, updated_at: new Date().toISOString() }).eq("user_id", userId);
+    } else {
+      await db.from("compliance_records").insert({
+        compliance_id: uid("cmp"), user_id: userId, user_type: userType || null, status,
+        notes: notes || null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      });
+    }
   };
 
   try {
@@ -293,6 +333,12 @@ export async function handleApiRequest(
     if (deliveryActionMatch && method === "POST") {
       const u = requireRole("delivery");
       const [, oid, action] = deliveryActionMatch;
+      if (action === "accept") {
+        const { data: comp } = await db.from("compliance_records").select("status").eq("user_id", u.user_id).maybeSingle();
+        if (comp && ["under_review", "suspended", "removed"].includes(comp.status as string)) {
+          throwErr("Delivery access is restricted pending compliance review", 403);
+        }
+      }
       const { data: o } = await db.from("orders").select("*").eq("order_id", oid).maybeSingle();
       if (!o) throwErr("Not found", 404);
       if (action === "accept") {
@@ -568,6 +614,196 @@ export async function handleApiRequest(
         stats: { orders: todaysOrders?.length || 0, paid_orders: paid.length, gmv: Math.round(gmv * 100) / 100, pending_approvals: pending || 0, new_restaurants: newRestaurants || 0 },
       };
     }
+    // ================= Agreement Center =================
+    if (path === "/agreements/me" && method === "GET") {
+      const u = requireAuth();
+      const { data: catalog } = await db.from("agreements").select("*").eq("published", true);
+      const { data: accepted } = await db.from("agreement_acceptances").select("agreement_type,agreement_version,accepted_at,status").eq("user_id", u.user_id);
+      const byType: Record<string, { agreement_version: string; accepted_at: string }> = {};
+      for (const a of accepted || []) byType[a.agreement_type] = a;
+      const role = (u.role as string) || "customer";
+      return (catalog || [])
+        .filter((a) => (a.required_for || []).includes("all") || (a.required_for || []).includes(role))
+        .map((a) => {
+          const mine = byType[a.agreement_type];
+          return {
+            agreement_type: a.agreement_type, name: a.name, version: a.version, body: a.body,
+            required_for: a.required_for, accepted: !!mine && mine.agreement_version === a.version,
+            accepted_version: mine?.agreement_version || null, accepted_at: mine?.accepted_at || null,
+          };
+        });
+    }
+
+    if (path === "/agreements/accept" && method === "POST") {
+      const u = requireAuth();
+      const agreementType = body.agreement_type as string;
+      if (!agreementType) throwErr("agreement_type required");
+      if (!body.consent_checkbox) throwErr("Consent checkbox is required");
+      if (!body.typed_name) throwErr("Typed legal name is required");
+      const { data: ag } = await db.from("agreements").select("*").eq("agreement_type", agreementType).maybeSingle();
+      if (!ag) throwErr("Unknown agreement type", 404);
+      const acceptance_id = uid("acc");
+      const now = new Date().toISOString();
+      await db.from("agreement_acceptances").insert({
+        acceptance_id, user_id: u.user_id, user_type: u.role, agreement_type: agreementType,
+        agreement_version: ag.version, accepted_at: now, status: "accepted",
+        ip_address: opts.ip || null, device_info: opts.userAgent || null,
+        typed_name: body.typed_name as string, acceptance_method: "typed_name+checkbox",
+        signature_metadata: { typed_name: body.typed_name, consent: true, ip: opts.ip || null, user_agent: opts.userAgent || null, signed_at: now },
+        created_at: now,
+      });
+      await audit({ user_id: u.user_id as string, action_type: "agreement_accepted", entity: "agreement_acceptances", entity_id: acceptance_id, new_value: { agreement_type: agreementType, version: ag.version }, metadata: { ip: opts.ip, user_agent: opts.userAgent } });
+      return { acceptance_id, agreement_type: agreementType, version: ag.version, accepted_at: now };
+    }
+
+    // ================= Criminal History Disclosure + auto Second Chance routing =================
+    if (path === "/agreements/driver/disclosure" && method === "POST") {
+      const u = requireAuth();
+      const hasConviction = !!body.has_conviction;
+      const disclosure_id = uid("disc");
+      const now = new Date().toISOString();
+      await db.from("driver_disclosures").insert({
+        disclosure_id, user_id: u.user_id, has_conviction: hasConviction,
+        offense_type: (body.offense_type as string) || null, severity: (body.severity as string) || null,
+        conviction_date: (body.conviction_date as string) || null, state: (body.state as string) || null,
+        explanation: (body.explanation as string) || null, rehabilitation: (body.rehabilitation as string) || null,
+        additional_notes: (body.additional_notes as string) || null, created_at: now,
+      });
+      await audit({ user_id: u.user_id as string, action_type: "disclosure_submitted", entity: "driver_disclosures", entity_id: disclosure_id, new_value: { has_conviction: hasConviction } });
+
+      if (!hasConviction) {
+        return { disclosure_id, review_id: null, status: "cleared" };
+      }
+      // Automated Second Chance routing
+      const review_id = uid("scr");
+      let years: number | null = null;
+      if (body.conviction_date) {
+        const d = new Date(body.conviction_date as string);
+        if (!isNaN(d.getTime())) years = Math.max(0, Math.round(((Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000)) * 10) / 10);
+      }
+      await db.from("second_chance_reviews").insert({
+        review_id, user_id: u.user_id, disclosure_id, offense_type: (body.offense_type as string) || null,
+        severity: (body.severity as string) || null, conviction_date: (body.conviction_date as string) || null,
+        years_since_conviction: years, state: (body.state as string) || null, status: "pending_review",
+        notes: [], created_at: now, updated_at: now,
+      });
+      await setComplianceStatus(u.user_id as string, "under_review", "Pending Second Chance Review", u.role as string);
+      await audit({ user_id: u.user_id as string, action_type: "second_chance_routed", entity: "second_chance_reviews", entity_id: review_id, new_value: { status: "pending_review" } });
+      return { disclosure_id, review_id, status: "pending_review" };
+    }
+
+    // ================= Secure document uploads (compliance-docs bucket) =================
+    if (path === "/uploads/presign" && method === "POST") {
+      const u = requireAuth();
+      const rawName = (params.filename as string) || (body.filename as string) || "upload";
+      const safe = rawName.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const key = `${u.user_id}/${Date.now()}_${safe}`;
+      const { data, error } = await db.storage.from("compliance-docs").createSignedUploadUrl(key);
+      if (error) throwErr(error.message, 500);
+      return { url: data?.signedUrl, key: data?.path, token: data?.token };
+    }
+
+    if (path === "/uploads/confirm" && method === "POST") {
+      const u = requireAuth();
+      const key = body.key as string;
+      if (!key) throwErr("key required");
+      const ref = (body.disclosure_id as string) || null;
+      const doc_id = uid("doc");
+      await db.from("compliance_documents").insert({
+        doc_id, user_id: u.user_id, review_id: ref, disclosure_id: ref, bucket: "compliance-docs",
+        key, filename: (body.filename as string) || null, content_type: (body.content_type as string) || null,
+        created_at: new Date().toISOString(),
+      });
+      await audit({ user_id: u.user_id as string, action_type: "document_uploaded", entity: "compliance_documents", entity_id: doc_id, new_value: { key } });
+      return { ok: true, doc_id };
+    }
+
+    // ================= User's own compliance view =================
+    if (path === "/compliance/me" && method === "GET") {
+      const u = requireAuth();
+      const { data: rec } = await db.from("compliance_records").select("*").eq("user_id", u.user_id).maybeSingle();
+      const { data: review } = await db.from("second_chance_reviews").select("*").eq("user_id", u.user_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      const status = rec?.status || "active";
+      return { status, can_deliver: !["under_review", "suspended", "removed"].includes(status), review: review || null };
+    }
+
+    // ================= Admin: Second Chance Review Queue =================
+    if (path === "/admin/compliance/reviews" && method === "GET") {
+      requireRole("admin");
+      const { data: reviews } = await db.from("second_chance_reviews").select("*").order("created_at", { ascending: false });
+      const ids = [...new Set((reviews || []).map((r) => r.user_id))];
+      const { data: users } = ids.length ? await db.from("users").select("user_id,name,email").in("user_id", ids) : { data: [] };
+      const byId = Object.fromEntries((users || []).map((x) => [x.user_id, x]));
+      const docIds = (reviews || []).map((r) => r.review_id);
+      const { data: docs } = docIds.length ? await db.from("compliance_documents").select("doc_id,review_id,filename,key").in("review_id", docIds) : { data: [] };
+      const docsByReview: Record<string, unknown[]> = {};
+      for (const d of docs || []) (docsByReview[d.review_id] = docsByReview[d.review_id] || []).push(d);
+      return (reviews || []).map((r) => ({
+        ...r,
+        applicant_name: byId[r.user_id]?.name || null,
+        applicant_email: byId[r.user_id]?.email || null,
+        documents: docsByReview[r.review_id] || [],
+      }));
+    }
+
+    const reviewActionMatch = path.match(/^\/admin\/compliance\/reviews\/([^/]+)\/action$/);
+    if (reviewActionMatch && method === "POST") {
+      const adminUser = requireRole("admin");
+      const reviewId = reviewActionMatch[1];
+      const action = body.action as string;
+      const { data: rev } = await db.from("second_chance_reviews").select("*").eq("review_id", reviewId).maybeSingle();
+      if (!rev) throwErr("Review not found", 404);
+      const statusMap: Record<string, string> = {
+        approve: "approved", reject: "rejected", request_info: "more_info_requested",
+        escalate: "second_chance_review", suspend: "compliance_review", reopen: "pending_review",
+        add_note: rev.status,
+      };
+      const newStatus = statusMap[action];
+      if (!newStatus) throwErr("Invalid action");
+      const notes = Array.isArray(rev.notes) ? rev.notes : [];
+      if (body.note) notes.push({ reviewer_id: adminUser.user_id, note: body.note, action, at: new Date().toISOString() });
+      const decision = action === "approve" ? "approved" : action === "reject" ? "rejected" : rev.decision || null;
+      await db.from("second_chance_reviews").update({
+        status: newStatus, reviewer_id: adminUser.user_id, decision, notes, updated_at: new Date().toISOString(),
+      }).eq("review_id", reviewId);
+      if (action === "approve") await setComplianceStatus(rev.user_id, "active", "Approved via Second Chance Review");
+      else if (action === "reject") await setComplianceStatus(rev.user_id, "removed", "Rejected via Second Chance Review");
+      else if (action === "suspend") await setComplianceStatus(rev.user_id, "suspended", "Suspended pending review");
+      await audit({ user_id: rev.user_id, reviewer_id: adminUser.user_id as string, action_type: `review_${action}`, entity: "second_chance_reviews", entity_id: reviewId, previous_value: { status: rev.status }, new_value: { status: newStatus } });
+      return { status: newStatus, review_id: reviewId };
+    }
+
+    if (path === "/admin/compliance/records" && method === "GET") {
+      requireRole("admin");
+      const { data } = await db.from("compliance_records").select("*").order("updated_at", { ascending: false });
+      return data || [];
+    }
+
+    if (path === "/admin/compliance/audit" && method === "GET") {
+      requireRole("admin");
+      const { data } = await db.from("compliance_audit_log").select("*").order("ts", { ascending: false }).limit(200);
+      return data || [];
+    }
+
+    if (path === "/admin/compliance/investigations" && method === "GET") {
+      requireRole("admin");
+      const { data } = await db.from("compliance_investigations").select("*").order("created_at", { ascending: false });
+      return data || [];
+    }
+    if (path === "/admin/compliance/investigations" && method === "POST") {
+      const adminUser = requireRole("admin");
+      const investigation_id = uid("inv");
+      const now = new Date().toISOString();
+      await db.from("compliance_investigations").insert({
+        investigation_id, user_id: (body.user_id as string) || null, investigation_type: (body.investigation_type as string) || null,
+        report_date: now, investigator: adminUser.user_id, notes: (body.notes as string) || null,
+        status: "open", created_at: now, updated_at: now,
+      });
+      await audit({ user_id: (body.user_id as string) || undefined, reviewer_id: adminUser.user_id as string, action_type: "investigation_opened", entity: "compliance_investigations", entity_id: investigation_id, new_value: { status: "open" } });
+      return { investigation_id, status: "open" };
+    }
+
+    // Backward-compatible fallback for any other compliance/agreement subpaths
     if (path.startsWith("/admin/compliance") || path.startsWith("/agreements")) {
       return { ok: true, items: [], reviews: [] };
     }
