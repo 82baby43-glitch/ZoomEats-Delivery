@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 48" fill="none">
+  <rect width="48" height="48" rx="12" fill="#B6F127"/>
+  <text x="24" y="32" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="900" font-size="22" fill="#0A0A0A">Z</text>
+  <text x="60" y="32" font-family="system-ui,sans-serif" font-weight="800" font-size="22" fill="#F5F5F5">ZoomEats</text>
+</svg>

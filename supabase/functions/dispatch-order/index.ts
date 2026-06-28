@@ -1,48 +1,65 @@
 // Supabase Edge Function: dispatch-order
-// Triggered by Postgres pg_net.http_post on `orders` INSERT.
-// Proxies the order_id to the FastAPI backend's /api/dispatch/trigger endpoint.
+// Triggered by Postgres on paid orders. Runs dispatch logic directly (no FastAPI).
 
-// deno-lint-ignore-file no-explicit-any
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
-const FASTAPI_BASE_URL = Deno.env.get("FASTAPI_BASE_URL") ?? "";
-const DISPATCH_TRIGGER_TOKEN = Deno.env.get("DISPATCH_TRIGGER_TOKEN") ?? "";
-
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
-  if (!FASTAPI_BASE_URL || !DISPATCH_TRIGGER_TOKEN) {
-    console.error("Missing FASTAPI_BASE_URL or DISPATCH_TRIGGER_TOKEN secret");
-    return new Response(JSON.stringify({ error: "misconfigured" }), { status: 500 });
-  }
 
-  let payload: any;
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const db = createClient(supabaseUrl, serviceKey);
+
+  let payload: { record?: { order_id?: string }; order_id?: string };
   try {
     payload = await req.json();
   } catch {
     return new Response(JSON.stringify({ error: "bad_json" }), { status: 400 });
   }
 
-  // The trigger sends { record: <NEW row>, old_record: ..., type: 'INSERT'|'UPDATE' }
   const orderId = payload?.record?.order_id ?? payload?.order_id;
   if (!orderId) {
-    return new Response(JSON.stringify({ error: "missing_order_id", payload }), { status: 400 });
+    return new Response(JSON.stringify({ error: "missing_order_id" }), { status: 400 });
   }
 
-  try {
-    const r = await fetch(`${FASTAPI_BASE_URL}/api/dispatch/trigger/${orderId}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Dispatch-Token": DISPATCH_TRIGGER_TOKEN,
-      },
-      body: JSON.stringify({ source: "supabase_trigger" }),
-    });
-    const text = await r.text();
-    return new Response(text, { status: r.status, headers: { "Content-Type": "application/json" } });
-  } catch (e) {
-    console.error("dispatch proxy error:", e);
-    return new Response(JSON.stringify({ error: String(e) }), { status: 502 });
+  const { data: order } = await db.from("orders").select("*").eq("order_id", orderId).maybeSingle();
+  if (!order || order.payment_status !== "paid") {
+    return new Response(JSON.stringify({ skipped: true }), { status: 200 });
   }
+
+  // Find available internal driver
+  const { data: drivers } = await db
+    .from("drivers")
+    .select("*")
+    .eq("availability", true)
+    .order("workload", { ascending: true })
+    .limit(1);
+
+  const driver = drivers?.[0];
+  if (driver) {
+    await db.from("orders").update({
+      driver_id: driver.driver_id,
+      delivery_type: "internal",
+      status: "assigned_internal",
+      tracking_id: `trk_${orderId}`,
+    }).eq("order_id", orderId);
+
+    await db.from("drivers").update({ workload: (driver.workload || 0) + 1 }).eq("driver_id", driver.driver_id);
+
+    await db.from("deliveries").insert({
+      delivery_id: `dlv_${crypto.randomUUID().slice(0, 12)}`,
+      order_id: orderId,
+      provider: "internal",
+      tracking_id: `trk_${orderId}`,
+      status: "assigned",
+      driver_id: driver.driver_id,
+    });
+  }
+
+  return new Response(JSON.stringify({ ok: true, order_id: orderId, driver_id: driver?.driver_id }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
 });
