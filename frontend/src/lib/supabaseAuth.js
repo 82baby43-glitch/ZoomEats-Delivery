@@ -1,9 +1,18 @@
-import { supabase } from "./supabaseClient";
+import { supabase, isSupabaseConfigured } from "./supabaseClient";
 
 const callbackUrl = () => `${window.location.origin}/auth/callback`;
 
+function assertSupabaseConfigured() {
+  if (!isSupabaseConfigured) {
+    throw new Error(
+      "Supabase is not configured. Set REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_ANON_KEY."
+    );
+  }
+}
+
 /** Google OAuth — used by existing Sign in / Get started buttons. */
 export async function signInWithGoogle() {
+  assertSupabaseConfigured();
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: { redirectTo: callbackUrl() },

@@ -37,6 +37,14 @@ export function AuthProvider({ children }) {
       return;
     }
     checkAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, [checkAuth]);
 
   const logout = useCallback(async () => {

@@ -1,14 +1,10 @@
 """Alembic env configuration — loads sync DATABASE_URL + Base.metadata."""
-import os
 from logging.config import fileConfig
-from pathlib import Path
 
-from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-# Load .env from /app/backend/.env
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+from env import database_url  # loads backend + frontend .env on import
 
 # Import Base after env loaded so models register correctly
 from models import Base  # noqa: E402
@@ -16,7 +12,9 @@ from models import Base  # noqa: E402
 config = context.config
 
 # Use sync URL (psycopg2) — alembic is sync
-sync_url = os.environ["DATABASE_URL"]
+sync_url = database_url()
+if not sync_url:
+    raise RuntimeError("DATABASE_URL is not set — see backend/.env.example")
 config.set_main_option("sqlalchemy.url", sync_url)
 
 if config.config_file_name is not None:

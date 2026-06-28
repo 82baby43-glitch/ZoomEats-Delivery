@@ -12,7 +12,6 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Cookie, Header, Depends
-from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
@@ -31,12 +30,13 @@ from audit_exporter import start_background_snapshot, stop_background_snapshot, 
 from geocode import geocode_address
 from rate_limit import TokenBucket
 
+from env import supabase_anon_key, supabase_configured, supabase_url
+
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
-SUPABASE_URL = (os.environ.get("SUPABASE_URL") or os.environ.get("REACT_APP_SUPABASE_URL", "")).rstrip("/")
-SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("REACT_APP_SUPABASE_ANON_KEY", "")
+SUPABASE_URL = supabase_url()
+SUPABASE_ANON_KEY = supabase_anon_key()
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "sk_test_emergent")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")  # SEC-001: signature secret
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
@@ -87,8 +87,8 @@ if not CORS_ORIGINS and not CORS_ORIGIN_REGEX:
     logger.warning("SEC-002: No CORS_ORIGINS configured — credentialed CORS is DISABLED.")
 if not STRIPE_WEBHOOK_SECRET:
     logger.warning("SEC-001: STRIPE_WEBHOOK_SECRET not set — /api/webhook/stripe will reject all events (HTTP 503).")
-if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    logger.warning("Supabase auth not configured — SUPABASE_URL and SUPABASE_ANON_KEY are required for /api/auth/session.")
+if not supabase_configured():
+    logger.warning("Supabase auth not configured — set SUPABASE_URL + SUPABASE_ANON_KEY (or REACT_APP_* in frontend/.env).")
 
 app = FastAPI(title="ZoomEats API")
 api = APIRouter(prefix="/api")
@@ -1296,8 +1296,37 @@ async def admin_digest(user: User = Depends(require_role("admin")), db: AsyncSes
 
 # ---------- Health ----------
 @api.get("/")
-async def root():
-    return {"app": "ZoomEats", "db": "supabase-postgres", "status": "ok"}
+async def root(db: AsyncSession = Depends(get_db)):
+    db_ok = False
+    try:
+        await db.execute(select(func.count()).select_from(User))
+        db_ok = True
+    except Exception as exc:
+        logger.warning("Database health check failed: %s", exc)
+
+    supabase_ok = False
+    if supabase_configured():
+        try:
+            async with httpx.AsyncClient(timeout=5) as cx:
+                r = await cx.get(
+                    f"{SUPABASE_URL}/auth/v1/health",
+                    headers={"apikey": SUPABASE_ANON_KEY},
+                )
+            supabase_ok = r.status_code == 200
+        except Exception as exc:
+            logger.warning("Supabase health check failed: %s", exc)
+
+    return {
+        "app": "ZoomEats",
+        "db": "supabase-postgres",
+        "status": "ok" if db_ok else "degraded",
+        "supabase": {
+            "configured": supabase_configured(),
+            "auth_reachable": supabase_ok,
+            "url": SUPABASE_URL or None,
+        },
+        "postgres_connected": db_ok,
+    }
 
 
 # ---------- Seed data ----------

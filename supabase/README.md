@@ -32,6 +32,21 @@ INSERT INTO orders  ─▶  pg_trigger (after_order_insert)
                        Customer / restaurant / driver dashboards update instantly
 ```
 
+## Connect Supabase (local dev)
+
+1. Copy env templates:
+   ```bash
+   cp frontend/.env.example frontend/.env
+   cp backend/.env.example backend/.env
+   ```
+2. In [Supabase Dashboard → Project Settings → API](https://supabase.com/dashboard/project/njrrhckegbfqhwkqkzvw/settings/api), copy **Project URL** and **anon public** key into both `.env` files.
+3. In **Database → Connection string → Transaction pooler**, copy the URI into `backend/.env` as `DATABASE_URL`.
+4. Enable **Google** under Authentication → Providers and add `http://localhost:3000/auth/callback` to redirect URLs.
+5. Verify:
+   ```bash
+   python3 scripts/verify_supabase_connection.py
+   ```
+
 ## Files
 
 - **`functions/dispatch-order/index.ts`** — Edge Function that proxies the trigger payload to the FastAPI backend.

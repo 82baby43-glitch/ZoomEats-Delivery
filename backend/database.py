@@ -1,12 +1,15 @@
 """Async SQLAlchemy engine + session factory for Supabase Postgres."""
-import os
-from pathlib import Path
-from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
-load_dotenv(Path(__file__).parent / ".env")
+from env import database_url  # loads backend + frontend .env on import
 
-DATABASE_URL = os.environ["DATABASE_URL"]
+DATABASE_URL = database_url()
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL is not set. Copy backend/.env.example → backend/.env and paste "
+        "your Supabase Transaction pooler URI (Dashboard → Database → Connection string)."
+    )
+
 ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
 
 engine = create_async_engine(

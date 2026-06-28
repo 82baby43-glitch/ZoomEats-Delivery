@@ -36,12 +36,20 @@ VALUES ('test_session_token_001', 'test-user-001', NOW() + INTERVAL '7 days', NO
 
 ## Environment variables
 
-**Frontend**
+**Frontend** (`frontend/.env`)
 
 - `REACT_APP_SUPABASE_URL`
 - `REACT_APP_SUPABASE_ANON_KEY`
 
-**Backend**
+**Backend** (`backend/.env`)
 
-- `SUPABASE_URL` (or `REACT_APP_SUPABASE_URL`)
-- `SUPABASE_ANON_KEY` (or `REACT_APP_SUPABASE_ANON_KEY`)
+- `DATABASE_URL` — Transaction pooler URI (Dashboard → Database → Connection string)
+- `SUPABASE_URL` / `SUPABASE_ANON_KEY` (or reuse `REACT_APP_*` from `frontend/.env`)
+
+## Verify connection
+
+```bash
+python3 scripts/verify_supabase_connection.py
+```
+
+Expected: `OK Supabase Auth` + `OK Postgres` once `DATABASE_URL` is set.
