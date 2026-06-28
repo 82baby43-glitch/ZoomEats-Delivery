@@ -31,7 +31,8 @@ ADMIN_EMAILS=
 
 ```bash
 npm install
-cp .env.example .env.local
+cp .env.example .env.local   # add your Supabase URL + anon key
+npm run check:supabase         # verify connection
 npm run dev
 ```
 
