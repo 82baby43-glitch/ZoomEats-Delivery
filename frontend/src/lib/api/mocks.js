@@ -87,7 +87,7 @@ export function getMockResponse(url, { method = "GET", body = null } = {}) {
   }
 
   if (m === "POST" && pathname === "/api/auth/logout") return { ok: true };
-  if (m === "POST" && pathname === "/api/auth/session") return { ok: true };
+  if (m === "POST" && pathname === "/api/auth/session") return { ok: true, user: { user_id: "mock_user", email: "mock@example.com", name: "Mock User", role: "customer" } };
   if (m === "POST" && pathname === "/api/orders") return { id: "mock-order-1", status: "pending" };
   if (m === "POST" && pathname === "/api/checkout/session") {
     return { url: "https://checkout.stripe.com/mock-session", session_id: "mock_cs_1" };

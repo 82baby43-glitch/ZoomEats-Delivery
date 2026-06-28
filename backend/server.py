@@ -35,6 +35,8 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+SUPABASE_URL = (os.environ.get("SUPABASE_URL") or os.environ.get("REACT_APP_SUPABASE_URL", "")).rstrip("/")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("REACT_APP_SUPABASE_ANON_KEY", "")
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "sk_test_emergent")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")  # SEC-001: signature secret
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
@@ -85,6 +87,8 @@ if not CORS_ORIGINS and not CORS_ORIGIN_REGEX:
     logger.warning("SEC-002: No CORS_ORIGINS configured — credentialed CORS is DISABLED.")
 if not STRIPE_WEBHOOK_SECRET:
     logger.warning("SEC-001: STRIPE_WEBHOOK_SECRET not set — /api/webhook/stripe will reject all events (HTTP 503).")
+if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    logger.warning("Supabase auth not configured — SUPABASE_URL and SUPABASE_ANON_KEY are required for /api/auth/session.")
 
 app = FastAPI(title="ZoomEats API")
 api = APIRouter(prefix="/api")
@@ -264,26 +268,48 @@ def require_role(*roles: str):
     return dep
 
 
+async def verify_supabase_access_token(access_token: str) -> dict:
+    """Validate a Supabase Auth access token and return the user payload."""
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        raise HTTPException(status_code=503, detail="Supabase auth not configured")
+    async with httpx.AsyncClient(timeout=15) as cx:
+        r = await cx.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "apikey": SUPABASE_ANON_KEY,
+            },
+        )
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid access_token")
+    return r.json()
+
+
+def _supabase_profile(user_payload: dict) -> tuple[str, str, str]:
+    email = user_payload.get("email") or ""
+    if not email:
+        raise HTTPException(status_code=401, detail="Supabase user missing email")
+    meta = user_payload.get("user_metadata") or {}
+    name = (
+        meta.get("full_name")
+        or meta.get("name")
+        or user_payload.get("email", "").split("@")[0]
+    )
+    picture = meta.get("avatar_url") or meta.get("picture") or ""
+    return email, name, picture
+
+
 # ---------- Auth routes ----------
 @api.post("/auth/session")
 async def auth_session(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     body = await request.json()
-    session_id = body.get("session_id")
-    if not session_id:
-        raise HTTPException(status_code=400, detail="session_id required")
+    access_token = body.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="access_token required")
 
-    async with httpx.AsyncClient(timeout=15) as cx:
-        r = await cx.get(
-            "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-            headers={"X-Session-ID": session_id},
-        )
-    if r.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid session_id")
-    data = r.json()
-    email = data["email"]
-    name = data.get("name", email.split("@")[0])
-    picture = data.get("picture", "")
-    session_token = data["session_token"]
+    user_payload = await verify_supabase_access_token(access_token)
+    email, name, picture = _supabase_profile(user_payload)
+    session_token = f"sess_{uuid.uuid4().hex}"
 
     existing = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if existing:

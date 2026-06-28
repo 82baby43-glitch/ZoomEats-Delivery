@@ -1,5 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "@/lib/api";
+import { supabase } from "@/lib/supabaseClient";
+import { clearSessionCache, cleanupAllSubscriptions } from "@/lib/supabaseGateway";
+import { signOutSupabase, syncBackendSession } from "@/lib/supabaseAuth";
 
 const AuthContext = createContext(null);
 
@@ -12,6 +15,16 @@ export function AuthProvider({ children }) {
       const res = await api.get("/auth/me");
       setUser(res.data);
     } catch {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          const appUser = await syncBackendSession(api, session.access_token);
+          setUser(appUser);
+          return;
+        }
+      } catch {
+        // fall through
+      }
       setUser(null);
     } finally {
       setLoading(false);
@@ -19,8 +32,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    // CRITICAL: Skip /me check during OAuth callback so AuthCallback can establish session first.
-    if (window.location.hash?.includes("session_id=")) {
+    if (window.location.pathname === "/auth/callback") {
       setLoading(false);
       return;
     }
@@ -28,12 +40,18 @@ export function AuthProvider({ children }) {
   }, [checkAuth]);
 
   const logout = useCallback(async () => {
-    await api.post("/auth/logout");
+    try {
+      await api.post("/auth/logout");
+    } catch {
+      // continue local cleanup even if backend logout fails
+    }
+    await signOutSupabase();
+    clearSessionCache();
+    cleanupAllSubscriptions();
     setUser(null);
     window.location.href = "/";
   }, []);
 
-  // Memoize the context value to keep consumer renders stable.
   const value = useMemo(
     () => ({ user, setUser, loading, refresh: checkAuth, logout }),
     [user, loading, checkAuth, logout]
