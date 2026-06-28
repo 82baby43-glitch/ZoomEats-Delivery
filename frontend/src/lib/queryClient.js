@@ -1,23 +1,69 @@
-import React from "react";
 import { QueryClient } from "@tanstack/react-query";
+import { API_CONFIG } from "./api/config";
+import { isRetryableError, ApiError } from "./api/errors";
+import { request as gatewayRequest } from "./api/gateway";
+import { invalidate as invalidateGatewayCache } from "./api/gateway";
+
+/**
+ * Default query function — routes all TanStack Query reads through the global API gateway.
+ */
+export async function defaultQueryFn({ queryKey, signal }) {
+  const [path, params] = normalizeQueryKey(queryKey);
+  const search = params ? `?${new URLSearchParams(params).toString()}` : "";
+  const url = `${process.env.REACT_APP_BACKEND_URL}/api${path}${search}`;
+  return gatewayRequest(url, { method: "GET", signal });
+}
+
+function normalizeQueryKey(queryKey) {
+  if (typeof queryKey === "string") return [queryKey, null];
+  if (Array.isArray(queryKey)) {
+    const [path, params] = queryKey;
+    return [path, params || null];
+  }
+  return [String(queryKey), null];
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: Number(process.env.REACT_APP_QUERY_STALE_MS || 5000),
-      cacheTime: Number(process.env.REACT_APP_QUERY_CACHE_MS || 1000 * 60 * 5),
+      queryFn: defaultQueryFn,
+      staleTime: API_CONFIG.queryStaleMs,
+      gcTime: API_CONFIG.queryGcMs,
       retry: (failureCount, error) => {
-        // Only retry network/5xx/429 errors — don't retry auth/business errors
-        const status = error?.original?.status || error?.status || null;
-        if (!status) return failureCount < Number(process.env.REACT_APP_QUERY_MAX_RETRIES || 2);
-        if ([429, 500, 502, 503, 504].includes(status)) return failureCount < Number(process.env.REACT_APP_QUERY_MAX_RETRIES || 2);
+        const status = error?.status ?? error?.original?.status ?? null;
+        if (isRetryableError(error, status)) {
+          return failureCount < API_CONFIG.queryMaxRetries;
+        }
         return false;
       },
       refetchOnWindowFocus: true,
       refetchOnReconnect: true,
       refetchOnMount: false,
-    }
-  }
+      // TanStack Query handles in-flight deduplication automatically
+      structuralSharing: true,
+    },
+    mutations: {
+      retry: false,
+      onError: (error) => {
+        if (API_CONFIG.verboseLogging && error instanceof ApiError) {
+          console.debug("[queryClient] mutation error", error.code, error.message);
+        }
+      },
+    },
+  },
 });
+
+/**
+ * Invalidate both TanStack Query cache and gateway HTTP cache for a path pattern.
+ */
+export function invalidateAll(pathPattern) {
+  invalidateGatewayCache(pathPattern);
+  queryClient.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey?.[0];
+      return typeof key === "string" && key.includes(pathPattern);
+    },
+  });
+}
 
 export default queryClient;
