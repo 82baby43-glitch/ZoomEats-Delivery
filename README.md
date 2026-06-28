@@ -43,5 +43,7 @@ Auth callback URLs:
 ## Deploy
 
 1. Push to Vercel (auto-deploys Next.js)
-2. Deploy Edge Functions: `supabase functions deploy api dispatch-order`
-3. Apply migrations in Supabase SQL Editor (`supabase/migrations/`)
+2. Enable Google OAuth: Supabase Dashboard → Auth → Providers → Google (or `npm run auth:google`)
+   - Google Cloud redirect URI: `https://njrrhckegbfqhwkqkzvw.supabase.co/auth/v1/callback`
+3. Apply RLS migration: `npm run db:migrate` (needs `SUPABASE_ACCESS_TOKEN` or `DATABASE_URL` in `.env.local`)
+4. Deploy Edge Functions: `supabase functions deploy api dispatch-order`
