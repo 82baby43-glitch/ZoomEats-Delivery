@@ -83,6 +83,7 @@ Deno.serve(async (req) => {
           name: authUser.user_metadata?.full_name || email.split("@")[0],
           picture: authUser.user_metadata?.avatar_url || "",
           role,
+          created_at: new Date().toISOString(),
         };
         await db.from("users").upsert(newProfile);
         user = newProfile;
@@ -251,6 +252,7 @@ Deno.serve(async (req) => {
         status: "pending_payment",
         payment_status: "pending",
         price_hash: computePriceHash(repriced),
+        created_at: new Date().toISOString(),
       };
       const { data } = await db.from("orders").insert(order).select().single();
       return json(data);
@@ -336,7 +338,7 @@ Deno.serve(async (req) => {
         }).eq("driver_id", existing.driver_id);
         return json({ ok: true, driver_id: existing.driver_id, last_seen: now });
       }
-      const driver = { driver_id: uid("drv"), user_id: u.user_id, latitude: body.latitude, longitude: body.longitude, availability: true, workload: 0, last_seen: now };
+      const driver = { driver_id: uid("drv"), user_id: u.user_id, latitude: body.latitude, longitude: body.longitude, availability: true, workload: 0, last_seen: now, created_at: now };
       await db.from("drivers").insert(driver);
       return json({ ok: true, driver_id: driver.driver_id, last_seen: now });
     }
@@ -375,6 +377,7 @@ Deno.serve(async (req) => {
           amount: o.total,
           currency: "usd",
           payment_status: "initiated",
+          created_at: new Date().toISOString(),
         });
         await db.from("orders").update({ stripe_session_id: session_id }).eq("order_id", order_id);
         return json({ url: `${origin_url}/checkout/success?session_id=${session_id}`, session_id });
@@ -404,6 +407,7 @@ Deno.serve(async (req) => {
         amount: o.total,
         currency: "usd",
         payment_status: "initiated",
+        created_at: new Date().toISOString(),
       });
       await db.from("orders").update({ stripe_session_id: session.id }).eq("order_id", order_id);
       return json({ url: session.url, session_id: session.id });
@@ -476,9 +480,10 @@ Deno.serve(async (req) => {
         }
       }
 
+      const chatNow = new Date().toISOString();
       await db.from("chat_messages").insert([
-        { session_id, user_id: u.user_id, role: "user", text },
-        { session_id, user_id: u.user_id, role: "assistant", text: reply },
+        { session_id, user_id: u.user_id, role: "user", text, created_at: chatNow },
+        { session_id, user_id: u.user_id, role: "assistant", text: reply, created_at: chatNow },
       ]);
       return json({ reply, session_id });
     }
@@ -576,9 +581,10 @@ Deno.serve(async (req) => {
       const paid = (todaysOrders || []).filter((o) => o.payment_status === "paid");
       const gmv = paid.reduce((s, o) => s + (o.total || 0), 0);
       const { count: pending } = await db.from("restaurants").select("*", { count: "exact", head: true }).eq("approved", false);
+      const { count: newRestaurants } = await db.from("restaurants").select("*", { count: "exact", head: true }).gte("created_at", todayStart);
       return json({
         digest: `Today's pulse: ${todaysOrders?.length || 0} orders, $${gmv.toFixed(2)} GMV. ${pending || 0} restaurant(s) awaiting approval.`,
-        stats: { orders: todaysOrders?.length || 0, paid_orders: paid.length, gmv: Math.round(gmv * 100) / 100, pending_approvals: pending || 0 },
+        stats: { orders: todaysOrders?.length || 0, paid_orders: paid.length, gmv: Math.round(gmv * 100) / 100, pending_approvals: pending || 0, new_restaurants: newRestaurants || 0 },
       });
     }
     if (path.startsWith("/admin/compliance") || path.startsWith("/agreements")) {
