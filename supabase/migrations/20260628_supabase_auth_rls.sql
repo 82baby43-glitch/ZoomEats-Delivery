@@ -20,9 +20,9 @@ begin
     'customer',
     now()
   )
-  on conflict (email) do update set
-    user_id = excluded.user_id,
+  on conflict (user_id) do update set
     auth_id = excluded.auth_id,
+    email = excluded.email,
     name = excluded.name,
     picture = excluded.picture;
   return new;
@@ -46,8 +46,8 @@ grant select, insert, update on public.restaurants to authenticated;
 grant select, insert, update on public.drivers to authenticated;
 grant select on public.deliveries to authenticated;
 grant select, insert on public.chat_messages to authenticated;
-grant select on public.wallets to authenticated;
-grant select on public.wallet_transactions to authenticated;
+
+-- wallets tables are optional (not in legacy schema); skip if absent
 
 -- 3. Enable RLS
 alter table public.users enable row level security;
@@ -57,8 +57,6 @@ alter table public.orders enable row level security;
 alter table public.drivers enable row level security;
 alter table public.deliveries enable row level security;
 alter table public.chat_messages enable row level security;
-alter table public.wallets enable row level security;
-alter table public.wallet_transactions enable row level security;
 
 -- 4. Drop old deny-all policies if re-running
 drop policy if exists "public_read_restaurants" on public.restaurants;
