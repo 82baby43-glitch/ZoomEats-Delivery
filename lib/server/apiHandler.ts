@@ -448,14 +448,22 @@ export async function handleApiRequest(
       const session_id = checkoutStatusMatch[1];
       const { data: tx } = await db.from("payment_transactions").select("*").eq("session_id", session_id).maybeSingle();
 
-      if (!stripeKey) {
-        // Auto-mark paid in test mode
-        if (tx && tx.payment_status !== "paid") {
-          await db.from("payment_transactions").update({ payment_status: "paid" }).eq("session_id", session_id);
-          if (tx.order_id) {
-            await db.from("orders").update({ payment_status: "paid", status: "placed" }).eq("order_id", tx.order_id);
-          }
+      // Idempotently reconcile the order + transaction with a "paid" outcome.
+      const markPaid = async (stripeStatus?: string) => {
+        await db.from("payment_transactions").update({ payment_status: "paid", status: stripeStatus || "complete" }).eq("session_id", session_id);
+        let orderId = tx?.order_id as string | undefined;
+        if (!orderId) {
+          const { data: ord } = await db.from("orders").select("order_id").eq("stripe_session_id", session_id).maybeSingle();
+          orderId = ord?.order_id;
         }
+        if (orderId) {
+          await db.from("orders").update({ payment_status: "paid", status: "placed" }).eq("order_id", orderId);
+        }
+      };
+
+      if (!stripeKey) {
+        // Auto-mark paid in soft-pending (no-Stripe) mode
+        await markPaid("complete");
         return { status: "complete", payment_status: "paid", amount_total: Math.round((tx?.amount || 0) * 100), currency: "usd" };
       }
 
@@ -464,11 +472,8 @@ export async function handleApiRequest(
           headers: { Authorization: `Bearer ${stripeKey}` },
         });
         const status = await r.json();
-        if (tx && tx.payment_status !== "paid" && status.payment_status === "paid") {
-          await db.from("payment_transactions").update({ payment_status: "paid", status: status.status }).eq("session_id", session_id);
-          if (tx.order_id) {
-            await db.from("orders").update({ payment_status: "paid", status: "placed" }).eq("order_id", tx.order_id);
-          }
+        if (status.payment_status === "paid") {
+          await markPaid(status.status);
         }
         return { status: status.status, payment_status: status.payment_status, amount_total: status.amount_total, currency: status.currency };
       } catch {
