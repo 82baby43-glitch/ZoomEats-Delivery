@@ -42,7 +42,9 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const stripeKey = Deno.env.get("STRIPE_API_KEY") || "";
+  // Standardized on the official Stripe integration variable (STRIPE_SECRET_KEY);
+  // STRIPE_API_KEY kept only as a legacy fallback.
+  const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") || Deno.env.get("STRIPE_API_KEY") || "";
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
   const adminEmails = (Deno.env.get("ADMIN_EMAILS") || "")
     .split(",")

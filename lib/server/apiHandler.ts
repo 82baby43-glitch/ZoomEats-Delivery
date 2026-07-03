@@ -39,7 +39,9 @@ export async function handleApiRequest(
     userAgent?: string;
   }
 ) {
-  const stripeKey = process.env.STRIPE_API_KEY || "";
+  // Standardized on the official Vercel Stripe integration variable (STRIPE_SECRET_KEY);
+  // STRIPE_API_KEY kept only as a legacy fallback.
+  const stripeKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_API_KEY || "";
   const anthropicKey = process.env.ANTHROPIC_API_KEY || "";
   const adminEmails = (process.env.ADMIN_EMAILS || process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
     .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
