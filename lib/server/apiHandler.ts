@@ -457,7 +457,11 @@ export async function handleApiRequest(
           orderId = ord?.order_id;
         }
         if (orderId) {
-          await db.from("orders").update({ payment_status: "paid", status: "placed" }).eq("order_id", orderId);
+          // Record the payment first (always allowed), then advance the order status
+          // separately so a DB status state-machine can't block payment recording.
+          await db.from("orders").update({ payment_status: "paid" }).eq("order_id", orderId);
+          const { error: stErr } = await db.from("orders").update({ status: "placed" }).eq("order_id", orderId);
+          if (stErr) console.warn("[checkout] order status could not advance to 'placed':", stErr.message);
         }
       };
 
