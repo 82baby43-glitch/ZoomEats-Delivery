@@ -1,11 +1,19 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+/** Placeholders allow `next build` when env vars are not injected (CI/Vercel preview setup). */
+const PLACEHOLDER_URL = "https://placeholder.supabase.co";
+const PLACEHOLDER_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder";
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    "Missing Supabase env vars. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local"
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || PLACEHOLDER_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || PLACEHOLDER_ANON_KEY;
+
+export const isSupabaseConfigured = Boolean(
+  process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
+
+if (!isSupabaseConfigured && typeof window !== "undefined") {
+  console.warn(
+    "[ZoomEats] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY — auth and data will not work."
   );
 }
 
@@ -25,6 +33,14 @@ export const SUPABASE_ANON_KEY = supabaseAnonKey;
 
 /** Quick connectivity check — Auth API + optional table probe */
 export async function checkSupabaseConnection() {
+  if (!isSupabaseConfigured) {
+    return {
+      ok: false,
+      step: "config",
+      error: "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    };
+  }
+
   const { error: authError } = await supabase.auth.getSession();
   if (authError) {
     return { ok: false, step: "auth", error: authError.message };
