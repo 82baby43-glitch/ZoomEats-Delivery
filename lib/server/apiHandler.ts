@@ -351,6 +351,7 @@ export async function handleApiRequest(
 
       if (!stripeKey) {
         const session_id = uid("cs_test");
+        const now = new Date().toISOString();
         await db.from("payment_transactions").insert({
           session_id,
           order_id,
@@ -358,6 +359,7 @@ export async function handleApiRequest(
           amount: o.total,
           currency: "usd",
           payment_status: "initiated",
+          created_at: now,
         });
         await db.from("orders").update({ stripe_session_id: session_id }).eq("order_id", order_id);
         return { url: `${origin_url}/checkout/success?session_id=${session_id}`, session_id };
@@ -380,14 +382,17 @@ export async function handleApiRequest(
       });
       const session = await stripeRes.json();
       if (!stripeRes.ok) throwErr(session.error?.message || "Stripe error", 500);
-      await db.from("payment_transactions").insert({
+      const now = new Date().toISOString();
+      const { error: txError } = await db.from("payment_transactions").insert({
         session_id: session.id,
         order_id,
         user_id: u.user_id,
         amount: o.total,
         currency: "usd",
         payment_status: "initiated",
+        created_at: now,
       });
+      if (txError) throwErr(txError.message, 500);
       await db.from("orders").update({ stripe_session_id: session.id }).eq("order_id", order_id);
       return { url: session.url, session_id: session.id };
     }
@@ -398,17 +403,24 @@ export async function handleApiRequest(
       const session_id = checkoutStatusMatch[1];
       const { data: tx } = await db.from("payment_transactions").select("*").eq("session_id", session_id).maybeSingle();
 
-      let orderPaymentStatus = tx?.payment_status ?? "pending";
+      let orderRow: Record<string, unknown> | null = null;
       if (tx?.order_id) {
-        const { data: orderRow } = await db.from("orders").select("payment_status").eq("order_id", tx.order_id).maybeSingle();
-        if (orderRow?.payment_status) orderPaymentStatus = orderRow.payment_status;
+        const { data } = await db.from("orders").select("*").eq("order_id", tx.order_id).maybeSingle();
+        orderRow = data;
       }
+      if (!orderRow) {
+        const { data } = await db.from("orders").select("*").eq("stripe_session_id", session_id).maybeSingle();
+        orderRow = data;
+      }
+
+      let orderPaymentStatus = (orderRow?.payment_status as string) ?? tx?.payment_status ?? "pending";
+      const amount = (orderRow?.total as number) ?? tx?.amount ?? 0;
 
       if (orderPaymentStatus === "paid") {
         return {
           status: "complete",
           payment_status: "paid",
-          amount_total: Math.round((tx?.amount || 0) * 100),
+          amount_total: Math.round(amount * 100),
           currency: "usd",
         };
       }
@@ -417,7 +429,7 @@ export async function handleApiRequest(
         return {
           status: "open",
           payment_status: orderPaymentStatus,
-          amount_total: Math.round((tx?.amount || 0) * 100),
+          amount_total: Math.round(amount * 100),
           currency: "usd",
         };
       }
@@ -427,18 +439,56 @@ export async function handleApiRequest(
           headers: { Authorization: `Bearer ${stripeKey}` },
         });
         const stripeSession = await r.json();
+
+        if (stripeSession.payment_status === "paid" && orderRow && orderPaymentStatus !== "paid") {
+          const now = new Date().toISOString();
+          const paymentIntentId =
+            typeof stripeSession.payment_intent === "string" ? stripeSession.payment_intent : null;
+          await db
+            .from("orders")
+            .update({
+              payment_status: "paid",
+              order_status: "confirmed",
+              status: "placed",
+              confirmed_at: now,
+              updated_at: now,
+              ...(paymentIntentId ? { stripe_payment_intent_id: paymentIntentId } : {}),
+            })
+            .eq("order_id", orderRow.order_id)
+            .neq("payment_status", "paid");
+
+          if (!tx) {
+            await db.from("payment_transactions").insert({
+              session_id,
+              order_id: orderRow.order_id,
+              user_id: orderRow.customer_id,
+              amount,
+              currency: "usd",
+              payment_status: "paid",
+              status: "complete",
+              created_at: now,
+            });
+          } else {
+            await db
+              .from("payment_transactions")
+              .update({ payment_status: "paid", status: "complete" })
+              .eq("session_id", session_id);
+          }
+          orderPaymentStatus = "paid";
+        }
+
         return {
           status: stripeSession.status ?? "open",
           payment_status: orderPaymentStatus,
           stripe_payment_status: stripeSession.payment_status,
-          amount_total: stripeSession.amount_total ?? Math.round((tx?.amount || 0) * 100),
+          amount_total: stripeSession.amount_total ?? Math.round(amount * 100),
           currency: stripeSession.currency ?? "usd",
         };
       } catch {
         return {
           status: "open",
           payment_status: orderPaymentStatus,
-          amount_total: Math.round((tx?.amount || 0) * 100),
+          amount_total: Math.round(amount * 100),
           currency: "usd",
           soft_error: true,
         };
