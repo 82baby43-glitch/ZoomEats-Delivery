@@ -3,12 +3,15 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { api } from "@/lib/api";
+import { safeGet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { signInWithGoogle } from "@/lib/auth";
 import Header from "@/components/Header";
 import { Search, Star, Clock, Sparkles } from "lucide-react";
 import Chatbot from "@/components/Chatbot";
+import { sanitizeRestaurants } from "@/lib/safeData";
+import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
+import { logClientError } from "@/lib/clientErrorLog";
 
 const startLogin = () => {
   signInWithGoogle().catch((e) => console.error("[auth] login failed:", e));
@@ -20,15 +23,23 @@ const HERO_IMG =
 export default function Landing() {
   const [restaurants, setRestaurants] = useState([]);
   const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const { user } = useAuth();
 
   useEffect(() => {
     (async () => {
+      setLoading(true);
       try {
-        const res = await api.get("/restaurants", { params: q ? { q } : {} });
-        setRestaurants(res.data);
+        const data = await safeGet("/restaurants", [], { params: q ? { q } : {} });
+        setRestaurants(sanitizeRestaurants(data));
+        setError(false);
       } catch (e) {
-        console.warn("[landing] failed to load restaurants:", e);
+        logClientError("landing.restaurants", e);
+        setError(true);
+        setRestaurants([]);
+      } finally {
+        setLoading(false);
       }
     })();
   }, [q]);
@@ -108,10 +119,17 @@ export default function Landing() {
           </div>
         </div>
 
+        {loading && <LoadingSkeleton label="Loading restaurants…" rows={3} />}
+
+        {error && !loading && (
+          <ErrorState title="Could not load restaurants" description="Please check your connection and try again." />
+        )}
+
+        {!loading && !error && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {restaurants.map((r, i) => (
             <motion.div
-              key={r.restaurant_id}
+              key={r.restaurant_id || i}
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: i * 0.06 }}
@@ -122,17 +140,21 @@ export default function Landing() {
                 data-testid={`restaurant-card-${r.restaurant_id}`}
               >
                 <div className="aspect-video overflow-hidden">
-                  <img src={r.image_url} alt={r.name} className="w-full h-full object-cover" />
+                  {r.image_url ? (
+                    <img src={r.image_url} alt={r.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full" style={{ background: "var(--surface-2)" }} />
+                  )}
                 </div>
                 <div className="p-5">
-                  <div className="label-eyebrow">{r.cuisine}</div>
+                  <div className="label-eyebrow">{r.cuisine || "—"}</div>
                   <h3 className="font-display text-xl font-bold mt-1">{r.name}</h3>
                   <p className="text-sm mt-1 line-clamp-2" style={{ color: "var(--muted)" }}>
-                    {r.description}
+                    {r.description || ""}
                   </p>
                   <div className="mt-4 flex items-center gap-3 text-sm">
-                    <span className="badge"><Star size={14} /> {r.rating}</span>
-                    <span className="badge"><Clock size={14} /> {r.delivery_time_min} min</span>
+                    <span className="badge"><Star size={14} /> {r.rating ?? "—"}</span>
+                    <span className="badge"><Clock size={14} /> {r.delivery_time_min ?? "—"} min</span>
                   </div>
                 </div>
               </Link>
@@ -144,6 +166,7 @@ export default function Landing() {
             </div>
           )}
         </div>
+        )}
       </section>
 
       {user && <Chatbot />}

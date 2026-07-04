@@ -4,6 +4,9 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import { MapPin, Power, Truck } from "lucide-react";
+import { formatMoney, sanitizeActiveDispatch, sanitizeOrders, sanitizeWallet } from "@/lib/safeData";
+import { logClientError } from "@/lib/clientErrorLog";
+import { ErrorState } from "@/components/ui/PageStates";
 
 const HEARTBEAT_MS = 8000;
 
@@ -23,14 +26,21 @@ function useGeolocation(active) {
 }
 
 export default function DeliveryDashboard() {
-  const [online, setOnline] = useState(() => localStorage.getItem("zoomeats_driver_online") === "1");
+  const [online, setOnline] = useState(false);
   const [available, setAvailable] = useState([]);
   const [mine, setMine] = useState([]);
   const [activeDispatch, setActiveDispatch] = useState({ driver: null, orders: [] });
   const [wallet, setWallet] = useState({ available: 0.0, pending: 0.0 });
   const [payoutAmt, setPayoutAmt] = useState(0.0);
+  const [loadError, setLoadError] = useState(false);
   const { coords, err: geoErr } = useGeolocation(online);
   const lastSentRef = useRef(0);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setOnline(localStorage.getItem("zoomeats_driver_online") === "1");
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -39,17 +49,19 @@ export default function DeliveryDashboard() {
         api.get("/delivery/my"),
         api.get("/driver/active"),
       ]);
-      setAvailable(a.data);
-      setMine(m.data);
-      setActiveDispatch(act.data);
+      setAvailable(sanitizeOrders(a.data));
+      setMine(sanitizeOrders(m.data));
+      setActiveDispatch(sanitizeActiveDispatch(act.data));
+      setLoadError(false);
       try {
         const wb = await getWalletBalance();
-        setWallet(wb.data);
+        setWallet(sanitizeWallet(wb.data));
       } catch (e) {
-        console.warn("wallet load failed", e);
+        logClientError("delivery.wallet", e);
       }
     } catch (e) {
-      console.warn("[delivery] refresh failed:", e);
+      logClientError("delivery.refresh", e);
+      setLoadError(true);
     }
   }, []);
 
@@ -63,11 +75,13 @@ export default function DeliveryDashboard() {
   const toggleOnline = async () => {
     const next = !online;
     setOnline(next);
-    localStorage.setItem("zoomeats_driver_online", next ? "1" : "0");
+    if (typeof window !== "undefined") {
+      localStorage.setItem("zoomeats_driver_online", next ? "1" : "0");
+    }
     try {
       await api.post("/driver/availability", { available: next });
     } catch (e) {
-      console.warn("[delivery] availability toggle failed:", e);
+      logClientError("delivery.toggleOnline", e);
     }
   };
 
@@ -90,9 +104,16 @@ export default function DeliveryDashboard() {
   }, [online, coords]);
 
   const action = async (oid, act) => {
-    await api.post(`/delivery/orders/${oid}/${act}`);
-    await refresh();
+    if (!oid) return;
+    try {
+      await api.post(`/delivery/orders/${oid}/${act}`);
+      await refresh();
+    } catch (e) {
+      logClientError("delivery.action", e, { oid, act });
+    }
   };
+
+  const dispatchOrders = activeDispatch?.orders ?? [];
 
   return (
     <div>
@@ -128,6 +149,12 @@ export default function DeliveryDashboard() {
           </button>
         </div>
 
+        {loadError && (
+          <div className="mt-4">
+            <ErrorState title="Could not refresh deliveries" onRetry={refresh} />
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
           <div className="card p-5">
             <div className="label-eyebrow">Active deliveries</div>
@@ -135,8 +162,8 @@ export default function DeliveryDashboard() {
           </div>
           <div className="card p-5">
             <div className="label-eyebrow">Wallet</div>
-            <div className="font-display text-3xl font-black mt-1">${wallet.available.toFixed(2)}</div>
-            <div className="text-sm" style={{ color: "var(--muted)" }}>Pending: ${wallet.pending.toFixed(2)}</div>
+            <div className="font-display text-3xl font-black mt-1">${formatMoney(wallet.available)}</div>
+            <div className="text-sm" style={{ color: "var(--muted)" }}>Pending: ${formatMoney(wallet.pending)}</div>
             <div className="mt-3 flex gap-2">
               <input className="input-field" type="number" step="0.01" value={payoutAmt} onChange={(e) => setPayoutAmt(e.target.value)} style={{ width: 120 }} />
               <button className="btn-primary" onClick={async () => {
@@ -162,20 +189,20 @@ export default function DeliveryDashboard() {
         </div>
 
         {/* Auto-dispatched (internal) orders */}
-        {activeDispatch.orders.length > 0 && (
+        {dispatchOrders.length > 0 && (
           <div className="mt-10">
             <h2 className="font-display text-2xl font-bold mb-4 flex items-center gap-2">
               <Truck size={20} style={{ color: "var(--primary)" }} /> Dispatched to you
             </h2>
             <div className="space-y-3">
-              {activeDispatch.orders.map((o) => (
+              {dispatchOrders.map((o) => (
                 <div key={o.order_id} className="card p-5 flex items-center justify-between" style={{ borderColor: "var(--primary)" }} data-testid={`dispatched-${o.order_id}`}>
                   <div>
-                    <div className="font-bold">{o.restaurant_name}</div>
+                    <div className="font-bold">{o.restaurant_name ?? "Unknown Restaurant"}</div>
                     <div className="text-sm flex items-center gap-1" style={{ color: "var(--muted)" }}>
-                      <MapPin size={12} /> {o.address}
+                      <MapPin size={12} /> {o.address || "—"}
                     </div>
-                    <span className="badge mt-2">{o.status}</span>
+                    <span className="badge mt-2">{o.status ?? "unknown"}</span>
                   </div>
                   {o.status === "assigned_internal" && (
                     <button className="btn-primary !py-2" onClick={() => action(o.order_id, "accept")} data-testid={`pickup-${o.order_id}`}>
@@ -204,8 +231,8 @@ export default function DeliveryDashboard() {
               {available.map((o) => (
                 <div key={o.order_id} className="card p-5 flex items-center justify-between" data-testid={`avail-${o.order_id}`}>
                   <div>
-                    <div className="font-bold">{o.restaurant_name}</div>
-                    <div className="text-sm" style={{ color: "var(--muted)" }}>To: {o.address} · ${o.total.toFixed(2)}</div>
+                    <div className="font-bold">{o.restaurant_name ?? "Unknown Restaurant"}</div>
+                    <div className="text-sm" style={{ color: "var(--muted)" }}>To: {o.address || "—"} · ${formatMoney(o.total)}</div>
                   </div>
                   <button className="btn-primary !py-2" onClick={() => action(o.order_id, "accept")} data-testid={`accept-${o.order_id}`}>
                     Accept pickup
@@ -225,9 +252,9 @@ export default function DeliveryDashboard() {
               {mine.map((o) => (
                 <div key={o.order_id} className="card p-5 flex items-center justify-between" data-testid={`mine-${o.order_id}`}>
                   <div>
-                    <div className="font-bold">{o.restaurant_name}</div>
-                    <div className="text-sm" style={{ color: "var(--muted)" }}>{o.address}</div>
-                    <div className="badge mt-2">{o.status}</div>
+                    <div className="font-bold">{o.restaurant_name ?? "Unknown Restaurant"}</div>
+                    <div className="text-sm" style={{ color: "var(--muted)" }}>{o.address || "—"}</div>
+                    <div className="badge mt-2">{o.status ?? "unknown"}</div>
                   </div>
                   {o.status === "picked_up" && (
                     <button className="btn-primary !py-2" onClick={() => action(o.order_id, "deliver")} data-testid={`deliver-mine-${o.order_id}`}>
