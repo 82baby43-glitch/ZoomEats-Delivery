@@ -13,8 +13,9 @@ export default function AuthCallbackPage() {
 
     (async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) throw error;
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        const session = sessionData?.session;
 
         if (!session) {
           const hashParams = new URLSearchParams(window.location.hash.slice(1));
@@ -30,7 +31,9 @@ export default function AuthCallbackPage() {
           }
         }
 
-        const { data: { session: confirmed } } = await supabase.auth.getSession();
+        const { data: confirmedData, error: confirmedError } = await supabase.auth.getSession();
+        if (confirmedError) throw confirmedError;
+        const confirmed = confirmedData?.session;
         if (!confirmed) {
           router.replace("/?error=auth_failed");
           return;

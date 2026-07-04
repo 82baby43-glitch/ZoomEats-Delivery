@@ -24,15 +24,20 @@ export default function DisclosureForm() {
         explanation,
       };
       const r = await api.post("/agreements/driver/disclosure", payload);
-      const review_id = r.data.review_id;
+      const review_id = r?.data?.review_id;
+      if (!review_id) {
+        alert("Submit failed — no review id returned");
+        return;
+      }
       if (file) {
-        // presign via query params
         const pres = await api.post(`/uploads/presign?filename=${encodeURIComponent(file.name)}&content_type=${encodeURIComponent(file.type)}`);
-        const url = pres.data.url;
-        // upload via fetch
+        const url = pres?.data?.url;
+        if (!url) {
+          alert("Upload setup failed");
+          return;
+        }
         await fetch(url, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
-        // confirm
-        await api.post("/uploads/confirm", { disclosure_id: review_id, key: pres.data.key });
+        await api.post("/uploads/confirm", { disclosure_id: review_id, key: pres?.data?.key ?? "" });
       }
       alert("Disclosure submitted; review id: " + review_id);
     } catch (e) {

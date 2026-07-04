@@ -1,56 +1,45 @@
-import { supabase } from "../supabaseClient";
-import { safeData } from "../safeData";
-import { logClientError } from "../clientErrorLog";
+import { supabase, isSupabaseConfigured, SUPABASE_URL, SUPABASE_ANON_KEY } from "../supabaseClient";
+import { safeAccessObject, safeData } from "../safeData";
 
 async function getAccessToken() {
   try {
     const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? null;
+    return data?.session?.access_token ?? null;
   } catch {
     return null;
   }
 }
 
-const CACHE_TTL_MS = 3000;
-const DEDUPE_TTL_MS = 5000;
+type ApiErrorBody = { error?: string; status?: number };
 
-type CacheEntry = { data: unknown; expires: number };
-const responseCache = new Map<string, CacheEntry>();
-const inflightRequests = new Map<string, Promise<unknown>>();
-const sessionFetchKeys = new Set<string>();
-
-function buildRequestKey(path: string, method: string, body?: unknown, params?: Record<string, string>) {
-  return JSON.stringify({ path, method, body: body ?? null, params: params ?? null });
+function readApiError(data: unknown): string | null {
+  const body = safeAccessObject<ApiErrorBody>(data, {});
+  return body?.error ?? null;
 }
 
-function isCacheableGet(path: string) {
-  return (
-    path.startsWith("/checkout/status/") ||
-    path === "/orders/my" ||
-    path.startsWith("/admin/") ||
-    path.startsWith("/vendor/") ||
-    path.startsWith("/delivery/") ||
-    path.startsWith("/orders/") ||
-    path === "/restaurants" ||
-    path.startsWith("/restaurants/")
-  );
-}
-
-function getCached(key: string) {
-  const entry = responseCache.get(key);
-  if (!entry) return null;
-  if (entry.expires <= Date.now()) {
-    responseCache.delete(key);
+function parseApiResponse(res: Response, data: unknown) {
+  if (data == null) {
+    if (!res.ok) {
+      throw Object.assign(new Error(res.statusText || "Request failed"), { status: res.status });
+    }
     return null;
   }
-  return entry.data;
+
+  const apiError = readApiError(data);
+  if (!res.ok || apiError) {
+    const body = safeAccessObject<ApiErrorBody>(data, {});
+    const err = new Error(apiError || res.statusText || "Request failed") as Error & { status?: number };
+    err.status = body.status ?? res.status;
+    throw err;
+  }
+
+  return data;
 }
 
-function setCached(key: string, data: unknown, ttlMs: number) {
-  responseCache.set(key, { data, expires: Date.now() + ttlMs });
-}
-
-/** Next.js API route (service role on server) — works before RLS migration / without Edge Functions */
+/**
+ * Prefer Supabase Edge `api` — Stripe secrets live there.
+ * Fall back to Next.js `/api/backend` when Supabase is not configured (local dev).
+ */
 async function invokeBackendApi(
   path: string,
   method: string,
@@ -58,67 +47,36 @@ async function invokeBackendApi(
   params?: Record<string, string>
 ) {
   const token = await getAccessToken();
+  const payload = JSON.stringify({ path, method, body, params });
+
+  if (isSupabaseConfigured) {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/api`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${token || SUPABASE_ANON_KEY}`,
+      },
+      body: payload,
+    });
+    const data = await res.json().catch(() => null);
+    return parseApiResponse(res, data);
+  }
+
   const res = await fetch("/api/backend", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ path, method, body, params }),
+    body: payload,
   });
-  let data: unknown;
-  try {
-    data = await res.json();
-  } catch {
-    throw Object.assign(new Error("Invalid server response"), { status: res.status });
-  }
-  const errBody = data as { error?: string; status?: number };
-  if (!res.ok || errBody.error) {
-    const err = new Error(errBody.error || res.statusText) as Error & { status?: number };
-    err.status = errBody.status ?? res.status;
-    throw err;
-  }
-  return data;
+  const data = await res.json().catch(() => null);
+  return parseApiResponse(res, data);
 }
 
 async function request(path: string, method: string, body?: unknown, params?: Record<string, string>) {
-  const key = buildRequestKey(path, method, body, params);
-  const cacheable = method === "GET" && isCacheableGet(path);
-
-  if (path.startsWith("/checkout/status/")) {
-    const sessionId = path.split("/").pop() || "";
-    const sessionKey = `session:${sessionId}`;
-    if (sessionFetchKeys.has(sessionKey) && cacheable) {
-      const cached = getCached(key);
-      if (cached !== null) return cached;
-    }
-    sessionFetchKeys.add(sessionKey);
-    setTimeout(() => sessionFetchKeys.delete(sessionKey), DEDUPE_TTL_MS);
-  }
-
-  if (cacheable) {
-    const cached = getCached(key);
-    if (cached !== null) return cached;
-  }
-
-  const inflight = inflightRequests.get(key);
-  if (inflight) return inflight;
-
-  const promise = invokeBackendApi(path, method, body, params)
-    .then((data) => {
-      if (cacheable) setCached(key, data, CACHE_TTL_MS);
-      return data;
-    })
-    .catch((e) => {
-      logClientError("api.request", e, { path, method });
-      throw e;
-    })
-    .finally(() => {
-      setTimeout(() => inflightRequests.delete(key), DEDUPE_TTL_MS);
-    });
-
-  inflightRequests.set(key, promise);
-  return promise;
+  return invokeBackendApi(path, method, body, params);
 }
 
 export const api = {
@@ -136,7 +94,6 @@ export const api = {
   }),
 };
 
-/** Safe GET — returns fallback on any failure, never throws. */
 export async function safeGet<T>(
   path: string,
   fallback: T,
@@ -144,8 +101,23 @@ export async function safeGet<T>(
 ): Promise<T> {
   try {
     const r = await api.get(path, opts);
-    return safeData(r.data, fallback);
-  } catch {
+    return safeData(r?.data, fallback);
+  } catch (e) {
+    console.error("[api] safeGet failed:", path, e);
+    return fallback;
+  }
+}
+
+export async function safePost<T>(
+  path: string,
+  body: unknown,
+  fallback: T
+): Promise<T> {
+  try {
+    const r = await api.post(path, body);
+    return safeData(r?.data, fallback);
+  } catch (e) {
+    console.error("[api] safePost failed:", path, e);
     return fallback;
   }
 }
@@ -153,6 +125,13 @@ export async function safeGet<T>(
 export function getApiErrorMessage(error: unknown, fallback = "Something went wrong"): string {
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+export { safeAccess, safeAccessObject } from "../safeData";
+
+/** Extract `.data` from an API response with fallback. */
+export function apiData<T>(response: { data?: T | null } | null | undefined, fallback: T): T {
+  return safeData(response?.data, fallback);
 }
 
 export const getWalletBalance = () => api.get("/wallet/balance");

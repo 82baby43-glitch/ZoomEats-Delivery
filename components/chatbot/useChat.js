@@ -14,7 +14,8 @@ export function useChat(open) {
     (async () => {
       try {
         const r = await api.get("/chat/history");
-        setMsgs(r.data.length ? r.data.map((m) => ({ role: m.role, text: m.text })) : SEED);
+        const history = Array.isArray(r?.data) ? r.data : [];
+        setMsgs(history.length ? history.map((m) => ({ role: m?.role ?? "assistant", text: m?.text ?? "" })) : SEED);
       } catch (e) {
         console.warn("[chat] history load failed:", e);
         setMsgs(SEED);
@@ -28,7 +29,7 @@ export function useChat(open) {
     setBusy(true);
     try {
       const r = await api.post("/chat", { text });
-      setMsgs((m) => [...m, { role: "assistant", text: r.data.reply }]);
+      setMsgs((m) => [...m, { role: "assistant", text: r?.data?.reply ?? "I had trouble responding. Try again?" }]);
     } catch (e) {
       console.warn("[chat] send failed:", e);
       setMsgs((m) => [...m, { role: "assistant", text: "I had trouble responding. Try again?" }]);

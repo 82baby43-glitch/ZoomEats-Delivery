@@ -1,5 +1,18 @@
 /** Universal safe wrapper — never pass raw API data into components. */
 
+/** Null-safe access — returns fallback when obj is null/undefined. */
+export function safeAccess<T>(obj: T | null | undefined, fallback: T): T {
+  return obj ?? fallback;
+}
+
+/** Object-only safe access (rejects arrays / non-objects). */
+export function safeAccessObject<T extends Record<string, unknown>>(obj: unknown, fallback: T = {} as T): T {
+  if (obj == null || typeof obj !== "object" || Array.isArray(obj)) {
+    return fallback;
+  }
+  return obj as T;
+}
+
 export function safeData<T>(data: unknown, fallback: T): T {
   if (data == null) return fallback;
   if (Array.isArray(fallback)) return (Array.isArray(data) ? data : fallback) as T;

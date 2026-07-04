@@ -35,13 +35,13 @@ export default function Cart() {
         address,
         notes,
       });
-      const order = orderRes.data;
+      const order = orderRes?.data;
       if (!order?.order_id) throw new Error("Invalid order response");
       const checkout = await api.post("/checkout/session", {
         order_id: order.order_id,
         origin_url: typeof window !== "undefined" ? window.location.origin : "",
       });
-      if (!checkout.data?.url) throw new Error("Could not start checkout");
+      if (!checkout?.data?.url) throw new Error("Could not start checkout");
       clear();
       if (typeof window !== "undefined") window.location.href = checkout.data.url;
     } catch (e) {

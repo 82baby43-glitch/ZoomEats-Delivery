@@ -14,7 +14,7 @@ function AdminLink({ role }) {
       try {
         const r = await api.get("/admin/attention");
         if (!cancelled) {
-          const c = r.data.counts;
+          const c = r?.data?.counts ?? {};
           setCount((c.pending || 0) + (c.stuck || 0) + (c.failed || 0));
         }
       } catch (e) {

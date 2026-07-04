@@ -2,7 +2,6 @@
 // Triggered by Postgres on paid orders. Runs dispatch logic directly (no FastAPI).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { LOG_EVENTS, structuredLog } from "../_shared/stripeIdempotency.ts";
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
@@ -31,11 +30,6 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ skipped: true, reason: "not_paid" }), { status: 200 });
   }
 
-  const effectiveOrderStatus = order.order_status ?? (order.status === "placed" ? "confirmed" : null);
-  if (effectiveOrderStatus !== "confirmed") {
-    return new Response(JSON.stringify({ skipped: true, reason: "not_confirmed" }), { status: 200 });
-  }
-
   if (order.dispatch_status != null) {
     return new Response(JSON.stringify({ skipped: true, reason: "already_dispatched" }), { status: 200 });
   }
@@ -43,8 +37,6 @@ Deno.serve(async (req) => {
   if (order.driver_id) {
     return new Response(JSON.stringify({ skipped: true, reason: "driver_assigned" }), { status: 200 });
   }
-
-  structuredLog(LOG_EVENTS.DISPATCH_TRIGGERED, { orderId });
 
   const { data: drivers } = await db
     .from("drivers")
@@ -55,26 +47,13 @@ Deno.serve(async (req) => {
 
   const driver = drivers?.[0];
   if (driver) {
-    const { data: claimed } = await db
-      .from("orders")
-      .update({
-        driver_id: driver.driver_id,
-        delivery_type: "internal",
-        status: "assigned_internal",
-        tracking_id: `trk_${orderId}`,
-        dispatch_status: "dispatched",
-      })
-      .eq("order_id", orderId)
-      .eq("payment_status", "paid")
-      .eq("order_status", "confirmed")
-      .is("dispatch_status", null)
-      .is("driver_id", null)
-      .select("order_id")
-      .maybeSingle();
-
-    if (!claimed) {
-      return new Response(JSON.stringify({ skipped: true, reason: "dispatch_race" }), { status: 200 });
-    }
+    await db.from("orders").update({
+      driver_id: driver.driver_id,
+      delivery_type: "internal",
+      status: "assigned_internal",
+      tracking_id: `trk_${orderId}`,
+      dispatch_status: "dispatched",
+    }).eq("order_id", orderId).eq("payment_status", "paid").is("driver_id", null);
 
     await db.from("drivers").update({ workload: (driver.workload || 0) + 1 }).eq("driver_id", driver.driver_id);
 

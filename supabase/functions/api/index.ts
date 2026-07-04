@@ -1,17 +1,6 @@
 // ZoomEats API — Supabase Edge Function (replaces FastAPI backend)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import {
-  LOG_EVENTS,
-  alreadyProcessedSession,
-  fetchWithRateLimitRetry,
-  structuredLog,
-} from "../_shared/stripeIdempotency.ts";
-import {
-  PaymentStatus,
-  OrderStatus,
-  lockCheckoutSession,
-  writePaymentAudit,
-} from "../_shared/paymentEngine.ts";
+import { getStripeApiKey } from "../_shared/stripeEnv.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -54,7 +43,7 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const stripeKey = Deno.env.get("STRIPE_API_KEY") || "";
+  const stripeKey = getStripeApiKey();
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
   const adminEmails = (Deno.env.get("ADMIN_EMAILS") || "")
     .split(",")
@@ -261,12 +250,10 @@ Deno.serve(async (req) => {
         address: body.address || "",
         notes: body.notes || "",
         status: "pending_payment",
-        payment_status: PaymentStatus.REQUIRES_PAYMENT,
-        order_status: OrderStatus.AWAITING_PAYMENT,
+        payment_status: "pending",
         price_hash: computePriceHash(repriced),
       };
       const { data } = await db.from("orders").insert(order).select().single();
-      await writePaymentAudit(db, { order_id: order.order_id, action: "created", source: "api", meta: { customer_id: u.user_id } });
       return json(data);
     }
     if (path === "/orders/my" && method === "GET") {
@@ -377,67 +364,48 @@ Deno.serve(async (req) => {
       if (!order_id || !origin_url) return err("order_id & origin_url required");
       const { data: o } = await db.from("orders").select("*").eq("order_id", order_id).eq("customer_id", u.user_id).maybeSingle();
       if (!o) return err("Order not found", 404);
-      if (o.payment_status === PaymentStatus.PAID) return err("Already paid");
+      if (o.payment_status === "paid") return err("Already paid");
 
-      const { data: existingLock } = await db.from("stripe_checkout_sessions").select("session_id, status").eq("order_id", order_id).maybeSingle();
-      if (existingLock?.status === "complete") return err("Already paid");
-
-      structuredLog(LOG_EVENTS.CHECKOUT_STARTED, { orderId: order_id, userId: u.user_id });
-
-      const reuseSessionId = o.stripe_session_id || existingLock?.session_id;
-      if (reuseSessionId) {
-        const { data: existingTx } = await db.from("payment_transactions").select("session_id, payment_status").eq("session_id", reuseSessionId).maybeSingle();
-        if (existingTx && existingTx.payment_status !== PaymentStatus.PAID) {
-          structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, { orderId: order_id, sessionId: reuseSessionId, reused: true });
-          const r = await fetchWithRateLimitRetry(`https://api.stripe.com/v1/checkout/sessions/${reuseSessionId}`, { headers: { Authorization: `Bearer ${stripeKey}` } }, db);
-          const existingSession = await r.json();
-          if (r.ok && existingSession.url) return json({ url: existingSession.url, session_id: reuseSessionId });
-        }
+      if (!stripeKey) {
+        const session_id = uid("cs_test");
+        await db.from("payment_transactions").insert({
+          session_id,
+          order_id,
+          user_id: u.user_id,
+          amount: o.total,
+          currency: "usd",
+          payment_status: "initiated",
+        });
+        await db.from("orders").update({ stripe_session_id: session_id }).eq("order_id", order_id);
+        return json({ url: `${origin_url}/checkout/success?session_id=${session_id}`, session_id });
       }
 
-      if (!stripeKey) return err("Stripe is required for checkout. Configure STRIPE_API_KEY.", 503);
-
-      const stripeRes = await fetchWithRateLimitRetry(
-        "https://api.stripe.com/v1/checkout/sessions",
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${stripeKey}`, "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            mode: "payment",
-            "line_items[0][price_data][currency]": "usd",
-            "line_items[0][price_data][product_data][name]": `ZoomEats Order ${order_id}`,
-            "line_items[0][price_data][unit_amount]": String(Math.round(o.total * 100)),
-            "line_items[0][quantity]": "1",
-            success_url: `${origin_url}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${origin_url}/cart`,
-            "metadata[order_id]": order_id,
-            "metadata[user_id]": u.user_id as string,
-          }),
-        },
-        db
-      );
+      const stripeRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${stripeKey}`, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          mode: "payment",
+          "line_items[0][price_data][currency]": "usd",
+          "line_items[0][price_data][product_data][name]": `ZoomEats Order ${order_id}`,
+          "line_items[0][price_data][unit_amount]": String(Math.round(o.total * 100)),
+          "line_items[0][quantity]": "1",
+          success_url: `${origin_url}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${origin_url}/cart`,
+          "metadata[order_id]": order_id,
+          "metadata[user_id]": u.user_id as string,
+        }),
+      });
       const session = await stripeRes.json();
       if (!stripeRes.ok) return err(session.error?.message || "Stripe error", 500);
-
-      const lock = await lockCheckoutSession(db, { session_id: session.id, order_id, status: "open" });
-      if (lock === "duplicate") return err("Checkout session already exists for this order", 409);
-
       await db.from("payment_transactions").insert({
         session_id: session.id,
         order_id,
         user_id: u.user_id,
         amount: o.total,
         currency: "usd",
-        payment_status: PaymentStatus.PROCESSING,
+        payment_status: "initiated",
       });
-      await db.from("orders").update({
-        stripe_session_id: session.id,
-        payment_status: PaymentStatus.PROCESSING,
-        order_status: OrderStatus.AWAITING_PAYMENT,
-      }).eq("order_id", order_id).neq("payment_status", PaymentStatus.PAID);
-
-      await writePaymentAudit(db, { order_id, action: "checkout_session_created", source: "api", meta: { session_id: session.id } });
-      structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, { orderId: order_id, sessionId: session.id });
+      await db.from("orders").update({ stripe_session_id: session.id }).eq("order_id", order_id);
       return json({ url: session.url, session_id: session.id });
     }
 
@@ -447,54 +415,50 @@ Deno.serve(async (req) => {
       const session_id = checkoutStatusMatch[1];
       const { data: tx } = await db.from("payment_transactions").select("*").eq("session_id", session_id).maybeSingle();
 
-      let orderRow: { payment_status?: string; order_status?: string } | null = null;
+      let orderPaymentStatus = tx?.payment_status ?? "pending";
       if (tx?.order_id) {
-        const { data: ord } = await db.from("orders").select("payment_status, order_status").eq("order_id", tx.order_id).maybeSingle();
-        orderRow = ord;
+        const { data: orderRow } = await db.from("orders").select("payment_status").eq("order_id", tx.order_id).maybeSingle();
+        if (orderRow?.payment_status) orderPaymentStatus = orderRow.payment_status;
       }
-      const dbPaymentStatus = orderRow?.payment_status ?? tx?.payment_status ?? PaymentStatus.PENDING;
 
-      if (dbPaymentStatus === PaymentStatus.PAID || (await alreadyProcessedSession(db, session_id))) {
+      if (orderPaymentStatus === "paid") {
         return json({
           status: "complete",
-          payment_status: PaymentStatus.PAID,
-          order_status: orderRow?.order_status ?? OrderStatus.CONFIRMED,
+          payment_status: "paid",
           amount_total: Math.round((tx?.amount || 0) * 100),
           currency: "usd",
-          source: "supabase",
-          cached: true,
         });
       }
 
       if (!stripeKey) {
         return json({
           status: "open",
-          payment_status: dbPaymentStatus,
-          order_status: orderRow?.order_status ?? OrderStatus.AWAITING_PAYMENT,
+          payment_status: orderPaymentStatus,
           amount_total: Math.round((tx?.amount || 0) * 100),
           currency: "usd",
-          source: "supabase",
         });
       }
 
       try {
-        const r = await fetchWithRateLimitRetry(`https://api.stripe.com/v1/checkout/sessions/${session_id}`, { headers: { Authorization: `Bearer ${stripeKey}` } }, db);
+        const r = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session_id}`, {
+          headers: { Authorization: `Bearer ${stripeKey}` },
+        });
         const stripeSession = await r.json();
-        if (r.status === 429) {
-          return json({ status: "open", payment_status: dbPaymentStatus, order_status: orderRow?.order_status, amount_total: Math.round((tx?.amount || 0) * 100), currency: "usd", rate_limited: true, source: "supabase" });
-        }
         return json({
-          status: stripeSession.status,
-          payment_status: dbPaymentStatus,
+          status: stripeSession.status ?? "open",
+          payment_status: orderPaymentStatus,
           stripe_payment_status: stripeSession.payment_status,
-          order_status: orderRow?.order_status,
-          amount_total: stripeSession.amount_total,
-          currency: stripeSession.currency,
-          source: "supabase",
-          read_only: true,
+          amount_total: stripeSession.amount_total ?? Math.round((tx?.amount || 0) * 100),
+          currency: stripeSession.currency ?? "usd",
         });
       } catch {
-        return json({ status: "open", payment_status: dbPaymentStatus, order_status: orderRow?.order_status, amount_total: Math.round((tx?.amount || 0) * 100), currency: "usd", soft_error: true, source: "supabase" });
+        return json({
+          status: "open",
+          payment_status: orderPaymentStatus,
+          amount_total: Math.round((tx?.amount || 0) * 100),
+          currency: "usd",
+          soft_error: true,
+        });
       }
     }
 

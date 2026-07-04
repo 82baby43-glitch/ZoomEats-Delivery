@@ -21,7 +21,7 @@ export default function AgreementCenter({ onComplete = null }) {
   const loadAgreements = async () => {
     try {
       const res = await api.get("/agreements/all");
-      setAgreements(res.data || []);
+      setAgreements(Array.isArray(res?.data) ? res.data : []);
     } catch (e) {
       console.error("Failed to load agreements:", e);
       setError("Failed to load agreements");
@@ -33,7 +33,7 @@ export default function AgreementCenter({ onComplete = null }) {
   const loadAcceptances = async () => {
     try {
       const res = await api.get("/agreements/me");
-      const types = new Set((res.data || []).map((a) => a.agreement_type));
+      const types = new Set((Array.isArray(res?.data) ? res.data : []).map((a) => a?.agreement_type).filter(Boolean));
       setAcceptedTypes(types);
     } catch (e) {
       console.warn("Failed to load acceptances:", e);
@@ -59,7 +59,7 @@ export default function AgreementCenter({ onComplete = null }) {
       await loadAcceptances();
       if (onComplete) onComplete();
     } catch (e) {
-      setError("Failed to accept agreement: " + (e.response?.data || e.message));
+      setError("Failed to accept agreement: " + (e?.message ?? "Unknown error"));
     }
   };
 
@@ -69,6 +69,14 @@ export default function AgreementCenter({ onComplete = null }) {
         <div className="flex items-center justify-center h-64">
           <div className="w-8 h-8 rounded-full border-4 border-t-transparent animate-spin" style={{ borderColor: "var(--primary)" }} />
         </div>
+      </div>
+    );
+  }
+
+  if (!Array.isArray(agreements)) {
+    return (
+      <div className="max-w-3xl mx-auto px-6 py-12 text-center">
+        <p style={{ color: "var(--muted)" }}>Could not load agreements. Please refresh.</p>
       </div>
     );
   }
