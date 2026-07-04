@@ -397,6 +397,8 @@ Deno.serve(async (req) => {
           cancel_url: `${origin_url}/cart`,
           "metadata[order_id]": order_id,
           "metadata[user_id]": u.user_id as string,
+          "payment_intent_data[metadata][order_id]": order_id,
+          "payment_intent_data[metadata][user_id]": u.user_id as string,
         }),
       });
       const session = await stripeRes.json();
