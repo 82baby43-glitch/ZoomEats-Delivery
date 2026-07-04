@@ -4,6 +4,7 @@ export function getStripeApiKey(): string {
     Deno.env.get("STRIPE_API_KEY") ||
     Deno.env.get("STRIPE_SECRET_KEY") ||
     Deno.env.get("Stripe_Secret_Key") ||
+    Deno.env.get("Stripe_Api_Token") ||
     ""
   );
 }

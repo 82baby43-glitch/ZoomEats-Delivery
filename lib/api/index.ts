@@ -1,4 +1,4 @@
-import { supabase } from "../supabaseClient";
+import { supabase, isSupabaseConfigured, SUPABASE_URL, SUPABASE_ANON_KEY } from "../supabaseClient";
 import { safeAccessObject, safeData } from "../safeData";
 
 async function getAccessToken() {
@@ -17,25 +17,7 @@ function readApiError(data: unknown): string | null {
   return body?.error ?? null;
 }
 
-/** Next.js API route (service role on server) — null-safe JSON parsing */
-async function invokeBackendApi(
-  path: string,
-  method: string,
-  body?: unknown,
-  params?: Record<string, string>
-) {
-  const token = await getAccessToken();
-  const res = await fetch("/api/backend", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ path, method, body, params }),
-  });
-
-  const data = await res.json().catch(() => null);
-
+function parseApiResponse(res: Response, data: unknown) {
   if (data == null) {
     if (!res.ok) {
       throw Object.assign(new Error(res.statusText || "Request failed"), { status: res.status });
@@ -52,6 +34,45 @@ async function invokeBackendApi(
   }
 
   return data;
+}
+
+/**
+ * Prefer Supabase Edge `api` — Stripe secrets live there.
+ * Fall back to Next.js `/api/backend` when Supabase is not configured (local dev).
+ */
+async function invokeBackendApi(
+  path: string,
+  method: string,
+  body?: unknown,
+  params?: Record<string, string>
+) {
+  const token = await getAccessToken();
+  const payload = JSON.stringify({ path, method, body, params });
+
+  if (isSupabaseConfigured) {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/api`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${token || SUPABASE_ANON_KEY}`,
+      },
+      body: payload,
+    });
+    const data = await res.json().catch(() => null);
+    return parseApiResponse(res, data);
+  }
+
+  const res = await fetch("/api/backend", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: payload,
+  });
+  const data = await res.json().catch(() => null);
+  return parseApiResponse(res, data);
 }
 
 async function request(path: string, method: string, body?: unknown, params?: Record<string, string>) {
