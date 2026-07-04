@@ -21,22 +21,55 @@ INSERT INTO orders (paid)  ──▶  pg_trigger  ──▶  Edge Function `disp
 
 | Function | Purpose |
 |----------|---------|
-| `api` | Main API router — replaces FastAPI `/api/*` routes |
-| `dispatch-order` | Autonomous driver assignment on paid orders |
+| `api` | Main API router — checkout, orders, admin, chat |
+| `stripe-webhook` | Stripe `checkout.session.completed` → mark order paid |
+| `dispatch-order` | Driver assignment on paid orders |
+| `reconcile-payments` | Optional cron reconciliation (disabled in rollback mode) |
+
+## Stripe → Supabase
+
+Edge functions read Stripe from **Supabase secrets** (not committed to git).
+
+### One-command setup
+
+```bash
+# From .env.local or exported vars:
+export STRIPE_SECRET_KEY=sk_test_...
+export STRIPE_WEBHOOK_SECRET=whsec_...      # Stripe Dashboard → Webhooks
+export STRIPE_PUBLISHABLE_KEY=pk_test_...   # optional
+
+npm run stripe:supabase
+```
+
+This sets all secret aliases and deploys `api`, `stripe-webhook`, `dispatch-order`, `reconcile-payments`.
+
+### Secret names (any alias works)
+
+| Secret | Used by |
+|--------|---------|
+| `STRIPE_API_KEY` / `STRIPE_SECRET_KEY` / `Stripe_Secret_Key` | `api` checkout |
+| `STRIPE_WEBHOOK_SECRET` / `Stripe_Webhook_Secret` | `stripe-webhook` |
+| `STRIPE_PUBLISHABLE_KEY` | optional (redirect checkout does not require it) |
+
+### Stripe webhook URL
+
+```
+https://<project-ref>.supabase.co/functions/v1/stripe-webhook
+```
+
+Events: `checkout.session.completed`
 
 ## Deployment
 
 ```bash
 supabase login
-supabase link --project-ref <your-project-ref>
-supabase functions deploy api --no-verify-jwt
-supabase functions deploy dispatch-order --no-verify-jwt
+supabase link --project-ref njrrhckegbfqhwkqkzvw
+npm run stripe:supabase
 ```
 
-### Secrets
+### Other secrets
 
 ```bash
-supabase secrets set STRIPE_API_KEY=sk_live_...
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 supabase secrets set ADMIN_EMAILS=admin@zoomeats.com
 ```
