@@ -28,7 +28,7 @@ export default function CheckoutSuccess() {
     const poll = async () => {
       if (cancelled) return;
       attempts += 1;
-      if (attempts > 8) {
+      if (attempts > 20) {
         setStatus("timeout");
         return;
       }
@@ -36,17 +36,17 @@ export default function CheckoutSuccess() {
       const session = await safeGet(`/checkout/status/${sessionId}`, DEFAULT_STATUS);
       if (cancelled) return;
 
-      if (!session) {
-        setTimeout(poll, 2000);
-        return;
-      }
-
       const paymentStatus = session?.payment_status ?? "pending";
       const stripePaymentStatus = session?.stripe_payment_status ?? null;
       const sessionStatus = session?.status ?? "open";
 
-      if (paymentStatus === "paid" || stripePaymentStatus === "paid") {
+      if (paymentStatus === "paid" || stripePaymentStatus === "paid" || sessionStatus === "complete") {
         setStatus("paid");
+        const orderId = session?.order_id ?? null;
+        if (orderId) {
+          if (!cancelled) setOrder({ order_id: orderId, stripe_session_id: sessionId });
+          return;
+        }
         const orders = await safeGet("/orders/my", []);
         const list = sanitizeOrders(orders);
         const match = list.find((o) => o.stripe_session_id === sessionId) || list[0];
@@ -103,8 +103,15 @@ export default function CheckoutSuccess() {
           <>
             <XCircle size={56} className="mx-auto" style={{ color: "var(--primary)" }} />
             <h1 className="font-display text-3xl font-black mt-4">Something went wrong</h1>
-            <p className="mt-2" style={{ color: "var(--muted)" }}>Please try again or contact support.</p>
-            <button type="button" className="btn-primary mt-6" onClick={() => router.push("/cart")}>Back to cart</button>
+            <p className="mt-2" style={{ color: "var(--muted)" }}>
+              {status === "timeout"
+                ? "Payment confirmation is taking longer than expected. If you were charged, your order will appear in My Orders shortly."
+                : "Please try again or contact support."}
+            </p>
+            <div className="mt-6 flex justify-center gap-3">
+              <button type="button" className="btn-primary" onClick={() => window.location.reload()}>Try again</button>
+              <button type="button" className="btn-secondary" onClick={() => router.push("/orders")}>My Orders</button>
+            </div>
           </>
         )}
       </div>

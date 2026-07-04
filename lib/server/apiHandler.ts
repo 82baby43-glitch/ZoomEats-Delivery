@@ -401,7 +401,6 @@ export async function handleApiRequest(
 
     const checkoutStatusMatch = path.match(/^\/checkout\/status\/([^/]+)$/);
     if (checkoutStatusMatch && method === "GET") {
-      requireAuth();
       const session_id = checkoutStatusMatch[1];
       const { data: tx } = await db.from("payment_transactions").select("*").eq("session_id", session_id).maybeSingle();
 
@@ -415,6 +414,10 @@ export async function handleApiRequest(
         orderRow = data;
       }
 
+      if (user && orderRow && orderRow.customer_id !== user.user_id) {
+        throwErr("Forbidden", 403);
+      }
+
       let orderPaymentStatus = (orderRow?.payment_status as string) ?? tx?.payment_status ?? "pending";
       const amount = (orderRow?.total as number) ?? tx?.amount ?? 0;
 
@@ -422,6 +425,7 @@ export async function handleApiRequest(
         return {
           status: "complete",
           payment_status: "paid",
+          order_id: orderRow?.order_id ?? tx?.order_id ?? null,
           amount_total: Math.round(amount * 100),
           currency: "usd",
         };
@@ -442,6 +446,10 @@ export async function handleApiRequest(
         });
         const stripeSession = await r.json();
 
+        if (stripeSession?.error) {
+          console.error(JSON.stringify({ stripe_error: stripeSession.error.message, session_id }));
+        }
+
         if (stripeSession.payment_status === "paid" && orderRow && orderPaymentStatus !== "paid") {
           const now = new Date().toISOString();
           const paymentIntentId =
@@ -451,6 +459,7 @@ export async function handleApiRequest(
             .update({
               payment_status: "paid",
               updated_at: now,
+              webhook_processed_at: now,
               ...(paymentIntentId ? { stripe_payment_intent_id: paymentIntentId } : {}),
             })
             .eq("order_id", orderRow.order_id)
@@ -478,15 +487,18 @@ export async function handleApiRequest(
           }
         }
 
+        const isPaid = stripeSession.payment_status === "paid" || orderPaymentStatus === "paid";
+
         return {
-          status: stripeSession.status ?? "open",
-          payment_status:
-            stripeSession.payment_status === "paid" ? "paid" : orderPaymentStatus,
-          stripe_payment_status: stripeSession.payment_status,
+          status: isPaid ? "complete" : (stripeSession.status ?? "open"),
+          payment_status: isPaid ? "paid" : orderPaymentStatus,
+          stripe_payment_status: stripeSession.payment_status ?? null,
+          order_id: orderRow?.order_id ?? tx?.order_id ?? null,
           amount_total: stripeSession.amount_total ?? Math.round(amount * 100),
           currency: stripeSession.currency ?? "usd",
         };
-      } catch {
+      } catch (e) {
+        console.error(JSON.stringify({ checkout_status_error: e instanceof Error ? e.message : String(e), session_id }));
         return {
           status: "open",
           payment_status: orderPaymentStatus,
