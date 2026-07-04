@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { safeGet } from "@/lib/api";
+import { api, safeGet } from "@/lib/api";
 import Header from "@/components/Header";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { sanitizeOrder, sanitizeOrders } from "@/lib/safeData";
 
-const DEFAULT_STATUS = { payment_status: "pending", status: "open" };
+const MAX_ATTEMPTS = 5;
+const RETRY_DELAYS_MS = [1000, 2000, 3000, 5000, 8000];
 
 export default function CheckoutSuccess() {
   const [params] = useSearchParams();
@@ -15,54 +16,76 @@ export default function CheckoutSuccess() {
   const [status, setStatus] = useState(sessionId ? "polling" : "error");
   const [order, setOrder] = useState(null);
   const router = useRouter();
+  const hasVerifiedRef = useRef(false);
 
   useEffect(() => {
     if (!sessionId) {
       setStatus("error");
       return;
     }
+    if (hasVerifiedRef.current) return;
+    hasVerifiedRef.current = true;
 
     let cancelled = false;
-    let attempts = 0;
 
-    const poll = async () => {
-      if (cancelled) return;
-      attempts += 1;
-      if (attempts > 20) {
-        setStatus("timeout");
+    const resolveOrder = async (session) => {
+      const orderId = session?.order_id ?? null;
+      if (orderId) {
+        if (!cancelled) setOrder({ order_id: orderId, stripe_session_id: sessionId });
         return;
       }
-
-      const session = await safeGet(`/checkout/status/${sessionId}`, DEFAULT_STATUS);
-      if (cancelled) return;
-
-      const paymentStatus = session?.payment_status ?? "pending";
-      const stripePaymentStatus = session?.stripe_payment_status ?? null;
-      const sessionStatus = session?.status ?? "open";
-
-      if (paymentStatus === "paid" || stripePaymentStatus === "paid" || sessionStatus === "complete") {
-        setStatus("paid");
-        const orderId = session?.order_id ?? null;
-        if (orderId) {
-          if (!cancelled) setOrder({ order_id: orderId, stripe_session_id: sessionId });
-          return;
-        }
-        const orders = await safeGet("/orders/my", []);
-        const list = sanitizeOrders(orders);
-        const match = list.find((o) => o.stripe_session_id === sessionId) || list[0];
-        if (!cancelled) setOrder(match ? sanitizeOrder(match) : null);
-        return;
-      }
-
-      if (sessionStatus === "expired") {
-        setStatus("expired");
-        return;
-      }
-
-      setTimeout(poll, 2000);
+      const orders = await safeGet("/orders/my", []);
+      const list = sanitizeOrders(orders);
+      const match = list.find((o) => o.stripe_session_id === sessionId) || list[0];
+      if (!cancelled) setOrder(match ? sanitizeOrder(match) : null);
     };
 
-    poll();
+    const verifyOnce = async () => {
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        if (cancelled) return;
+        try {
+          const r = await api.get(`/checkout/status/${sessionId}`);
+          if (cancelled) return;
+
+          const session = r?.data ?? {};
+          const paymentStatus = session.payment_status ?? "pending";
+          const stripePaymentStatus = session.stripe_payment_status ?? null;
+          const sessionStatus = session.status ?? "open";
+
+          if (
+            paymentStatus === "paid" ||
+            stripePaymentStatus === "paid" ||
+            sessionStatus === "complete" ||
+            session.cached
+          ) {
+            setStatus("paid");
+            await resolveOrder(session);
+            return;
+          }
+
+          if (sessionStatus === "expired") {
+            setStatus("expired");
+            return;
+          }
+
+          if (session.rate_limited && attempt < MAX_ATTEMPTS - 1) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+            continue;
+          }
+
+          if (attempt < MAX_ATTEMPTS - 1) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+          }
+        } catch {
+          if (attempt < MAX_ATTEMPTS - 1) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+          }
+        }
+      }
+      if (!cancelled) setStatus("timeout");
+    };
+
+    verifyOnce();
     return () => {
       cancelled = true;
     };
@@ -87,15 +110,10 @@ export default function CheckoutSuccess() {
               We&apos;ve notified the kitchen. Track your order in real time.
             </p>
             <div className="mt-8 flex justify-center gap-3">
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={() => router.push(order?.order_id ? `/orders/${order.order_id}` : "/orders")}
-                data-testid="track-order-btn"
-              >
+              <button className="btn-primary" onClick={() => router.push(`/orders/${order?.order_id || ""}`)} data-testid="track-order-btn">
                 Track order
               </button>
-              <button type="button" className="btn-secondary" onClick={() => router.push("/")}>Keep browsing</button>
+              <button className="btn-secondary" onClick={() => router.push("/")}>Keep browsing</button>
             </div>
           </>
         )}
@@ -103,15 +121,8 @@ export default function CheckoutSuccess() {
           <>
             <XCircle size={56} className="mx-auto" style={{ color: "var(--primary)" }} />
             <h1 className="font-display text-3xl font-black mt-4">Something went wrong</h1>
-            <p className="mt-2" style={{ color: "var(--muted)" }}>
-              {status === "timeout"
-                ? "Payment confirmation is taking longer than expected. If you were charged, your order will appear in My Orders shortly."
-                : "Please try again or contact support."}
-            </p>
-            <div className="mt-6 flex justify-center gap-3">
-              <button type="button" className="btn-primary" onClick={() => window.location.reload()}>Try again</button>
-              <button type="button" className="btn-secondary" onClick={() => router.push("/orders")}>My Orders</button>
-            </div>
+            <p className="mt-2" style={{ color: "var(--muted)" }}>Please try again or contact support.</p>
+            <button className="btn-primary mt-6" onClick={() => router.push("/cart")}>Back to cart</button>
           </>
         )}
       </div>

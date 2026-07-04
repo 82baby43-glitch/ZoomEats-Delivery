@@ -1,6 +1,21 @@
 import { supabase, isSupabaseConfigured, SUPABASE_URL, SUPABASE_ANON_KEY } from "../supabaseClient";
 import { safeAccessObject, safeData } from "../safeData";
 
+const CACHE_TTL_MS = 3000;
+const DEDUPE_TTL_MS = 5000;
+
+type CacheEntry = { data: unknown; expires: number };
+const responseCache = new Map<string, CacheEntry>();
+const inflightRequests = new Map<string, Promise<unknown>>();
+
+function buildRequestKey(path: string, method: string, body?: unknown, params?: Record<string, string>) {
+  return JSON.stringify({ path, method, body: body ?? null, params: params ?? null });
+}
+
+function isCacheableGet(path: string) {
+  return path.startsWith("/checkout/status/") || path === "/orders/my";
+}
+
 async function getAccessToken() {
   try {
     const { data } = await supabase.auth.getSession();
@@ -76,7 +91,29 @@ async function invokeBackendApi(
 }
 
 async function request(path: string, method: string, body?: unknown, params?: Record<string, string>) {
-  return invokeBackendApi(path, method, body, params);
+  const key = buildRequestKey(path, method, body, params);
+  const cacheable = method === "GET" && isCacheableGet(path);
+
+  if (cacheable) {
+    const entry = responseCache.get(key);
+    if (entry && entry.expires > Date.now()) return entry.data;
+    if (entry) responseCache.delete(key);
+  }
+
+  const inflight = inflightRequests.get(key);
+  if (inflight) return inflight;
+
+  const promise = invokeBackendApi(path, method, body, params)
+    .then((data) => {
+      if (cacheable) responseCache.set(key, { data, expires: Date.now() + CACHE_TTL_MS });
+      return data;
+    })
+    .finally(() => {
+      setTimeout(() => inflightRequests.delete(key), DEDUPE_TTL_MS);
+    });
+
+  inflightRequests.set(key, promise);
+  return promise;
 }
 
 export const api = {
