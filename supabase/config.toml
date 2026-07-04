@@ -41,3 +41,7 @@ verify_jwt = false
 # Invoked by database triggers / internal dispatch, not end-user JWTs.
 [functions.dispatch-order]
 verify_jwt = false
+
+# Routing intelligence layer — GPS ingestion + continuous optimization loop.
+[functions.routing-engine]
+verify_jwt = false

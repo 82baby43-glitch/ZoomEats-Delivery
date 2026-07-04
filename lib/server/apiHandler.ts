@@ -7,6 +7,13 @@ import {
   structuredLog,
 } from "./stripeIdempotency";
 import { getStripeApiKey } from "./stripeEnv";
+import { createRoutingDbAdapter } from "../dispatch/routing/db-adapter";
+import { getRoutingMetrics } from "../dispatch/routing/metrics";
+import {
+  processGpsAndMaybeReroute,
+  recalculateOptimalRoute,
+  tryInsertOrderIntoRoute,
+} from "../dispatch/routing/uber-routing-ai";
 
 function throwErr(message: string, status = 400): never {
   const e = new Error(message) as Error & { status?: number };
@@ -324,6 +331,20 @@ export async function handleApiRequest(
           last_seen: now,
           availability: true,
         }).eq("driver_id", existing.driver_id);
+
+        // Routing intelligence layer — GPS stream ingestion
+        try {
+          const routingDb = createRoutingDbAdapter(db);
+          await processGpsAndMaybeReroute(routingDb, {
+            driver_id: existing.driver_id,
+            lat: body.latitude as number,
+            lng: body.longitude as number,
+            timestamp: now,
+          });
+        } catch (e) {
+          console.warn(JSON.stringify({ routing_gps_skipped: String(e) }));
+        }
+
         return { ok: true, driver_id: existing.driver_id, last_seen: now };
       }
       const driver = { driver_id: uid("drv"), user_id: u.user_id, latitude: body.latitude, longitude: body.longitude, availability: true, workload: 0, last_seen: now };
@@ -340,9 +361,57 @@ export async function handleApiRequest(
     if (path === "/driver/active" && method === "GET") {
       const u = requireRole("delivery");
       const { data: d } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
-      if (!d) return { driver: null, orders: [] };
+      if (!d) return { driver: null, orders: [], route: null };
       const { data: orders } = await db.from("orders").select("*").eq("driver_id", d.driver_id).in("status", ["assigned_internal", "picked_up"]).order("created_at", { ascending: false });
-      return { driver: d, orders: orders || [] };
+      const { data: routeState } = await db.from("driver_route_states").select("*").eq("driver_id", d.driver_id).maybeSingle();
+      return {
+        driver: d,
+        orders: orders || [],
+        route: routeState
+          ? {
+              remaining_stops: routeState.remaining_stops ?? [],
+              total_eta_minutes: routeState.total_eta_minutes ?? 0,
+              total_distance_km: routeState.total_distance_km ?? 0,
+              fallback_mode: routeState.fallback_mode ?? false,
+              last_reroute_timestamp: routeState.last_reroute_timestamp,
+            }
+          : null,
+      };
+    }
+
+    // ---- Routing intelligence (layer on top of dispatch) ----
+    if (path === "/routing/metrics" && method === "GET") {
+      const u = requireRole("delivery");
+      const { data: d } = await db.from("drivers").select("driver_id").eq("user_id", u.user_id).maybeSingle();
+      return getRoutingMetrics(d?.driver_id);
+    }
+    const routingOptimizeMatch = path.match(/^\/routing\/driver\/([^/]+)\/optimize$/);
+    if (routingOptimizeMatch && method === "POST") {
+      requireRole("delivery");
+      const driverId = routingOptimizeMatch[1];
+      const routingDb = createRoutingDbAdapter(db);
+      const state = await routingDb.getDriverState(driverId);
+      if (!state) throwErr("No route state", 404);
+      const result = recalculateOptimalRoute(state, "manual");
+      if (result.reroute_applied) {
+        await routingDb.saveDriverState({
+          ...state,
+          current_route: result.route,
+          remaining_stops: result.route.filter((s) => !s.completed),
+          total_eta_minutes: result.total_eta_minutes,
+          total_distance_km: result.total_distance_km,
+          last_reroute_timestamp: new Date().toISOString(),
+        });
+      }
+      return result;
+    }
+    if (path === "/routing/insert-order" && method === "POST") {
+      requireRole("admin");
+      const { driver_id, order_id } = body as { driver_id: string; order_id: string };
+      const routingDb = createRoutingDbAdapter(db);
+      const order = await routingDb.getOrderCoords?.(order_id);
+      if (!order) throwErr("Order not found", 404);
+      return tryInsertOrderIntoRoute(routingDb, driver_id, order);
     }
 
     // ---- Checkout ----

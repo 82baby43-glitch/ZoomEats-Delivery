@@ -84,6 +84,25 @@ Deno.serve(async (req) => {
     driver_id: driver.driver_id,
   });
 
+  // Routing intelligence layer — initialize live route (non-blocking)
+  try {
+    await fetch(`${supabaseUrl}/functions/v1/routing-engine?action=init`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        driver_id: driver.driver_id,
+        order_id: orderId,
+        lat: driver.latitude ?? 0,
+        lng: driver.longitude ?? 0,
+      }),
+    });
+  } catch (e) {
+    console.warn(JSON.stringify({ routing_init_skipped: String(e), order_id: orderId }));
+  }
+
   return new Response(JSON.stringify({ ok: true, order_id: orderId, driver_id: driver.driver_id }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
