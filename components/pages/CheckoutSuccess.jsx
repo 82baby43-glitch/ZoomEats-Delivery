@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
+
+const MAX_ATTEMPTS = 3;
+const RETRY_DELAYS_MS = [1000, 2000, 5000];
 
 export default function CheckoutSuccess() {
   const [params] = useSearchParams();
@@ -12,29 +15,55 @@ export default function CheckoutSuccess() {
   const [status, setStatus] = useState("polling");
   const [order, setOrder] = useState(null);
   const router = useRouter();
+  const hasVerifiedRef = useRef(false);
 
   useEffect(() => {
-    if (!sessionId) { setStatus("error"); return; }
-    let attempts = 0;
-    const poll = async () => {
-      attempts += 1;
-      if (attempts > 8) { setStatus("timeout"); return; }
-      try {
-        const r = await api.get(`/checkout/status/${sessionId}`);
-        if (r.data.payment_status === "paid") {
-          setStatus("paid");
-          // Try to find latest order
-          const my = await api.get("/orders/my");
-          setOrder(my.data[0] || null);
-          return;
+    if (!sessionId) {
+      setStatus("error");
+      return;
+    }
+    if (hasVerifiedRef.current) return;
+    hasVerifiedRef.current = true;
+
+    let cancelled = false;
+
+    const verifyOnce = async () => {
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        if (cancelled) return;
+        try {
+          const r = await api.get(`/checkout/status/${sessionId}`);
+          if (cancelled) return;
+
+          if (r.data.payment_status === "paid" || r.data.cached) {
+            setStatus("paid");
+            const my = await api.get("/orders/my");
+            if (!cancelled) setOrder(my.data[0] || null);
+            return;
+          }
+          if (r.data.status === "expired") {
+            setStatus("expired");
+            return;
+          }
+          if (r.data.rate_limited && attempt < MAX_ATTEMPTS - 1) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+            continue;
+          }
+          if (attempt < MAX_ATTEMPTS - 1) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+          }
+        } catch {
+          if (attempt < MAX_ATTEMPTS - 1) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+          }
         }
-        if (r.data.status === "expired") { setStatus("expired"); return; }
-        setTimeout(poll, 2000);
-      } catch {
-        setTimeout(poll, 2000);
       }
+      if (!cancelled) setStatus("timeout");
     };
-    poll();
+
+    verifyOnce();
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId]);
 
   return (
