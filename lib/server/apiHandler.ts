@@ -444,42 +444,42 @@ export async function handleApiRequest(
           const now = new Date().toISOString();
           const paymentIntentId =
             typeof stripeSession.payment_intent === "string" ? stripeSession.payment_intent : null;
-          await db
+          const { error: updateError } = await db
             .from("orders")
             .update({
               payment_status: "paid",
-              order_status: "confirmed",
-              status: "placed",
-              confirmed_at: now,
               updated_at: now,
               ...(paymentIntentId ? { stripe_payment_intent_id: paymentIntentId } : {}),
             })
             .eq("order_id", orderRow.order_id)
             .neq("payment_status", "paid");
 
-          if (!tx) {
-            await db.from("payment_transactions").insert({
-              session_id,
-              order_id: orderRow.order_id,
-              user_id: orderRow.customer_id,
-              amount,
-              currency: "usd",
-              payment_status: "paid",
-              status: "complete",
-              created_at: now,
-            });
-          } else {
-            await db
-              .from("payment_transactions")
-              .update({ payment_status: "paid", status: "complete" })
-              .eq("session_id", session_id);
+          if (!updateError) {
+            if (!tx) {
+              await db.from("payment_transactions").insert({
+                session_id,
+                order_id: orderRow.order_id,
+                user_id: orderRow.customer_id,
+                amount,
+                currency: "usd",
+                payment_status: "paid",
+                status: "complete",
+                created_at: now,
+              });
+            } else {
+              await db
+                .from("payment_transactions")
+                .update({ payment_status: "paid", status: "complete" })
+                .eq("session_id", session_id);
+            }
+            orderPaymentStatus = "paid";
           }
-          orderPaymentStatus = "paid";
         }
 
         return {
           status: stripeSession.status ?? "open",
-          payment_status: orderPaymentStatus,
+          payment_status:
+            stripeSession.payment_status === "paid" ? "paid" : orderPaymentStatus,
           stripe_payment_status: stripeSession.payment_status,
           amount_total: stripeSession.amount_total ?? Math.round(amount * 100),
           currency: stripeSession.currency ?? "usd",
