@@ -2,11 +2,15 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { api } from "@/lib/api";
+import { safeGet } from "@/lib/api";
 import { useRealtimeRow } from "@/lib/useRealtime";
 import Header from "@/components/Header";
 import LiveMap from "@/components/LiveMap";
 import { CheckCircle2, Circle, ExternalLink, MapPin, Truck, Clock, Wifi } from "lucide-react";
+import { formatMoney, safeNumber, safeOrderId, sanitizeOrder } from "@/lib/safeData";
+import { PAYMENT_STATE_LABEL, resolvePaymentState } from "@/lib/orderState";
+import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
+import { logClientError } from "@/lib/clientErrorLog";
 
 const TIMELINE = [
   { id: "placed", label: "Placed" },
@@ -20,35 +24,45 @@ const TIMELINE = [
 ];
 
 function timelineIndex(status) {
-  // collapse the two "assigned_*" into a single conceptual step
   if (status === "assigned_uber" || status === "assigned_internal") return 4;
   const i = TIMELINE.findIndex((t) => t.id === status);
-  return i === 5 ? 4 : i; // map index back for display
+  return i === 5 ? 4 : i;
 }
 
 function fmtEta(iso) {
   if (!iso) return null;
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
   return d.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", weekday: "short" });
 }
 
 export default function OrderDetail() {
   const { oid } = useParams();
   const [data, setData] = useState(null);
-  const [pulse, setPulse] = useState(0); // little visual indicator when realtime fires
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [pulse, setPulse] = useState(0);
 
   const load = useCallback(async () => {
+    if (!oid) return;
     try {
-      const r = await api.get(`/orders/${oid}/tracking`);
-      setData(r.data);
+      const raw = await safeGet(`/orders/${oid}/tracking`, null);
+      if (raw && typeof raw === "object") {
+        setData(raw);
+        setError(false);
+      } else {
+        setError(true);
+      }
     } catch (e) {
-      console.warn("[order-detail] tracking load failed:", e);
+      logClientError("order-detail", e, { oid });
+      setError(true);
+    } finally {
+      setLoading(false);
     }
   }, [oid]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Realtime: when the order row updates → reload tracking
   const onChange = useCallback(() => {
     setPulse((p) => p + 1);
     load();
@@ -58,27 +72,50 @@ export default function OrderDetail() {
   useRealtimeRow("deliveries", "order_id", oid, onChange);
   useRealtimeRow("drivers", "driver_id", data?.driver?.driver_id, onChange);
 
-  // Fallback polling (5s) in case Realtime channel hiccups
   useEffect(() => {
     const t = setInterval(load, 8000);
     return () => clearInterval(t);
   }, [load]);
 
-  if (!data) return <div><Header /><div className="p-12 text-center">Loading…</div></div>;
-  const o = data.order;
+  if (loading) {
+    return (
+      <div>
+        <Header />
+        <div className="max-w-3xl mx-auto px-6 md:px-12 py-12">
+          <LoadingSkeleton label="Loading order…" rows={4} />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !data?.order) {
+    return (
+      <div>
+        <Header />
+        <div className="max-w-3xl mx-auto px-6 md:px-12 py-12">
+          <ErrorState title="Could not load order" description="This order may not exist or the connection failed." onRetry={load} />
+        </div>
+      </div>
+    );
+  }
+
+  const o = sanitizeOrder(data.order);
   const idx = timelineIndex(o.status);
   const isUber = data.delivery_type === "uber";
   const isInternal = data.delivery_type === "internal";
   const display = TIMELINE.filter((t) => !(isUber && t.id === "assigned_internal") && !(isInternal && t.id === "assigned_uber"));
   const eta = data.delivery?.eta;
   const trackingUrl = data.delivery?.meta?.tracking_url;
+  const paymentState = resolvePaymentState(o);
+  const driverLat = safeNumber(data.driver?.latitude, NaN);
+  const driverLng = safeNumber(data.driver?.longitude, NaN);
 
   return (
     <div>
       <Header />
       <div className="max-w-3xl mx-auto px-6 md:px-12 py-12">
         <div className="flex items-center gap-2">
-          <div className="label-eyebrow">Order #{o.order_id.slice(-6)}</div>
+          <div className="label-eyebrow">Order #{safeOrderId(o.order_id)}</div>
           <span
             className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md"
             style={{ background: "var(--surface-2)", color: pulse > 0 ? "var(--primary)" : "var(--muted)" }}
@@ -90,10 +127,9 @@ export default function OrderDetail() {
         </div>
         <h1 className="font-display text-4xl font-black tracking-tighter mt-1">{o.restaurant_name}</h1>
         <p className="mt-2" style={{ color: "var(--muted)" }}>
-          {o.address} · ${o.total.toFixed(2)} · {o.payment_status}
+          {o.address || "—"} · ${formatMoney(o.total)} · {PAYMENT_STATE_LABEL[paymentState]}
         </p>
 
-        {/* Live delivery banner */}
         {data.delivery_type && (
           <div className="card p-5 mt-6 flex items-center gap-4" data-testid="delivery-banner">
             <div
@@ -104,13 +140,13 @@ export default function OrderDetail() {
             </div>
             <div className="flex-1">
               <div className="font-bold">
-                {isUber ? "Uber Direct" : "ZoomEats Driver"} · {o.status.replace("_", " ")}
+                {isUber ? "Uber Direct" : "ZoomEats Driver"} · {(o.status || "unknown").replace(/_/g, " ")}
               </div>
               <div className="text-sm flex items-center gap-3 mt-1" style={{ color: "var(--muted)" }}>
                 {eta && <span className="flex items-center gap-1"><Clock size={14} /> ETA {fmtEta(eta)}</span>}
-                {data.driver?.latitude && (
+                {Number.isFinite(driverLat) && (
                   <span className="flex items-center gap-1">
-                    <MapPin size={14} /> driver @ {data.driver.latitude.toFixed(3)}, {data.driver.longitude.toFixed(3)}
+                    <MapPin size={14} /> driver @ {driverLat.toFixed(3)}, {driverLng.toFixed(3)}
                   </span>
                 )}
               </div>
@@ -129,7 +165,6 @@ export default function OrderDetail() {
           </div>
         )}
 
-        {/* Live map (shown only when we have at least one geocoded point) */}
         {(data.restaurant?.latitude || data.customer?.latitude || data.driver?.latitude) && (
           <div className="mt-6">
             <LiveMap restaurant={data.restaurant} customer={data.customer} driver={data.driver} />
@@ -155,15 +190,19 @@ export default function OrderDetail() {
 
         <div className="card p-6 mt-6">
           <h3 className="font-display text-xl font-bold mb-4">Items</h3>
-          {o.items.map((it) => (
-            <div key={it.item_id} className="flex justify-between py-2 border-b last:border-b-0" style={{ borderColor: "var(--border)" }}>
-              <span>{it.quantity}× {it.name}</span>
-              <span>${(it.price * it.quantity).toFixed(2)}</span>
-            </div>
-          ))}
+          {(o.items || []).length === 0 ? (
+            <p className="text-sm" style={{ color: "var(--muted)" }}>No items listed.</p>
+          ) : (
+            o.items.map((it) => (
+              <div key={it.item_id || it.name} className="flex justify-between py-2 border-b last:border-b-0" style={{ borderColor: "var(--border)" }}>
+                <span>{it.quantity}× {it.name}</span>
+                <span>${formatMoney(it.price * it.quantity)}</span>
+              </div>
+            ))
+          )}
           <div className="flex justify-between mt-4 font-display font-bold text-lg">
             <span>Total</span>
-            <span>${o.total.toFixed(2)}</span>
+            <span>${formatMoney(o.total)}</span>
           </div>
         </div>
       </div>

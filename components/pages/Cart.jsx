@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
-import { api } from "@/lib/api";
+import { api, getApiErrorMessage } from "@/lib/api";
 import Header from "@/components/Header";
 import { Minus, Plus, Trash2 } from "lucide-react";
 
@@ -22,7 +22,7 @@ export default function Cart() {
   const placeOrder = async () => {
     setErr("");
     if (!user) {
-      window.location.href = "/";
+      router.push("/");
       return;
     }
     if (!cart.restaurant || cart.items.length === 0) return;
@@ -36,14 +36,16 @@ export default function Cart() {
         notes,
       });
       const order = orderRes.data;
+      if (!order?.order_id) throw new Error("Invalid order response");
       const checkout = await api.post("/checkout/session", {
         order_id: order.order_id,
-        origin_url: window.location.origin,
+        origin_url: typeof window !== "undefined" ? window.location.origin : "",
       });
+      if (!checkout.data?.url) throw new Error("Could not start checkout");
       clear();
-      window.location.href = checkout.data.url;
+      if (typeof window !== "undefined") window.location.href = checkout.data.url;
     } catch (e) {
-      setErr(e.response?.data?.detail || "Could not place order");
+      setErr(getApiErrorMessage(e, "Could not place order"));
       setLoading(false);
     }
   };

@@ -2,6 +2,8 @@
 
 import { motion } from "framer-motion";
 import { RefreshCw } from "lucide-react";
+import { formatMoney, sanitizeMetrics } from "@/lib/safeData";
+import { LoadingSkeleton } from "@/components/ui/PageStates";
 
 export default function PulseHeader({ since, onRefresh }) {
   return (
@@ -13,7 +15,7 @@ export default function PulseHeader({ since, onRefresh }) {
       <div className="flex items-center gap-3 text-sm" style={{ color: "var(--muted)" }} data-testid="pulse-status">
         <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ background: "var(--primary)" }} />
         Live · refreshed {since}s ago
-        <button className="btn-ghost !p-2" onClick={onRefresh} data-testid="manual-refresh">
+        <button type="button" className="btn-ghost !p-2" onClick={onRefresh} data-testid="manual-refresh">
           <RefreshCw size={16} />
         </button>
       </div>
@@ -21,15 +23,23 @@ export default function PulseHeader({ since, onRefresh }) {
   );
 }
 
-export function MetricsTiles({ metrics }) {
-  if (!metrics) return null;
+export function MetricsTiles({ metrics, loading }) {
+  const safe = sanitizeMetrics(metrics);
+
+  if (loading && !safe) {
+    return <LoadingSkeleton label="Loading metrics…" rows={1} />;
+  }
+
+  if (!safe) return null;
+
   const tiles = [
-    ["Users", metrics.users],
-    ["Restaurants", metrics.restaurants],
-    ["Orders", metrics.orders],
-    ["Paid", metrics.paid_orders],
-    ["Revenue", `$${metrics.revenue.toFixed(2)}`],
+    ["Users", safe.users],
+    ["Restaurants", safe.restaurants],
+    ["Orders", safe.orders],
+    ["Paid", safe.paid_orders],
+    ["Revenue", `$${formatMoney(safe.revenue)}`],
   ];
+
   return (
     <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-6" data-testid="admin-metrics">
       {tiles.map(([label, v]) => (

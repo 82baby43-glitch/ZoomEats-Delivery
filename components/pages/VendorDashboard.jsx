@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
+import { api, getApiErrorMessage, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import { useRealtimeRow } from "@/lib/useRealtime";
 import { useWebPush } from "@/lib/useWebPush";
 import { primeChime, playChime } from "@/lib/chime";
 import { Plus, Trash2, Wifi, Bell, BellOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { formatMoney, sanitizeOrders, sanitizeWallet, safeArray } from "@/lib/safeData";
+import { isPaymentConfirmed } from "@/lib/orderState";
+import { logClientError } from "@/lib/clientErrorLog";
 
 const STATUS_NEXT = {
   placed: "accepted",
@@ -43,35 +46,33 @@ export default function VendorDashboard() {
           image_url: r.data.image_url, cover_url: r.data.cover_url, address: r.data.address,
         });
         const m = await api.get("/vendor/menu-items");
-        setMenu(m.data);
+        setMenu(safeArray(m.data));
         const o = await api.get("/vendor/orders");
         const wb = await getWalletBalance();
-        setWallet(wb.data);
-        setOrders(o.data);
+        setWallet(sanitizeWallet(wb.data));
+        const orderList = sanitizeOrders(o.data);
+        setOrders(orderList);
 
-        // ---- OS notification for new "placed" orders that we haven't seen yet ----
-        const fresh = o.data.filter(
-          (x) => x.status === "placed" && x.payment_status === "paid" && !notifiedRef.current.has(x.order_id)
+        const fresh = orderList.filter(
+          (x) => x.status === "placed" && isPaymentConfirmed(x) && !notifiedRef.current.has(x.order_id)
         );
         if (primedRef.current && fresh.length > 0) {
           fresh.forEach((x) => {
             fire(
-              `New order · $${x.total.toFixed(2)}`,
-              `${x.customer_name} — ${x.items.map((i) => `${i.quantity}× ${i.name}`).join(", ")}`,
+              `New order · $${formatMoney(x.total)}`,
+              `${x.customer_name} — ${(x.items || []).map((i) => `${i.quantity}× ${i.name}`).join(", ")}`,
               { tag: `order-${x.order_id}` }
             );
           });
-          // One chime per refresh — even if 3 new orders land at once, we only beep once.
           playChime();
         }
-        // Mark every currently-placed order as "seen" so we never re-fire for it.
-        o.data.forEach((x) => {
+        orderList.forEach((x) => {
           if (x.status === "placed") notifiedRef.current.add(x.order_id);
         });
         primedRef.current = true;
       }
     } catch (e) {
-      console.warn("[vendor] load failed:", e);
+      logClientError("vendor.load", e);
     }
   }, [fire]);
 
@@ -82,7 +83,7 @@ export default function VendorDashboard() {
       const wb = await getWalletBalance();
       setWallet(wb.data);
     } catch (e) {
-      alert("Payout failed: " + (e.response?.data || e.message));
+      alert("Payout failed: " + getApiErrorMessage(e));
     }
   };
 
@@ -103,27 +104,43 @@ export default function VendorDashboard() {
   }, [restaurant, load]);
 
   const saveRestaurant = async () => {
-    await api.post("/vendor/restaurant", form);
-    await load();
+    try {
+      await api.post("/vendor/restaurant", form);
+      await load();
+    } catch (e) {
+      logClientError("vendor.saveRestaurant", e);
+    }
   };
 
   const addItem = async () => {
     if (!item.name || !item.price) return;
-    await api.post("/vendor/menu-items", { ...item, price: parseFloat(item.price), image_url: item.image_url || FOOD_IMG });
-    setItem({ name: "", description: "", price: "", image_url: "", category: "Mains" });
-    await load();
+    try {
+      await api.post("/vendor/menu-items", { ...item, price: parseFloat(item.price), image_url: item.image_url || FOOD_IMG });
+      setItem({ name: "", description: "", price: "", image_url: "", category: "Mains" });
+      await load();
+    } catch (e) {
+      logClientError("vendor.addItem", e);
+    }
   };
 
   const removeItem = async (id) => {
-    await api.delete(`/vendor/menu-items/${id}`);
-    await load();
+    try {
+      await api.delete(`/vendor/menu-items/${id}`);
+      await load();
+    } catch (e) {
+      logClientError("vendor.removeItem", e);
+    }
   };
 
   const advance = async (oid, current) => {
     const next = STATUS_NEXT[current];
     if (!next) return;
-    await api.post(`/vendor/orders/${oid}/status`, { status: next });
-    await load();
+    try {
+      await api.post(`/vendor/orders/${oid}/status`, { status: next });
+      await load();
+    } catch (e) {
+      logClientError("vendor.advance", e);
+    }
   };
 
   if (!restaurant) {
@@ -237,15 +254,15 @@ export default function VendorDashboard() {
                       <div className="font-display text-lg font-bold">{o.customer_name}</div>
                       <div className="text-sm" style={{ color: "var(--muted)" }}>{o.address}</div>
                       <div className="mt-2 text-sm">
-                        {o.items.map((it) => `${it.quantity}× ${it.name}`).join(", ")}
+                        {(o.items || []).map((it) => `${it.quantity}× ${it.name}`).join(", ") || "—"}
                       </div>
                     </div>
                   <div className="text-right">
-                    <div className="font-display font-bold">${o.total.toFixed(2)}</div>
+                    <div className="font-display font-bold">${formatMoney(o.total)}</div>
                     <div className="badge mt-2">{o.status}</div>
                   </div>
                 </div>
-                {STATUS_NEXT[o.status] && o.payment_status === "paid" && (
+                {STATUS_NEXT[o.status] && isPaymentConfirmed(o) && (
                   <button
                     className="btn-primary mt-4 !py-2"
                     onClick={() => advance(o.order_id, o.status)}
@@ -281,7 +298,7 @@ export default function VendorDashboard() {
                   <img src={m.image_url || FOOD_IMG} alt="" className="w-16 h-16 rounded-xl object-cover" />
                   <div className="flex-1">
                     <div className="font-bold">{m.name}</div>
-                    <div className="text-sm" style={{ color: "var(--muted)" }}>{m.category} · ${m.price.toFixed(2)}</div>
+                    <div className="text-sm" style={{ color: "var(--muted)" }}>{m.category || "—"} · ${formatMoney(m.price)}</div>
                   </div>
                   <button className="btn-ghost !p-2" onClick={() => removeItem(m.item_id)} data-testid={`del-menu-${m.item_id}`}>
                     <Trash2 size={16} />
@@ -298,8 +315,8 @@ export default function VendorDashboard() {
               <div className="flex justify-between items-center">
                 <div>
                   <div className="label-eyebrow">Wallet</div>
-                  <div className="font-display text-xl font-bold">${wallet.available.toFixed(2)}</div>
-                  <div className="text-sm" style={{ color: "var(--muted)" }}>Pending: ${wallet.pending.toFixed(2)}</div>
+                  <div className="font-display text-xl font-bold">${formatMoney(wallet.available)}</div>
+                  <div className="text-sm" style={{ color: "var(--muted)" }}>Pending: ${formatMoney(wallet.pending)}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <input className="input-field" type="number" step="0.01" value={payoutAmt} onChange={(e) => setPayoutAmt(e.target.value)} style={{ width: 140 }} />

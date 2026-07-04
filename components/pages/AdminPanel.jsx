@@ -9,11 +9,11 @@ import AttentionSummary from "@/components/admin/AttentionSummary";
 import ActivityFeed from "@/components/admin/ActivityFeed";
 import AttentionTab from "@/components/admin/AttentionTab";
 import { UsersTable, RestaurantsList, OrdersTable } from "@/components/admin/Tables";
+import { sanitizeActivity, sanitizeAttention, sanitizeMetrics, sanitizeOrders, sanitizeRestaurants, sanitizeUsers } from "@/lib/safeData";
+import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
+import { logClientError } from "@/lib/clientErrorLog";
 
-const EMPTY_ATTENTION = {
-  pending_restaurants: [], stuck_orders: [], failed_payments: [],
-  counts: { pending: 0, stuck: 0, failed: 0 },
-};
+const EMPTY_ATTENTION = sanitizeAttention(null);
 
 export default function AdminPanel() {
   const [metrics, setMetrics] = useState(null);
@@ -26,6 +26,8 @@ export default function AdminPanel() {
   const [digestLoading, setDigestLoading] = useState(false);
   const [tab, setTab] = useState("pulse");
   const [since, setSince] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const loadFast = useCallback(async () => {
     try {
@@ -34,12 +36,16 @@ export default function AdminPanel() {
         api.get("/admin/activity"),
         api.get("/admin/attention"),
       ]);
-      setMetrics(m.data);
-      setActivity(a.data);
-      setAttention(at.data);
+      setMetrics(sanitizeMetrics(m.data));
+      setActivity(sanitizeActivity(a.data));
+      setAttention(sanitizeAttention(at.data));
       setSince(0);
+      setLoadError(false);
     } catch (e) {
-      console.warn("[admin] pulse refresh failed:", e);
+      logClientError("admin.loadFast", e);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -50,11 +56,11 @@ export default function AdminPanel() {
         api.get("/admin/restaurants"),
         api.get("/admin/orders"),
       ]);
-      setUsers(u.data);
-      setRestaurants(r.data);
-      setOrders(o.data);
+      setUsers(sanitizeUsers(u.data));
+      setRestaurants(sanitizeRestaurants(r.data));
+      setOrders(sanitizeOrders(o.data));
     } catch (e) {
-      console.warn("[admin] full refresh failed:", e);
+      logClientError("admin.loadFull", e);
     }
   }, []);
 
@@ -73,20 +79,26 @@ export default function AdminPanel() {
     setDigestLoading(true);
     try {
       const r = await api.get("/admin/digest");
-      setDigest(r.data);
+      setDigest(r.data && typeof r.data === "object" ? r.data : null);
     } catch (e) {
-      console.warn("[admin] digest fetch failed:", e);
+      logClientError("admin.digest", e);
     } finally {
       setDigestLoading(false);
     }
   };
 
   const approve = async (rid) => {
-    await api.post(`/admin/restaurants/${rid}/approve`);
-    await Promise.all([loadFast(), loadFull()]);
+    if (!rid) return;
+    try {
+      await api.post(`/admin/restaurants/${rid}/approve`);
+      await Promise.all([loadFast(), loadFull()]);
+    } catch (e) {
+      logClientError("admin.approve", e);
+    }
   };
 
-  const totalAttention = attention.counts.pending + attention.counts.stuck + attention.counts.failed;
+  const counts = attention?.counts ?? { pending: 0, stuck: 0, failed: 0 };
+  const totalAttention = counts.pending + counts.stuck + counts.failed;
 
   const tabs = [
     { id: "pulse", label: "Pulse" },
@@ -96,17 +108,35 @@ export default function AdminPanel() {
     { id: "orders", label: "Orders" },
   ];
 
+  const retryAll = () => {
+    setLoading(true);
+    setLoadError(false);
+    loadFast();
+    loadFull();
+  };
+
   return (
     <div>
       <Header />
       <div className="max-w-7xl mx-auto px-6 md:px-12 py-12">
-        <PulseHeader since={since} onRefresh={loadFast} />
-        <MetricsTiles metrics={metrics} />
+        <PulseHeader since={since} onRefresh={retryAll} />
+        <MetricsTiles metrics={metrics} loading={loading} />
+
+        {loadError && !metrics && (
+          <div className="mt-6">
+            <ErrorState
+              title="Could not load admin data"
+              description="The dashboard will keep retrying. You can also refresh manually."
+              onRetry={retryAll}
+            />
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2 mt-8 border-b" style={{ borderColor: "var(--border)" }}>
           {tabs.map((t) => (
             <button
               key={t.id}
+              type="button"
               onClick={() => setTab(t.id)}
               className="px-4 py-2 capitalize font-bold flex items-center gap-2"
               style={{
@@ -130,17 +160,23 @@ export default function AdminPanel() {
         </div>
 
         <div className="mt-6">
-          {tab === "pulse" && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <DigestCard digest={digest} loading={digestLoading} onGenerate={fetchDigest} />
-              <AttentionSummary counts={attention.counts} onResolve={() => setTab("attention")} />
-              <ActivityFeed events={activity} />
-            </div>
+          {loading && tab !== "pulse" ? (
+            <LoadingSkeleton label="Loading…" />
+          ) : (
+            <>
+              {tab === "pulse" && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <DigestCard digest={digest} loading={digestLoading} onGenerate={fetchDigest} />
+                  <AttentionSummary counts={counts} onResolve={() => setTab("attention")} />
+                  <ActivityFeed events={activity} />
+                </div>
+              )}
+              {tab === "attention" && <AttentionTab attention={attention} onApprove={approve} />}
+              {tab === "users" && <UsersTable users={users} />}
+              {tab === "restaurants" && <RestaurantsList restaurants={restaurants} onApprove={approve} />}
+              {tab === "orders" && <OrdersTable orders={orders} />}
+            </>
           )}
-          {tab === "attention" && <AttentionTab attention={attention} onApprove={approve} />}
-          {tab === "users" && <UsersTable users={users} />}
-          {tab === "restaurants" && <RestaurantsList restaurants={restaurants} onApprove={approve} />}
-          {tab === "orders" && <OrdersTable orders={orders} />}
         </div>
       </div>
     </div>
