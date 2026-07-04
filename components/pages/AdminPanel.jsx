@@ -79,7 +79,7 @@ export default function AdminPanel() {
     setDigestLoading(true);
     try {
       const r = await api.get("/admin/digest");
-      setDigest(r.data && typeof r.data === "object" ? r.data : null);
+      setDigest(r?.data && typeof r.data === "object" ? r.data : null);
     } catch (e) {
       logClientError("admin.digest", e);
     } finally {

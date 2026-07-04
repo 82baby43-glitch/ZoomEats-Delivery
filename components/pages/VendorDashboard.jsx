@@ -86,7 +86,7 @@ export default function VendorDashboard() {
       const res = await requestWalletPayout(parseFloat(payoutAmt));
       alert(`Payout requested: ${res?.data?.payout_id ?? "unknown"} · ${res?.data?.status ?? "pending"}`);
       const wb = await getWalletBalance();
-      setWallet(wb.data);
+      setWallet(sanitizeWallet(wb?.data));
     } catch (e) {
       alert("Payout failed: " + getApiErrorMessage(e));
     }

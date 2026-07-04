@@ -49,13 +49,13 @@ export default function DeliveryDashboard() {
         api.get("/delivery/my"),
         api.get("/driver/active"),
       ]);
-      setAvailable(sanitizeOrders(a.data));
-      setMine(sanitizeOrders(m.data));
-      setActiveDispatch(sanitizeActiveDispatch(act.data));
+      setAvailable(sanitizeOrders(a?.data));
+      setMine(sanitizeOrders(m?.data));
+      setActiveDispatch(sanitizeActiveDispatch(act?.data));
       setLoadError(false);
       try {
         const wb = await getWalletBalance();
-        setWallet(sanitizeWallet(wb.data));
+        setWallet(sanitizeWallet(wb?.data));
       } catch (e) {
         logClientError("delivery.wallet", e);
       }
@@ -171,7 +171,7 @@ export default function DeliveryDashboard() {
                   const r = await requestWalletPayout(parseFloat(payoutAmt));
                   alert(`Payout requested: ${r?.data?.payout_id ?? "unknown"}`);
                   const wb = await getWalletBalance();
-                  setWallet(wb.data);
+                  setWallet(sanitizeWallet(wb?.data));
                 } catch (e) {
                   alert('Payout failed');
                 }

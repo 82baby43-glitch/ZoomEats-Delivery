@@ -1,5 +1,5 @@
 import { supabase } from "../supabaseClient";
-import { safeAccess, safeData } from "../safeData";
+import { safeAccessObject, safeData } from "../safeData";
 
 async function getAccessToken() {
   try {
@@ -13,8 +13,8 @@ async function getAccessToken() {
 type ApiErrorBody = { error?: string; status?: number };
 
 function readApiError(data: unknown): string | null {
-  const body = safeAccess<ApiErrorBody>(data, {});
-  return body.error ?? null;
+  const body = safeAccessObject<ApiErrorBody>(data, {});
+  return body?.error ?? null;
 }
 
 /** Next.js API route (service role on server) — null-safe JSON parsing */
@@ -45,7 +45,7 @@ async function invokeBackendApi(
 
   const apiError = readApiError(data);
   if (!res.ok || apiError) {
-    const body = safeAccess<ApiErrorBody>(data, {});
+    const body = safeAccessObject<ApiErrorBody>(data, {});
     const err = new Error(apiError || res.statusText || "Request failed") as Error & { status?: number };
     err.status = body.status ?? res.status;
     throw err;
@@ -106,7 +106,12 @@ export function getApiErrorMessage(error: unknown, fallback = "Something went wr
   return fallback;
 }
 
-export { safeAccess };
+export { safeAccess, safeAccessObject } from "../safeData";
+
+/** Extract `.data` from an API response with fallback. */
+export function apiData<T>(response: { data?: T | null } | null | undefined, fallback: T): T {
+  return safeData(response?.data, fallback);
+}
 
 export const getWalletBalance = () => api.get("/wallet/balance");
 export const getWalletTransactions = () => api.get("/wallet/transactions");
