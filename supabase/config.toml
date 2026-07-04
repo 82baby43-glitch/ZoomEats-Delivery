@@ -12,7 +12,7 @@ max_rows = 1000
 
 [db]
 port = 54322
-major_version = 15
+major_version = 17
 
 [studio]
 enabled = true
@@ -26,5 +26,18 @@ additional_redirect_urls = [
   "http://localhost:3000/auth/callback"
 ]
 
-[auth.external.google]
-enabled = true
+# Google OAuth is configured in Supabase Dashboard (Auth → Providers → Google).
+# [auth.external.google]
+# enabled = true
+
+# Stripe sends unsigned requests — verify via stripe-signature in the handler instead.
+[functions.stripe-webhook]
+verify_jwt = false
+
+# Cron / service calls authenticate with RECONCILE_CRON_SECRET in the handler.
+[functions.reconcile-payments]
+verify_jwt = false
+
+# Invoked by database triggers / internal dispatch, not end-user JWTs.
+[functions.dispatch-order]
+verify_jwt = false

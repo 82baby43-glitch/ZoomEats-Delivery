@@ -6,6 +6,7 @@ import {
   fetchWithRateLimitRetry,
   structuredLog,
 } from "./stripeIdempotency";
+import { getStripeApiKey } from "./stripeEnv";
 import {
   PaymentStatus,
   OrderStatus,
@@ -50,7 +51,7 @@ export async function handleApiRequest(
     userToken?: string;
   }
 ) {
-  const stripeKey = process.env.STRIPE_API_KEY || "";
+  const stripeKey = getStripeApiKey();
   const anthropicKey = process.env.ANTHROPIC_API_KEY || "";
   const adminEmails = (process.env.ADMIN_EMAILS || process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
     .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);

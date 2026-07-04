@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { handleStripeWebhook } from "@/lib/server/stripeWebhook";
+import { getStripeWebhookSecret } from "@/lib/server/stripeEnv";
 
 export const runtime = "nodejs";
 
@@ -32,7 +33,7 @@ async function verifyStripeSignature(payload: string, sigHeader: string, secret:
 }
 
 export async function POST(req: NextRequest) {
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
+  const webhookSecret = getStripeWebhookSecret();
   if (!webhookSecret) {
     return NextResponse.json({ error: "Webhook not configured" }, { status: 503 });
   }

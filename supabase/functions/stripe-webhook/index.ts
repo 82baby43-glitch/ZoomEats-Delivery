@@ -8,6 +8,7 @@ import {
   resolveOrderIdForSession,
   logPaymentError,
 } from "../_shared/paymentEngine.ts";
+import { getStripeWebhookSecret } from "../_shared/stripeEnv.ts";
 import {
   LOG_EVENTS,
   claimStripeEvent,
@@ -89,7 +90,7 @@ async function processWithRetry(db: ReturnType<typeof getServiceDb>, event: Stri
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
-  const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") || "";
+  const webhookSecret = getStripeWebhookSecret();
   if (!webhookSecret) return new Response(JSON.stringify({ error: "Webhook not configured" }), { status: 503 });
 
   const payload = await req.text();

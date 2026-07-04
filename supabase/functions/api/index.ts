@@ -6,6 +6,7 @@ import {
   fetchWithRateLimitRetry,
   structuredLog,
 } from "../_shared/stripeIdempotency.ts";
+import { getStripeApiKey } from "../_shared/stripeEnv.ts";
 import {
   PaymentStatus,
   OrderStatus,
@@ -55,7 +56,7 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const stripeKey = Deno.env.get("STRIPE_API_KEY") || "";
+  const stripeKey = getStripeApiKey();
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
   const adminEmails = (Deno.env.get("ADMIN_EMAILS") || "")
     .split(",")

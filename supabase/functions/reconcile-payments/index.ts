@@ -1,5 +1,5 @@
-// Scheduled reconciliation: Stripe ↔ Supabase payment state
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { getStripeApiKey } from "../_shared/stripeEnv.ts";
 
 const PaymentStatus = { PAID: "paid" } as const;
 
@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
   }
 
-  const stripeKey = Deno.env.get("STRIPE_API_KEY") || "";
+  const stripeKey = getStripeApiKey();
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const db = createClient(supabaseUrl, serviceKey);

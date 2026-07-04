@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { reconcilePayments } from "@/lib/server/reconcilePayments";
+import { getStripeApiKey } from "@/lib/server/stripeEnv";
 
 export const runtime = "nodejs";
 
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const stripeKey = process.env.STRIPE_API_KEY || "";
+  const stripeKey = getStripeApiKey();
   if (!stripeKey) {
     return NextResponse.json({ skipped: true, reason: "no_stripe_key" });
   }
