@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
   }
 
   const db = getSupabaseAdmin();
-  await handleStripeWebhook(db, event, { asyncProcess: true });
+  await handleStripeWebhook(db, event);
 
   return new NextResponse("OK", { status: 200 });
 }
