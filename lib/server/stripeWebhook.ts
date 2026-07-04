@@ -56,9 +56,6 @@ async function markOrderPaid(
   const now = new Date().toISOString();
   const patch: Record<string, unknown> = {
     payment_status: "paid",
-    order_status: "confirmed",
-    status: "placed",
-    confirmed_at: now,
     updated_at: now,
   };
 
@@ -67,7 +64,13 @@ async function markOrderPaid(
   if (sessionId) patch.stripe_session_id = sessionId;
   if (paymentIntentId) patch.stripe_payment_intent_id = paymentIntentId;
 
-  await db.from("orders").update(patch).eq("order_id", opts.orderId).neq("payment_status", "paid");
+  const { error: updateError } = await db
+    .from("orders")
+    .update(patch)
+    .eq("order_id", opts.orderId)
+    .neq("payment_status", "paid");
+
+  if (updateError) return;
 
   if (sessionId) {
     await db
@@ -91,7 +94,6 @@ async function markOrderFailed(db: SupabaseClient, orderId: string) {
     .from("orders")
     .update({
       payment_status: "failed",
-      order_status: "cancelled",
       updated_at: new Date().toISOString(),
     })
     .eq("order_id", orderId)

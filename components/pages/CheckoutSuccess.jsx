@@ -42,9 +42,10 @@ export default function CheckoutSuccess() {
       }
 
       const paymentStatus = session?.payment_status ?? "pending";
+      const stripePaymentStatus = session?.stripe_payment_status ?? null;
       const sessionStatus = session?.status ?? "open";
 
-      if (paymentStatus === "paid") {
+      if (paymentStatus === "paid" || stripePaymentStatus === "paid") {
         setStatus("paid");
         const orders = await safeGet("/orders/my", []);
         const list = sanitizeOrders(orders);
