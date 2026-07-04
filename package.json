@@ -11,7 +11,9 @@
     "db:migrate": "node scripts/apply-rls-migration.mjs",
     "auth:google": "node scripts/configure-google-auth.mjs",
     "functions:deploy": "supabase functions deploy api && supabase functions deploy stripe-webhook --no-verify-jwt && supabase functions deploy dispatch-order --no-verify-jwt && supabase functions deploy reconcile-payments --no-verify-jwt",
-    "stripe:supabase": "node scripts/setup-stripe-supabase.mjs"
+    "stripe:supabase": "node scripts/setup-stripe-supabase.mjs",
+    "stripe:listen": "stripe listen --forward-to localhost:3000/api/stripe/webhook --events checkout.session.completed,payment_intent.succeeded,payment_intent.payment_failed",
+    "stripe:listen:supabase": "stripe listen --forward-to http://127.0.0.1:54321/functions/v1/stripe-webhook --events checkout.session.completed,payment_intent.succeeded,payment_intent.payment_failed"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",
