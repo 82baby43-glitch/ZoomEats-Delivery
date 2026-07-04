@@ -36,9 +36,9 @@ export default function AdminPanel() {
         api.get("/admin/activity"),
         api.get("/admin/attention"),
       ]);
-      setMetrics(sanitizeMetrics(m.data));
-      setActivity(sanitizeActivity(a.data));
-      setAttention(sanitizeAttention(at.data));
+      setMetrics(sanitizeMetrics(m?.data));
+      setActivity(sanitizeActivity(a?.data));
+      setAttention(sanitizeAttention(at?.data));
       setSince(0);
       setLoadError(false);
     } catch (e) {
@@ -56,9 +56,9 @@ export default function AdminPanel() {
         api.get("/admin/restaurants"),
         api.get("/admin/orders"),
       ]);
-      setUsers(sanitizeUsers(u.data));
-      setRestaurants(sanitizeRestaurants(r.data));
-      setOrders(sanitizeOrders(o.data));
+      setUsers(sanitizeUsers(u?.data));
+      setRestaurants(sanitizeRestaurants(r?.data));
+      setOrders(sanitizeOrders(o?.data));
     } catch (e) {
       logClientError("admin.loadFull", e);
     }

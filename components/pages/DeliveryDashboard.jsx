@@ -169,7 +169,7 @@ export default function DeliveryDashboard() {
               <button className="btn-primary" onClick={async () => {
                 try {
                   const r = await requestWalletPayout(parseFloat(payoutAmt));
-                  alert(`Payout requested: ${r.data.payout_id}`);
+                  alert(`Payout requested: ${r?.data?.payout_id ?? "unknown"}`);
                   const wb = await getWalletBalance();
                   setWallet(wb.data);
                 } catch (e) {

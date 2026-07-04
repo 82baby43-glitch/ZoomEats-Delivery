@@ -2,14 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { safeGet } from "@/lib/api";
 import Header from "@/components/Header";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { sanitizeOrder, sanitizeOrders } from "@/lib/safeData";
+
+const DEFAULT_STATUS = { payment_status: "pending", status: "open" };
 
 export default function CheckoutSuccess() {
   const [params] = useSearchParams();
   const sessionId = params.get("session_id");
-  const [status, setStatus] = useState("polling");
+  const [status, setStatus] = useState(sessionId ? "polling" : "error");
   const [order, setOrder] = useState(null);
   const router = useRouter();
 
@@ -30,26 +33,32 @@ export default function CheckoutSuccess() {
         return;
       }
 
-      try {
-        const r = await api.get(`/checkout/status/${sessionId}`);
-        if (cancelled) return;
+      const session = await safeGet(`/checkout/status/${sessionId}`, DEFAULT_STATUS);
+      if (cancelled) return;
 
-        if (r.data.payment_status === "paid") {
-          setStatus("paid");
-          const my = await api.get("/orders/my");
-          if (!cancelled) setOrder(my.data?.[0] || null);
-          return;
-        }
-
-        if (r.data.status === "expired") {
-          setStatus("expired");
-          return;
-        }
-
+      if (!session) {
         setTimeout(poll, 2000);
-      } catch {
-        if (!cancelled) setTimeout(poll, 2000);
+        return;
       }
+
+      const paymentStatus = session?.payment_status ?? "pending";
+      const sessionStatus = session?.status ?? "open";
+
+      if (paymentStatus === "paid") {
+        setStatus("paid");
+        const orders = await safeGet("/orders/my", []);
+        const list = sanitizeOrders(orders);
+        const match = list.find((o) => o.stripe_session_id === sessionId) || list[0];
+        if (!cancelled) setOrder(match ? sanitizeOrder(match) : null);
+        return;
+      }
+
+      if (sessionStatus === "expired") {
+        setStatus("expired");
+        return;
+      }
+
+      setTimeout(poll, 2000);
     };
 
     poll();
@@ -77,10 +86,15 @@ export default function CheckoutSuccess() {
               We&apos;ve notified the kitchen. Track your order in real time.
             </p>
             <div className="mt-8 flex justify-center gap-3">
-              <button className="btn-primary" onClick={() => router.push(`/orders/${order?.order_id || ""}`)} data-testid="track-order-btn">
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => router.push(order?.order_id ? `/orders/${order.order_id}` : "/orders")}
+                data-testid="track-order-btn"
+              >
                 Track order
               </button>
-              <button className="btn-secondary" onClick={() => router.push("/")}>Keep browsing</button>
+              <button type="button" className="btn-secondary" onClick={() => router.push("/")}>Keep browsing</button>
             </div>
           </>
         )}
@@ -89,7 +103,7 @@ export default function CheckoutSuccess() {
             <XCircle size={56} className="mx-auto" style={{ color: "var(--primary)" }} />
             <h1 className="font-display text-3xl font-black mt-4">Something went wrong</h1>
             <p className="mt-2" style={{ color: "var(--muted)" }}>Please try again or contact support.</p>
-            <button className="btn-primary mt-6" onClick={() => router.push("/cart")}>Back to cart</button>
+            <button type="button" className="btn-primary mt-6" onClick={() => router.push("/cart")}>Back to cart</button>
           </>
         )}
       </div>

@@ -14,7 +14,7 @@ export default function AgreementCenter() {
     const load = async () => {
       try {
         const r = await api.get("/agreements/me");
-        setAgreements(r.data || []);
+        setAgreements(Array.isArray(r?.data) ? r.data : []);
       } catch (e) {
         console.warn("load agreements failed", e);
       }
@@ -26,9 +26,9 @@ export default function AgreementCenter() {
     if (!selected) return alert("Select an agreement type to accept");
     try {
       const res = await api.post("/agreements/accept", { agreement_type: selected, typed_name: name, consent_checkbox: consent });
-      alert("Accepted: " + res.data.acceptance_id);
+      alert("Accepted: " + (res?.data?.acceptance_id ?? "unknown"));
     } catch (e) {
-      alert("Accept failed: " + (e.response?.data || e.message));
+      alert("Accept failed: " + (e?.message ?? "Unknown error"));
     }
   };
 

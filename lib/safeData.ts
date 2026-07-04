@@ -1,5 +1,13 @@
 /** Universal safe wrapper — never pass raw API data into components. */
 
+/** Null-safe object access with fallback (use before reading nested props). */
+export function safeAccess<T extends Record<string, unknown>>(obj: unknown, fallback: T = {} as T): T {
+  if (obj == null || typeof obj !== "object" || Array.isArray(obj)) {
+    return fallback;
+  }
+  return obj as T;
+}
+
 export function safeData<T>(data: unknown, fallback: T): T {
   if (data == null) return fallback;
   if (Array.isArray(fallback)) return (Array.isArray(data) ? data : fallback) as T;

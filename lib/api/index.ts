@@ -1,15 +1,23 @@
 import { supabase } from "../supabaseClient";
-import { safeData } from "../safeData";
+import { safeAccess, safeData } from "../safeData";
 
 async function getAccessToken() {
   try {
     const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? null;
+    return data?.session?.access_token ?? null;
   } catch {
     return null;
   }
 }
 
+type ApiErrorBody = { error?: string; status?: number };
+
+function readApiError(data: unknown): string | null {
+  const body = safeAccess<ApiErrorBody>(data, {});
+  return body.error ?? null;
+}
+
+/** Next.js API route (service role on server) — null-safe JSON parsing */
 async function invokeBackendApi(
   path: string,
   method: string,
@@ -25,18 +33,24 @@ async function invokeBackendApi(
     },
     body: JSON.stringify({ path, method, body, params }),
   });
-  let data: unknown;
-  try {
-    data = await res.json();
-  } catch {
-    throw Object.assign(new Error("Invalid server response"), { status: res.status });
+
+  const data = await res.json().catch(() => null);
+
+  if (data == null) {
+    if (!res.ok) {
+      throw Object.assign(new Error(res.statusText || "Request failed"), { status: res.status });
+    }
+    return null;
   }
-  const errBody = data as { error?: string; status?: number };
-  if (!res.ok || errBody.error) {
-    const err = new Error(errBody.error || res.statusText) as Error & { status?: number };
-    err.status = errBody.status ?? res.status;
+
+  const apiError = readApiError(data);
+  if (!res.ok || apiError) {
+    const body = safeAccess<ApiErrorBody>(data, {});
+    const err = new Error(apiError || res.statusText || "Request failed") as Error & { status?: number };
+    err.status = body.status ?? res.status;
     throw err;
   }
+
   return data;
 }
 
@@ -66,8 +80,23 @@ export async function safeGet<T>(
 ): Promise<T> {
   try {
     const r = await api.get(path, opts);
-    return safeData(r.data, fallback);
-  } catch {
+    return safeData(r?.data, fallback);
+  } catch (e) {
+    console.error("[api] safeGet failed:", path, e);
+    return fallback;
+  }
+}
+
+export async function safePost<T>(
+  path: string,
+  body: unknown,
+  fallback: T
+): Promise<T> {
+  try {
+    const r = await api.post(path, body);
+    return safeData(r?.data, fallback);
+  } catch (e) {
+    console.error("[api] safePost failed:", path, e);
     return fallback;
   }
 }
@@ -76,6 +105,8 @@ export function getApiErrorMessage(error: unknown, fallback = "Something went wr
   if (error instanceof Error && error.message) return error.message;
   return fallback;
 }
+
+export { safeAccess };
 
 export const getWalletBalance = () => api.get("/wallet/balance");
 export const getWalletTransactions = () => api.get("/wallet/transactions");

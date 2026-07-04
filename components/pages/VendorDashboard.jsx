@@ -39,18 +39,23 @@ export default function VendorDashboard() {
   const load = useCallback(async () => {
     try {
       const r = await api.get("/vendor/restaurant");
-      setRestaurant(r.data);
-      if (r.data) {
+      const restaurantData = r?.data ?? null;
+      setRestaurant(restaurantData);
+      if (restaurantData) {
         setForm({
-          name: r.data.name, description: r.data.description, cuisine: r.data.cuisine,
-          image_url: r.data.image_url, cover_url: r.data.cover_url, address: r.data.address,
+          name: restaurantData.name ?? "",
+          description: restaurantData.description ?? "",
+          cuisine: restaurantData.cuisine ?? "",
+          image_url: restaurantData.image_url ?? "",
+          cover_url: restaurantData.cover_url ?? "",
+          address: restaurantData.address ?? "",
         });
         const m = await api.get("/vendor/menu-items");
-        setMenu(safeArray(m.data));
+        setMenu(safeArray(m?.data));
         const o = await api.get("/vendor/orders");
         const wb = await getWalletBalance();
-        setWallet(sanitizeWallet(wb.data));
-        const orderList = sanitizeOrders(o.data);
+        setWallet(sanitizeWallet(wb?.data));
+        const orderList = sanitizeOrders(o?.data);
         setOrders(orderList);
 
         const fresh = orderList.filter(
@@ -79,7 +84,7 @@ export default function VendorDashboard() {
   const doPayout = async () => {
     try {
       const res = await requestWalletPayout(parseFloat(payoutAmt));
-      alert(`Payout requested: ${res.data.payout_id} · ${res.data.status}`);
+      alert(`Payout requested: ${res?.data?.payout_id ?? "unknown"} · ${res?.data?.status ?? "pending"}`);
       const wb = await getWalletBalance();
       setWallet(wb.data);
     } catch (e) {

@@ -11,13 +11,13 @@ export default function AdminCompliance() {
   const load = async () => {
     try {
       const r = await api.get("/admin/compliance/reviews");
-      setReviews(r.data || []);
+      setReviews(Array.isArray(r?.data) ? r.data : []);
     } catch (e) { console.warn(e); }
   };
 
   const act = async (id, action) => {
     const res = await api.post(`/admin/compliance/reviews/${id}/action`, { action });
-    alert(`Action: ${res.data.status}`);
+    alert(`Action: ${res?.data?.status ?? "unknown"}`);
     load();
   };
 
