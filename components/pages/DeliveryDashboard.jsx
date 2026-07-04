@@ -4,11 +4,13 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import { MapPin, Power, Truck } from "lucide-react";
-import { formatMoney, sanitizeActiveDispatch, sanitizeOrders, sanitizeWallet } from "@/lib/safeData";
+import { formatMoney, sanitizeOrders, sanitizeWallet } from "@/lib/safeData";
 import { logClientError } from "@/lib/clientErrorLog";
 import { ErrorState } from "@/components/ui/PageStates";
+import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
+import { Navigation } from "lucide-react";
 
-const HEARTBEAT_MS = 8000;
+const HEARTBEAT_MS = 3000;
 
 function useGeolocation(active) {
   const [coords, setCoords] = useState(null);
@@ -29,7 +31,7 @@ export default function DeliveryDashboard() {
   const [online, setOnline] = useState(false);
   const [available, setAvailable] = useState([]);
   const [mine, setMine] = useState([]);
-  const [activeDispatch, setActiveDispatch] = useState({ driver: null, orders: [] });
+  const [activeDispatch, setActiveDispatch] = useState({ driver: null, orders: [], route: null });
   const [wallet, setWallet] = useState({ available: 0.0, pending: 0.0 });
   const [payoutAmt, setPayoutAmt] = useState(0.0);
   const [loadError, setLoadError] = useState(false);
@@ -51,7 +53,11 @@ export default function DeliveryDashboard() {
       ]);
       setAvailable(sanitizeOrders(a?.data));
       setMine(sanitizeOrders(m?.data));
-      setActiveDispatch(sanitizeActiveDispatch(act?.data));
+      setActiveDispatch({
+        driver: act?.data?.driver ?? null,
+        orders: sanitizeOrders(act?.data?.orders),
+        route: act?.data?.route ?? null,
+      });
       setLoadError(false);
       try {
         const wb = await getWalletBalance();
@@ -70,6 +76,11 @@ export default function DeliveryDashboard() {
     const t = setInterval(refresh, 6000);
     return () => clearInterval(t);
   }, [refresh]);
+
+  const driverId = activeDispatch?.driver?.driver_id;
+  useRoutingRealtime(driverId, () => {
+    refresh();
+  });
 
   // Toggle online → flip availability + persist
   const toggleOnline = async () => {
@@ -114,6 +125,8 @@ export default function DeliveryDashboard() {
   };
 
   const dispatchOrders = activeDispatch?.orders ?? [];
+  const route = activeDispatch?.route;
+  const routeStops = route?.remaining_stops ?? [];
 
   return (
     <div>
@@ -148,6 +161,41 @@ export default function DeliveryDashboard() {
             {online ? "Go offline" : "Go online"}
           </button>
         </div>
+
+        {/* Live optimized route (routing intelligence layer) */}
+        {online && routeStops.length > 0 && (
+          <div className="mt-6 card p-5" data-testid="live-route-panel">
+            <h2 className="font-display text-xl font-bold mb-3 flex items-center gap-2">
+              <Navigation size={18} style={{ color: "var(--primary)" }} />
+              Optimized route
+              {route?.fallback_mode && (
+                <span className="badge text-xs ml-2">fallback</span>
+              )}
+            </h2>
+            <div className="text-sm mb-3" style={{ color: "var(--muted)" }}>
+              {route?.total_eta_minutes != null && (
+                <>ETA {Math.round(route.total_eta_minutes)} min · {Number(route.total_distance_km ?? 0).toFixed(1)} km</>
+              )}
+            </div>
+            <ol className="space-y-2">
+              {routeStops.map((stop, idx) => (
+                <li key={stop.stop_id ?? idx} className="flex items-center gap-3 text-sm">
+                  <span
+                    className="w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs"
+                    style={{ background: "var(--surface-2)" }}
+                  >
+                    {idx + 1}
+                  </span>
+                  <span className="flex-1">
+                    <span className="font-bold capitalize">{stop.type}</span>
+                    {stop.restaurant_name ? ` · ${stop.restaurant_name}` : ""}
+                    {stop.eta_minutes != null ? ` · ~${stop.eta_minutes} min` : ""}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
 
         {loadError && (
           <div className="mt-4">
