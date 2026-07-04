@@ -252,8 +252,10 @@ Deno.serve(async (req) => {
         status: "pending_payment",
         payment_status: "pending",
         price_hash: computePriceHash(repriced),
+        created_at: new Date().toISOString(),
       };
-      const { data } = await db.from("orders").insert(order).select().single();
+      const { data, error: insertError } = await db.from("orders").insert(order).select().single();
+      if (insertError) return err(insertError.message, 500);
       return json(data);
     }
     if (path === "/orders/my" && method === "GET") {

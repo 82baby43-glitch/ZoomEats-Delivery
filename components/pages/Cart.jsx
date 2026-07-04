@@ -36,7 +36,7 @@ export default function Cart() {
         notes,
       });
       const order = orderRes?.data;
-      if (!order?.order_id) throw new Error("Invalid order response");
+      if (!order?.order_id) throw new Error("Could not create order — please try again");
       const checkout = await api.post("/checkout/session", {
         order_id: order.order_id,
         origin_url: typeof window !== "undefined" ? window.location.origin : "",

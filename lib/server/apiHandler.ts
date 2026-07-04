@@ -233,8 +233,10 @@ export async function handleApiRequest(
         status: "pending_payment",
         payment_status: "pending",
         price_hash: computePriceHash(repriced),
+        created_at: new Date().toISOString(),
       };
-      const { data } = await db.from("orders").insert(order).select().single();
+      const { data, error: insertError } = await db.from("orders").insert(order).select().single();
+      if (insertError) throwErr(insertError.message, 500);
       return data;
     }
     if (path === "/orders/my" && method === "GET") {
