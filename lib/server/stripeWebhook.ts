@@ -38,7 +38,16 @@ async function resolveOrderId(
     .eq("session_id", opts.sessionId)
     .maybeSingle();
 
-  return safeStr(tx?.order_id) ?? null;
+  const fromTx = safeStr(tx?.order_id);
+  if (fromTx) return fromTx;
+
+  const { data: order } = await db
+    .from("orders")
+    .select("order_id")
+    .eq("stripe_session_id", opts.sessionId)
+    .maybeSingle();
+
+  return safeStr(order?.order_id);
 }
 
 async function markOrderPaid(
@@ -125,9 +134,11 @@ export async function handleStripeWebhook(db: SupabaseClient, event: StripeEvent
 
   if (!HANDLED_EVENTS.has(event.type)) return;
 
+  let orderId: string | null = null;
+
   if (event.type === "checkout.session.completed") {
     if (obj.payment_status !== "paid") return;
-    const orderId = await resolveOrderId(db, { orderId: meta.order_id, sessionId: safeStr(obj.id), metadata: meta });
+    orderId = await resolveOrderId(db, { orderId: meta.order_id, sessionId: safeStr(obj.id), metadata: meta });
     if (!orderId) return;
     await markOrderPaid(db, {
       orderId,
@@ -135,11 +146,11 @@ export async function handleStripeWebhook(db: SupabaseClient, event: StripeEvent
       paymentIntentId: safeStr(obj.payment_intent),
     });
   } else if (event.type === "payment_intent.succeeded") {
-    const orderId = await resolveOrderId(db, { orderId: meta.order_id, sessionId: meta.session_id, metadata: meta });
+    orderId = await resolveOrderId(db, { orderId: meta.order_id, sessionId: meta.session_id, metadata: meta });
     if (!orderId) return;
     await markOrderPaid(db, { orderId, sessionId: meta.session_id ?? null, paymentIntentId: safeStr(obj.id) });
   } else if (event.type === "payment_intent.payment_failed") {
-    const orderId = await resolveOrderId(db, { orderId: meta.order_id, sessionId: meta.session_id, metadata: meta });
+    orderId = await resolveOrderId(db, { orderId: meta.order_id, sessionId: meta.session_id, metadata: meta });
     if (!orderId) return;
     await markOrderFailed(db, orderId);
   }
@@ -147,6 +158,7 @@ export async function handleStripeWebhook(db: SupabaseClient, event: StripeEvent
   await markEventProcessed(db, {
     event_id: event.id,
     type: event.type,
+    order_id: orderId,
     session_id: sessionId,
     payment_intent_id: paymentIntentId,
   });

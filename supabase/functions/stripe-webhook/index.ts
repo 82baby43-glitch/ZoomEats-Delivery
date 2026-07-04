@@ -1,6 +1,7 @@
-// Stripe webhook — minimal, synchronous, production-safe
+// Stripe webhook — verify signature, process idempotently, update orders + payments.
+import Stripe from "npm:stripe@16.11.0";
 import { getServiceDb, isEventProcessed, markEventProcessed } from "../_shared/stripeIdempotency.ts";
-import { getStripeWebhookSecret } from "../_shared/stripeEnv.ts";
+import { getStripeApiKey, getStripeWebhookSecret } from "../_shared/stripeEnv.ts";
 
 const HANDLED_EVENTS = new Set([
   "checkout.session.completed",
@@ -8,70 +9,18 @@ const HANDLED_EVENTS = new Set([
   "payment_intent.payment_failed",
 ]);
 
-type StripeEvent = { id: string; type: string; data: { object: Record<string, unknown> } };
-
 function safeStr(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function safeMeta(obj: Record<string, unknown> | null | undefined): Record<string, string> {
-  const meta = obj?.metadata;
-  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return {};
-  return meta as Record<string, string>;
-}
-
-async function verifyStripeSignature(
-  payload: string,
-  sigHeader: string,
-  secret: string
-): Promise<StripeEvent> {
-  if (!sigHeader || !secret) throw new Error("Missing signature or secret");
-
-  let timestamp: string | undefined;
-  const signatures: string[] = [];
-  for (const part of sigHeader.split(",")) {
-    const eq = part.indexOf("=");
-    if (eq === -1) continue;
-    const key = part.slice(0, eq).trim();
-    const value = part.slice(eq + 1).trim();
-    if (key === "t") timestamp = value;
-    if (key === "v1") signatures.push(value);
-  }
-
-  if (!timestamp || signatures.length === 0) {
-    throw new Error("Invalid stripe-signature header");
-  }
-
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const signed = `${timestamp}.${payload}`;
-  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signed));
-  const expected = Array.from(new Uint8Array(mac))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  if (!signatures.some((sig) => sig === expected)) {
-    throw new Error("Webhook signature mismatch");
-  }
-
-  const parsed = JSON.parse(payload) as StripeEvent;
-  if (!parsed?.id || !parsed?.type || !parsed?.data?.object) {
-    throw new Error("Invalid event payload");
-  }
-  return parsed;
+function metaUserId(meta: Stripe.Metadata | null | undefined): string | null {
+  return safeStr(meta?.user_id) ?? safeStr(meta?.customer_id);
 }
 
 async function resolveOrderId(
   db: ReturnType<typeof getServiceDb>,
-  opts: { orderId?: string | null; sessionId?: string | null; metadata?: Record<string, string> }
+  opts: { orderId?: string | null; sessionId?: string | null }
 ): Promise<string | null> {
-  const fromMeta = safeStr(opts.metadata?.order_id);
-  if (fromMeta) return fromMeta;
   if (opts.orderId) return opts.orderId;
   if (!opts.sessionId) return null;
 
@@ -81,16 +30,71 @@ async function resolveOrderId(
     .eq("session_id", opts.sessionId)
     .maybeSingle();
 
-  return safeStr(tx?.order_id) ?? null;
+  const fromTx = safeStr(tx?.order_id);
+  if (fromTx) return fromTx;
+
+  const { data: order } = await db
+    .from("orders")
+    .select("order_id")
+    .eq("stripe_session_id", opts.sessionId)
+    .maybeSingle();
+
+  return safeStr(order?.order_id);
+}
+
+async function syncPaymentsRow(
+  db: ReturnType<typeof getServiceDb>,
+  row: {
+    orderId: string;
+    customerId?: string | null;
+    status: string;
+    stripeCheckoutSession?: string | null;
+    stripePaymentIntent?: string | null;
+    amountPaid?: number | null;
+    currency?: string | null;
+    failureReason?: string | null;
+  }
+) {
+  const patch: Record<string, unknown> = {
+    order_id: row.orderId,
+    customer_id: row.customerId ?? null,
+    status: row.status,
+    updated_at: new Date().toISOString(),
+    webhook_processed_at: new Date().toISOString(),
+  };
+  if (row.stripeCheckoutSession) patch.stripe_checkout_session = row.stripeCheckoutSession;
+  if (row.stripePaymentIntent) patch.stripe_payment_intent = row.stripePaymentIntent;
+  if (row.amountPaid != null) patch.amount_paid = row.amountPaid;
+  if (row.currency) patch.currency = row.currency;
+  if (row.failureReason) patch.payment_failure_reason = row.failureReason;
+
+  const conflict = row.stripePaymentIntent
+    ? "stripe_payment_intent"
+    : row.stripeCheckoutSession
+      ? "stripe_checkout_session"
+      : undefined;
+
+  if (conflict) {
+    await db.from("payments").upsert(patch, { onConflict: conflict });
+  } else {
+    await db.from("payments").insert(patch);
+  }
 }
 
 async function markOrderPaid(
   db: ReturnType<typeof getServiceDb>,
-  opts: { orderId: string; sessionId?: string | null; paymentIntentId?: string | null }
+  opts: {
+    orderId: string;
+    customerId?: string | null;
+    sessionId?: string | null;
+    paymentIntentId?: string | null;
+    amountPaid?: number | null;
+    currency?: string | null;
+  }
 ) {
   const { data: existing } = await db
     .from("orders")
-    .select("order_id, payment_status")
+    .select("order_id, payment_status, customer_id")
     .eq("order_id", opts.orderId)
     .maybeSingle();
 
@@ -108,12 +112,15 @@ async function markOrderPaid(
   const patch: Record<string, unknown> = {
     payment_status: "paid",
     updated_at: now,
+    webhook_processed_at: now,
   };
 
   const sessionId = safeStr(opts.sessionId);
   const paymentIntentId = safeStr(opts.paymentIntentId);
   if (sessionId) patch.stripe_session_id = sessionId;
   if (paymentIntentId) patch.stripe_payment_intent_id = paymentIntentId;
+  if (opts.amountPaid != null) patch.amount_paid = opts.amountPaid;
+  if (opts.currency) patch.currency = opts.currency;
 
   const { error: updateError } = await db
     .from("orders")
@@ -134,84 +141,136 @@ async function markOrderPaid(
       .neq("payment_status", "paid");
   }
 
-  console.log(JSON.stringify({ updated: true, order_id: opts.orderId, session_id: sessionId, payment_intent_id: paymentIntentId }));
+  await syncPaymentsRow(db, {
+    orderId: opts.orderId,
+    customerId: opts.customerId ?? safeStr(existing.customer_id),
+    status: "paid",
+    stripeCheckoutSession: sessionId,
+    stripePaymentIntent: paymentIntentId,
+    amountPaid: opts.amountPaid ?? null,
+    currency: opts.currency ?? null,
+  });
+
+  console.log(JSON.stringify({ updated: true, order_id: opts.orderId, session_id: sessionId }));
 }
 
-async function markOrderFailed(db: ReturnType<typeof getServiceDb>, orderId: string) {
+async function markOrderFailed(
+  db: ReturnType<typeof getServiceDb>,
+  opts: { orderId: string; customerId?: string | null; paymentIntentId?: string | null; reason?: string | null }
+) {
   const { data: existing } = await db
     .from("orders")
-    .select("order_id, payment_status")
-    .eq("order_id", orderId)
+    .select("order_id, payment_status, customer_id")
+    .eq("order_id", opts.orderId)
     .maybeSingle();
 
   if (!existing || existing.payment_status === "paid") return;
 
   const now = new Date().toISOString();
-  await db
-    .from("orders")
-    .update({
-      payment_status: "failed",
-      updated_at: now,
-    })
-    .eq("order_id", orderId)
-    .neq("payment_status", "paid");
+  const patch: Record<string, unknown> = {
+    payment_status: "failed",
+    updated_at: now,
+    webhook_processed_at: now,
+  };
+  if (opts.reason) patch.payment_failure_reason = opts.reason;
+  if (opts.paymentIntentId) patch.stripe_payment_intent_id = opts.paymentIntentId;
 
-  console.log(JSON.stringify({ failed: true, order_id: orderId }));
+  await db.from("orders").update(patch).eq("order_id", opts.orderId).neq("payment_status", "paid");
+
+  await syncPaymentsRow(db, {
+    orderId: opts.orderId,
+    customerId: opts.customerId ?? safeStr(existing.customer_id),
+    status: "payment_failed",
+    stripePaymentIntent: opts.paymentIntentId ?? null,
+    failureReason: opts.reason ?? null,
+  });
 }
 
-async function processEvent(db: ReturnType<typeof getServiceDb>, event: StripeEvent) {
-  const obj = event.data?.object;
-  if (!obj || typeof obj !== "object") return;
-
-  const meta = safeMeta(obj);
-  const sessionId = event.type.startsWith("checkout.session.")
-    ? safeStr(obj.id)
-    : safeStr(meta.session_id);
-  const paymentIntentId =
-    safeStr(obj.payment_intent) ?? (event.type.startsWith("payment_intent.") ? safeStr(obj.id) : null);
-
-  console.log(
-    JSON.stringify({
-      event_type: event.type,
-      order_id: meta.order_id ?? null,
-      session_id: sessionId,
-      payment_intent_id: paymentIntentId,
-    })
-  );
-
+async function processEvent(db: ReturnType<typeof getServiceDb>, event: Stripe.Event) {
   if (!HANDLED_EVENTS.has(event.type)) {
     console.log(JSON.stringify({ event_type: event.type, skipped: "ignored" }));
-    return;
+    return { order_id: null as string | null, session_id: null as string | null, payment_intent_id: null as string | null };
   }
 
   if (event.type === "checkout.session.completed") {
-    if (obj.payment_status !== "paid") return;
-    const orderId = await resolveOrderId(db, { orderId: meta.order_id, sessionId: safeStr(obj.id), metadata: meta });
-    if (!orderId) return;
+    const session = event.data.object as Stripe.Checkout.Session;
+    if (session.payment_status !== "paid") {
+      return { order_id: null, session_id: session.id, payment_intent_id: null };
+    }
+
+    const orderId = await resolveOrderId(db, {
+      orderId: safeStr(session.metadata?.order_id),
+      sessionId: session.id,
+    });
+    const customerId = metaUserId(session.metadata);
+    const paymentIntentId =
+      typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null;
+
+    if (!orderId) {
+      console.log(JSON.stringify({ event_type: event.type, error: "missing_order_id", session_id: session.id }));
+      return { order_id: null, session_id: session.id, payment_intent_id: paymentIntentId };
+    }
+
     await markOrderPaid(db, {
       orderId,
-      sessionId: safeStr(obj.id),
-      paymentIntentId: safeStr(obj.payment_intent),
+      customerId,
+      sessionId: session.id,
+      paymentIntentId,
+      amountPaid: session.amount_total != null ? session.amount_total / 100 : null,
+      currency: session.currency ?? null,
     });
-    return;
+
+    return { order_id: orderId, session_id: session.id, payment_intent_id: paymentIntentId };
   }
 
   if (event.type === "payment_intent.succeeded") {
-    const orderId = await resolveOrderId(db, { orderId: meta.order_id, sessionId: meta.session_id, metadata: meta });
-    if (!orderId) return;
+    const pi = event.data.object as Stripe.PaymentIntent;
+    const orderId = await resolveOrderId(db, {
+      orderId: safeStr(pi.metadata?.order_id),
+      sessionId: safeStr(pi.metadata?.session_id),
+    });
+    const customerId = metaUserId(pi.metadata);
+
+    if (!orderId) {
+      return { order_id: null, session_id: null, payment_intent_id: pi.id };
+    }
+
     await markOrderPaid(db, {
       orderId,
-      sessionId: meta.session_id ?? null,
-      paymentIntentId: safeStr(obj.id),
+      customerId,
+      sessionId: safeStr(pi.metadata?.session_id),
+      paymentIntentId: pi.id,
+      amountPaid: typeof pi.amount === "number" ? pi.amount / 100 : null,
+      currency: pi.currency ?? null,
     });
-    return;
+
+    return { order_id: orderId, session_id: safeStr(pi.metadata?.session_id), payment_intent_id: pi.id };
   }
 
   if (event.type === "payment_intent.payment_failed") {
-    const orderId = await resolveOrderId(db, { orderId: meta.order_id, sessionId: meta.session_id, metadata: meta });
-    if (!orderId) return;
-    await markOrderFailed(db, orderId);
+    const pi = event.data.object as Stripe.PaymentIntent;
+    const orderId = await resolveOrderId(db, {
+      orderId: safeStr(pi.metadata?.order_id),
+      sessionId: safeStr(pi.metadata?.session_id),
+    });
+    const customerId = metaUserId(pi.metadata);
+    const reason = pi.last_payment_error?.message ?? "payment_failed";
+
+    if (!orderId) {
+      return { order_id: null, session_id: null, payment_intent_id: pi.id };
+    }
+
+    await markOrderFailed(db, {
+      orderId,
+      customerId,
+      paymentIntentId: pi.id,
+      reason,
+    });
+
+    return { order_id: orderId, session_id: safeStr(pi.metadata?.session_id), payment_intent_id: pi.id };
   }
+
+  return { order_id: null, session_id: null, payment_intent_id: null };
 }
 
 Deno.serve(async (req) => {
@@ -219,10 +278,20 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
+  const stripeKey = getStripeApiKey();
   const webhookSecret = getStripeWebhookSecret();
-  if (!webhookSecret) {
+  if (!stripeKey || !webhookSecret) {
     console.error(JSON.stringify({ error: "webhook_not_configured" }));
     return new Response("OK", { status: 200 });
+  }
+
+  const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" });
+  const signature = req.headers.get("stripe-signature");
+  if (!signature) {
+    return new Response(JSON.stringify({ error: "missing_stripe_signature" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   let payload = "";
@@ -233,15 +302,16 @@ Deno.serve(async (req) => {
     return new Response("OK", { status: 200 });
   }
 
-  const sigHeader = req.headers.get("stripe-signature") ?? "";
-
-  let event: StripeEvent;
+  let event: Stripe.Event;
   try {
-    event = await verifyStripeSignature(payload, sigHeader, webhookSecret);
+    event = stripe.webhooks.constructEvent(payload, signature, webhookSecret);
   } catch (e) {
     const message = e instanceof Error ? e.message : "invalid_signature";
     console.error(JSON.stringify({ error: message }));
-    return new Response(JSON.stringify({ error: message }), { status: 400 });
+    return new Response(JSON.stringify({ error: message }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const db = getServiceDb();
@@ -252,20 +322,14 @@ Deno.serve(async (req) => {
       return new Response("OK", { status: 200 });
     }
 
-    await processEvent(db, event);
-
-    const sessionId = event.type.startsWith("checkout.session.")
-      ? safeStr(event.data?.object?.id)
-      : safeStr(safeMeta(event.data?.object).session_id);
-    const paymentIntentId =
-      safeStr(event.data?.object?.payment_intent) ??
-      (event.type.startsWith("payment_intent.") ? safeStr(event.data?.object?.id) : null);
+    const result = await processEvent(db, event);
 
     await markEventProcessed(db, {
       event_id: event.id,
       type: event.type,
-      session_id: sessionId,
-      payment_intent_id: paymentIntentId,
+      order_id: result.order_id,
+      session_id: result.session_id,
+      payment_intent_id: result.payment_intent_id,
     });
   } catch (e) {
     console.error(
