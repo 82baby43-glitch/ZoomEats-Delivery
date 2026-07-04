@@ -1,5 +1,5 @@
 // Supabase Edge Function: dispatch-order
-// Triggered by Postgres on paid orders. Runs dispatch logic directly (no FastAPI).
+// Triggered by Postgres on paid orders. Assigns nearest available driver.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
@@ -30,12 +30,11 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ skipped: true, reason: "not_paid" }), { status: 200 });
   }
 
-  if (order.dispatch_status != null) {
-    return new Response(JSON.stringify({ skipped: true, reason: "already_dispatched" }), { status: 200 });
-  }
-
   if (order.driver_id) {
-    return new Response(JSON.stringify({ skipped: true, reason: "driver_assigned" }), { status: 200 });
+    return new Response(JSON.stringify({ skipped: true, reason: "driver_assigned", driver_id: order.driver_id }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const { data: drivers } = await db
@@ -46,28 +45,46 @@ Deno.serve(async (req) => {
     .limit(1);
 
   const driver = drivers?.[0];
-  if (driver) {
-    await db.from("orders").update({
-      driver_id: driver.driver_id,
-      delivery_type: "internal",
-      status: "assigned_internal",
-      tracking_id: `trk_${orderId}`,
-      dispatch_status: "dispatched",
-    }).eq("order_id", orderId).eq("payment_status", "paid").is("driver_id", null);
-
-    await db.from("drivers").update({ workload: (driver.workload || 0) + 1 }).eq("driver_id", driver.driver_id);
-
-    await db.from("deliveries").insert({
-      delivery_id: `dlv_${crypto.randomUUID().slice(0, 12)}`,
-      order_id: orderId,
-      provider: "internal",
-      tracking_id: `trk_${orderId}`,
-      status: "assigned",
-      driver_id: driver.driver_id,
+  if (!driver) {
+    return new Response(JSON.stringify({ ok: true, order_id: orderId, driver_id: null, reason: "no_drivers" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
     });
   }
 
-  return new Response(JSON.stringify({ ok: true, order_id: orderId, driver_id: driver?.driver_id }), {
+  const trackingId = `trk_${orderId}`;
+  const { error: updateError } = await db
+    .from("orders")
+    .update({
+      driver_id: driver.driver_id,
+      delivery_type: "internal",
+      tracking_id: trackingId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("order_id", orderId)
+    .eq("payment_status", "paid")
+    .is("driver_id", null);
+
+  if (updateError) {
+    console.error(JSON.stringify({ error: updateError.message, order_id: orderId }));
+    return new Response(JSON.stringify({ error: updateError.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  await db.from("drivers").update({ workload: (driver.workload || 0) + 1 }).eq("driver_id", driver.driver_id);
+
+  await db.from("deliveries").insert({
+    delivery_id: `dlv_${crypto.randomUUID().slice(0, 12)}`,
+    order_id: orderId,
+    provider: "internal",
+    tracking_id: trackingId,
+    status: "assigned",
+    driver_id: driver.driver_id,
+  });
+
+  return new Response(JSON.stringify({ ok: true, order_id: orderId, driver_id: driver.driver_id }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
