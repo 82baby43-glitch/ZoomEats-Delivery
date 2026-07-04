@@ -140,33 +140,8 @@ export async function markOrderPaidIfNeeded(
   db: SupabaseClient,
   opts: { orderId: string; sessionId: string; stripeSessionStatus?: string }
 ): Promise<{ updated: boolean }> {
-  const { orderId, sessionId, stripeSessionStatus } = opts;
-
-  const { data: order } = await db
-    .from("orders")
-    .select("payment_status, status")
-    .eq("order_id", orderId)
-    .maybeSingle();
-
-  if (!order || order.payment_status === "paid") {
-    structuredLog(LOG_EVENTS.ORDER_UPDATED, { orderId, sessionId, skipped: true, reason: "already_paid" });
-    memoryMarkProcessed(`sess:${sessionId}`);
-    return { updated: false };
-  }
-
-  const txUpdate: Record<string, string> = { payment_status: "paid" };
-  if (stripeSessionStatus) txUpdate.status = stripeSessionStatus;
-
-  await db.from("payment_transactions").update(txUpdate).eq("session_id", sessionId).neq("payment_status", "paid");
-  await db
-    .from("orders")
-    .update({ payment_status: "paid", status: "placed" })
-    .eq("order_id", orderId)
-    .neq("payment_status", "paid");
-
-  memoryMarkProcessed(`sess:${sessionId}`);
-  structuredLog(LOG_EVENTS.ORDER_UPDATED, { orderId, sessionId, updated: true });
-  return { updated: true };
+  const { confirmPaymentFromWebhook } = await import("./paymentEngine.ts");
+  return confirmPaymentFromWebhook(db, { orderId: opts.orderId, sessionId: opts.sessionId, source: "legacy" });
 }
 
 export function getServiceDb() {

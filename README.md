@@ -46,6 +46,7 @@ Auth callback URLs:
 2. Enable Google OAuth: Supabase Dashboard → Auth → Providers → Google (or `npm run auth:google`)
    - Google Cloud redirect URI: `https://njrrhckegbfqhwkqkzvw.supabase.co/auth/v1/callback`
 3. Apply RLS migration: `npm run db:migrate` (needs `SUPABASE_ACCESS_TOKEN` or `DATABASE_URL` in `.env.local`)
-4. Deploy Edge Functions: `supabase functions deploy api dispatch-order stripe-webhook`
+4. Deploy Edge Functions: `supabase functions deploy api dispatch-order stripe-webhook reconcile-payments`
 5. Point Stripe webhook to `/api/stripe/webhook` (Vercel) or the `stripe-webhook` Edge Function URL
-6. Apply idempotency migration: run `supabase/migrations/20260704_stripe_idempotency.sql` in SQL editor or via `npm run db:migrate`
+6. Apply migrations: `20260704_stripe_idempotency.sql` and `20260705_payment_production.sql`
+7. Schedule reconciliation: POST `/api/admin/reconcile` every 5–10 min (set `RECONCILE_CRON_SECRET`)

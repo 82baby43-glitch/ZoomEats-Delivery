@@ -4,8 +4,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { LOG_EVENTS, structuredLog } from "../_shared/stripeIdempotency.ts";
 
-const CONFIRMED_STATUSES = new Set(["placed", "confirmed"]);
-
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
@@ -33,7 +31,8 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ skipped: true, reason: "not_paid" }), { status: 200 });
   }
 
-  if (!CONFIRMED_STATUSES.has(order.status)) {
+  const effectiveOrderStatus = order.order_status ?? (order.status === "placed" ? "confirmed" : null);
+  if (effectiveOrderStatus !== "confirmed") {
     return new Response(JSON.stringify({ skipped: true, reason: "not_confirmed" }), { status: 200 });
   }
 
@@ -67,7 +66,7 @@ Deno.serve(async (req) => {
       })
       .eq("order_id", orderId)
       .eq("payment_status", "paid")
-      .in("status", Array.from(CONFIRMED_STATUSES))
+      .eq("order_status", "confirmed")
       .is("dispatch_status", null)
       .is("driver_id", null)
       .select("order_id")

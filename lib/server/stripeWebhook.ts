@@ -3,102 +3,157 @@ import {
   LOG_EVENTS,
   alreadyProcessedSession,
   logStripeEvent,
-  markOrderPaidIfNeeded,
   structuredLog,
+  claimStripeEvent,
 } from "./stripeIdempotency";
+import {
+  WEBHOOK_EVENTS,
+  confirmPaymentFromWebhook,
+  handleSessionCreated,
+  markPaymentFailed,
+  resolveOrderIdForSession,
+  logPaymentError,
+} from "./paymentEngine";
 
-type StripeEvent = {
+export type StripeEvent = {
   id: string;
   type: string;
   data: { object: Record<string, unknown> };
 };
 
-export async function processStripeWebhookEvent(db: SupabaseClient, event: StripeEvent): Promise<void> {
-  const sessionId =
-    event.type === "checkout.session.completed"
-      ? (event.data.object.id as string)
-      : (event.data.object.metadata as Record<string, string> | undefined)?.session_id ||
-        (event.data.object as { id?: string }).id;
+const RETRY_DELAYS_MS = [1000, 2000, 5000];
+const MAX_RETRIES = 3;
 
-  if (sessionId && (await alreadyProcessedSession(db, sessionId))) {
+function extractSessionId(event: StripeEvent): string | null {
+  const obj = event.data.object;
+  if (event.type.startsWith("checkout.session.")) return obj.id as string;
+  const meta = obj.metadata as Record<string, string> | undefined;
+  return meta?.session_id ?? null;
+}
+
+function extractPaymentIntentId(event: StripeEvent): string | null {
+  const obj = event.data.object;
+  if (event.type.startsWith("payment_intent.")) return obj.id as string;
+  return (obj.payment_intent as string) ?? null;
+}
+
+async function processWithRetry(db: SupabaseClient, event: StripeEvent): Promise<void> {
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      await dispatchWebhookEvent(db, event);
+      return;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      await logPaymentError(db, {
+        event_id: event.id,
+        error_message: message,
+        retry_count: attempt + 1,
+        source: "webhook",
+      });
+      if (attempt >= MAX_RETRIES - 1) throw e;
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+    }
+  }
+}
+
+async function dispatchWebhookEvent(db: SupabaseClient, event: StripeEvent): Promise<void> {
+  const sessionId = extractSessionId(event);
+  const paymentIntentId = extractPaymentIntentId(event);
+
+  if (!WEBHOOK_EVENTS.has(event.type)) {
     await logStripeEvent(db, {
       event_id: event.id,
       type: event.type,
       session_id: sessionId,
-      status: "processed",
-    });
-    structuredLog(LOG_EVENTS.WEBHOOK_PROCESSED, { eventId: event.id, sessionId, skipped: true, reason: "session_done" });
-    return;
-  }
-
-  try {
-    if (event.type === "checkout.session.completed") {
-      await handleCheckoutSessionCompleted(db, event);
-    } else if (event.type === "payment_intent.succeeded") {
-      await handlePaymentIntentSucceeded(db, event);
-    } else {
-      await logStripeEvent(db, { event_id: event.id, type: event.type, session_id: sessionId ?? null, status: "ignored" });
-      return;
-    }
-
-    await logStripeEvent(db, {
-      event_id: event.id,
-      type: event.type,
-      session_id: sessionId ?? null,
-      status: "processed",
-    });
-    structuredLog(LOG_EVENTS.WEBHOOK_PROCESSED, { eventId: event.id, type: event.type, sessionId });
-  } catch (e) {
-    await logStripeEvent(db, {
-      event_id: event.id,
-      type: event.type,
-      session_id: sessionId ?? null,
-      status: "failed",
-    });
-    throw e;
-  }
-}
-
-async function handleCheckoutSessionCompleted(db: SupabaseClient, event: StripeEvent) {
-  const session = event.data.object;
-  const sessionId = session.id as string;
-  const paymentStatus = session.payment_status as string;
-  if (paymentStatus !== "paid") return;
-
-  const orderId = (session.metadata as Record<string, string> | undefined)?.order_id;
-  if (!orderId) {
-    const { data: tx } = await db.from("payment_transactions").select("order_id").eq("session_id", sessionId).maybeSingle();
-    if (!tx?.order_id) return;
-    await markOrderPaidIfNeeded(db, {
-      orderId: tx.order_id,
-      sessionId,
-      stripeSessionStatus: session.status as string,
+      status: "ignored",
     });
     return;
   }
 
-  await markOrderPaidIfNeeded(db, {
-    orderId,
-    sessionId,
-    stripeSessionStatus: session.status as string,
+  if (sessionId && (await alreadyProcessedSession(db, sessionId)) && event.type !== "payment_intent.payment_failed") {
+    await logStripeEvent(db, { event_id: event.id, type: event.type, session_id: sessionId, status: "processed" });
+    structuredLog(LOG_EVENTS.WEBHOOK_PROCESSED, { eventId: event.id, sessionId, skipped: true });
+    return;
+  }
+
+  if (event.type === "checkout.session.created") {
+    await handleSessionCreated(db, event.data.object);
+  } else if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    if (session.payment_status !== "paid") return;
+    const sid = session.id as string;
+    const metadata = session.metadata as Record<string, string> | undefined;
+    const orderId = metadata?.order_id ?? (await resolveOrderIdForSession(db, sid));
+    if (!orderId) return;
+    await confirmPaymentFromWebhook(db, {
+      orderId,
+      sessionId: sid,
+      paymentIntentId: (session.payment_intent as string) ?? paymentIntentId ?? undefined,
+    });
+  } else if (event.type === "payment_intent.succeeded") {
+    const intent = event.data.object;
+    const metadata = intent.metadata as Record<string, string> | undefined;
+    const sid = metadata?.session_id ?? sessionId;
+    const orderId = metadata?.order_id ?? (sid ? await resolveOrderIdForSession(db, sid) : null);
+    if (!orderId || !sid) return;
+    await confirmPaymentFromWebhook(db, {
+      orderId,
+      sessionId: sid,
+      paymentIntentId: intent.id as string,
+    });
+  } else if (event.type === "payment_intent.payment_failed") {
+    const intent = event.data.object;
+    const metadata = intent.metadata as Record<string, string> | undefined;
+    await markPaymentFailed(db, {
+      orderId: metadata?.order_id,
+      sessionId: metadata?.session_id ?? sessionId ?? undefined,
+      paymentIntentId: intent.id as string,
+    });
+  }
+
+  await logStripeEvent(db, {
+    event_id: event.id,
+    type: event.type,
+    session_id: sessionId,
+    status: "processed",
   });
+  structuredLog(LOG_EVENTS.WEBHOOK_PROCESSED, { eventId: event.id, type: event.type, sessionId });
 }
 
-async function handlePaymentIntentSucceeded(db: SupabaseClient, event: StripeEvent) {
-  const intent = event.data.object;
-  const metadata = intent.metadata as Record<string, string> | undefined;
-  const orderId = metadata?.order_id;
-  const sessionId = metadata?.session_id;
+/** Validate signature → claim event → return 200 fast → process async (caller responsibility). */
+export async function handleStripeWebhook(
+  db: SupabaseClient,
+  event: StripeEvent,
+  opts: { asyncProcess?: boolean } = {}
+): Promise<"duplicate" | "accepted"> {
+  structuredLog(LOG_EVENTS.WEBHOOK_RECEIVED, { eventId: event.id, type: event.type });
 
-  if (orderId && sessionId) {
-    await markOrderPaidIfNeeded(db, { orderId, sessionId });
-    return;
+  const sessionId = extractSessionId(event);
+  const claim = await claimStripeEvent(db, {
+    event_id: event.id,
+    type: event.type,
+    session_id: sessionId,
+  });
+
+  if (claim === "duplicate") return "duplicate";
+
+  const work = processWithRetry(db, event).catch(async (e) => {
+    console.error("Webhook processing error:", e);
+    await logStripeEvent(db, { event_id: event.id, type: event.type, session_id: sessionId, status: "failed" });
+    await logPaymentError(db, {
+      event_id: event.id,
+      session_id: sessionId ?? undefined,
+      error_message: e instanceof Error ? e.message : String(e),
+      retry_count: MAX_RETRIES,
+      source: "webhook",
+    });
+  });
+
+  if (opts.asyncProcess !== false) {
+    void work;
+  } else {
+    await work;
   }
 
-  if (sessionId) {
-    const { data: tx } = await db.from("payment_transactions").select("order_id").eq("session_id", sessionId).maybeSingle();
-    if (tx?.order_id) {
-      await markOrderPaidIfNeeded(db, { orderId: tx.order_id, sessionId });
-    }
-  }
+  return "accepted";
 }

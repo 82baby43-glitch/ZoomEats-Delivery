@@ -4,9 +4,14 @@ import {
   LOG_EVENTS,
   alreadyProcessedSession,
   fetchWithRateLimitRetry,
-  markOrderPaidIfNeeded,
   structuredLog,
 } from "./stripeIdempotency";
+import {
+  PaymentStatus,
+  OrderStatus,
+  lockCheckoutSession,
+  writePaymentAudit,
+} from "./paymentEngine";
 
 function throwErr(message: string, status = 400): never {
   const e = new Error(message) as Error & { status?: number };
@@ -237,10 +242,12 @@ export async function handleApiRequest(
         address: body.address || "",
         notes: body.notes || "",
         status: "pending_payment",
-        payment_status: "pending",
+        payment_status: PaymentStatus.REQUIRES_PAYMENT,
+        order_status: OrderStatus.AWAITING_PAYMENT,
         price_hash: computePriceHash(repriced),
       };
       const { data } = await db.from("orders").insert(order).select().single();
+      await writePaymentAudit(db, { order_id: order.order_id, action: "created", source: "api", meta: { customer_id: u.user_id } });
       return data;
     }
     if (path === "/orders/my" && method === "GET") {
@@ -351,46 +358,40 @@ export async function handleApiRequest(
       if (!order_id || !origin_url) throwErr("order_id & origin_url required");
       const { data: o } = await db.from("orders").select("*").eq("order_id", order_id).eq("customer_id", u.user_id).maybeSingle();
       if (!o) throwErr("Order not found", 404);
-      if (o.payment_status === "paid") throwErr("Already paid");
+      if (o.payment_status === PaymentStatus.PAID) throwErr("Already paid");
+
+      const { data: existingLock } = await db
+        .from("stripe_checkout_sessions")
+        .select("session_id, status")
+        .eq("order_id", order_id)
+        .maybeSingle();
+      if (existingLock?.status === "complete") throwErr("Already paid");
 
       structuredLog(LOG_EVENTS.CHECKOUT_STARTED, { orderId: order_id, userId: u.user_id });
 
-      if (o.stripe_session_id) {
+      const reuseSessionId = o.stripe_session_id || existingLock?.session_id;
+      if (reuseSessionId) {
         const { data: existingTx } = await db
           .from("payment_transactions")
           .select("session_id, payment_status")
-          .eq("session_id", o.stripe_session_id)
+          .eq("session_id", reuseSessionId)
           .maybeSingle();
-        if (existingTx && existingTx.payment_status !== "paid") {
-          structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, { orderId: order_id, sessionId: o.stripe_session_id, reused: true });
-          if (!stripeKey) {
-            return { url: `${origin_url}/checkout/success?session_id=${o.stripe_session_id}`, session_id: o.stripe_session_id };
-          }
+        if (existingTx && existingTx.payment_status !== PaymentStatus.PAID) {
+          structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, { orderId: order_id, sessionId: reuseSessionId, reused: true });
           const r = await fetchWithRateLimitRetry(
-            `https://api.stripe.com/v1/checkout/sessions/${o.stripe_session_id}`,
+            `https://api.stripe.com/v1/checkout/sessions/${reuseSessionId}`,
             { headers: { Authorization: `Bearer ${stripeKey}` } },
             db
           );
           const existingSession = await r.json();
           if (r.ok && existingSession.url) {
-            return { url: existingSession.url, session_id: o.stripe_session_id };
+            return { url: existingSession.url, session_id: reuseSessionId };
           }
         }
       }
 
       if (!stripeKey) {
-        const session_id = uid("cs_test");
-        await db.from("payment_transactions").insert({
-          session_id,
-          order_id,
-          user_id: u.user_id,
-          amount: o.total,
-          currency: "usd",
-          payment_status: "initiated",
-        });
-        await db.from("orders").update({ stripe_session_id: session_id }).eq("order_id", order_id);
-        structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, { orderId: order_id, sessionId: session_id, testMode: true });
-        return { url: `${origin_url}/checkout/success?session_id=${session_id}`, session_id };
+        throwErr("Stripe is required for checkout. Configure STRIPE_API_KEY.", 503);
       }
 
       const stripeRes = await fetchWithRateLimitRetry(
@@ -414,15 +415,34 @@ export async function handleApiRequest(
       );
       const session = await stripeRes.json();
       if (!stripeRes.ok) throwErr(session.error?.message || "Stripe error", 500);
+
+      const lock = await lockCheckoutSession(db, { session_id: session.id, order_id, status: "open" });
+      if (lock === "duplicate") throwErr("Checkout session already exists for this order", 409);
+
       await db.from("payment_transactions").insert({
         session_id: session.id,
         order_id,
         user_id: u.user_id,
         amount: o.total,
         currency: "usd",
-        payment_status: "initiated",
+        payment_status: PaymentStatus.PROCESSING,
       });
-      await db.from("orders").update({ stripe_session_id: session.id }).eq("order_id", order_id);
+      await db
+        .from("orders")
+        .update({
+          stripe_session_id: session.id,
+          payment_status: PaymentStatus.PROCESSING,
+          order_status: OrderStatus.AWAITING_PAYMENT,
+        })
+        .eq("order_id", order_id)
+        .neq("payment_status", PaymentStatus.PAID);
+
+      await writePaymentAudit(db, {
+        order_id,
+        action: "checkout_session_created",
+        source: "api",
+        meta: { session_id: session.id },
+      });
       structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, { orderId: order_id, sessionId: session.id });
       return { url: session.url, session_id: session.id };
     }
@@ -433,21 +453,39 @@ export async function handleApiRequest(
       const session_id = checkoutStatusMatch[1];
       const { data: tx } = await db.from("payment_transactions").select("*").eq("session_id", session_id).maybeSingle();
 
-      if (tx?.payment_status === "paid" || (await alreadyProcessedSession(db, session_id))) {
+      let orderRow: { payment_status?: string; order_status?: string } | null = null;
+      if (tx?.order_id) {
+        const { data: o } = await db
+          .from("orders")
+          .select("payment_status, order_status")
+          .eq("order_id", tx.order_id)
+          .maybeSingle();
+        orderRow = o;
+      }
+
+      const dbPaymentStatus = orderRow?.payment_status ?? tx?.payment_status ?? PaymentStatus.PENDING;
+
+      if (dbPaymentStatus === PaymentStatus.PAID || (await alreadyProcessedSession(db, session_id))) {
         return {
           status: "complete",
-          payment_status: "paid",
+          payment_status: PaymentStatus.PAID,
+          order_status: orderRow?.order_status ?? OrderStatus.CONFIRMED,
           amount_total: Math.round((tx?.amount || 0) * 100),
           currency: "usd",
+          source: "supabase",
           cached: true,
         };
       }
 
       if (!stripeKey) {
-        if (tx && tx.payment_status !== "paid" && tx.order_id) {
-          await markOrderPaidIfNeeded(db, { orderId: tx.order_id, sessionId: session_id });
-        }
-        return { status: "complete", payment_status: "paid", amount_total: Math.round((tx?.amount || 0) * 100), currency: "usd" };
+        return {
+          status: "open",
+          payment_status: dbPaymentStatus,
+          order_status: orderRow?.order_status ?? OrderStatus.AWAITING_PAYMENT,
+          amount_total: Math.round((tx?.amount || 0) * 100),
+          currency: "usd",
+          source: "supabase",
+        };
       }
 
       try {
@@ -456,26 +494,38 @@ export async function handleApiRequest(
           { headers: { Authorization: `Bearer ${stripeKey}` } },
           db
         );
-        const status = await r.json();
+        const stripeSession = await r.json();
         if (r.status === 429) {
           return {
             status: "open",
-            payment_status: tx?.payment_status || "pending",
+            payment_status: dbPaymentStatus,
+            order_status: orderRow?.order_status,
             amount_total: Math.round((tx?.amount || 0) * 100),
             currency: "usd",
             rate_limited: true,
+            source: "supabase",
           };
         }
-        if (tx && tx.payment_status !== "paid" && status.payment_status === "paid" && tx.order_id) {
-          await markOrderPaidIfNeeded(db, {
-            orderId: tx.order_id,
-            sessionId: session_id,
-            stripeSessionStatus: status.status,
-          });
-        }
-        return { status: status.status, payment_status: status.payment_status, amount_total: status.amount_total, currency: status.currency };
+        return {
+          status: stripeSession.status,
+          payment_status: dbPaymentStatus,
+          stripe_payment_status: stripeSession.payment_status,
+          order_status: orderRow?.order_status,
+          amount_total: stripeSession.amount_total,
+          currency: stripeSession.currency,
+          source: "supabase",
+          read_only: true,
+        };
       } catch {
-        return { status: "open", payment_status: tx?.payment_status || "pending", amount_total: Math.round((tx?.amount || 0) * 100), currency: "usd", soft_error: true };
+        return {
+          status: "open",
+          payment_status: dbPaymentStatus,
+          order_status: orderRow?.order_status,
+          amount_total: Math.round((tx?.amount || 0) * 100),
+          currency: "usd",
+          soft_error: true,
+          source: "supabase",
+        };
       }
     }
 
