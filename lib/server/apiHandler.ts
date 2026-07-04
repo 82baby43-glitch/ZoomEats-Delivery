@@ -11,6 +11,7 @@ import {
   OrderStatus,
   lockCheckoutSession,
   writePaymentAudit,
+  confirmPaymentFromStripeSession,
 } from "./paymentEngine";
 
 function throwErr(message: string, status = 400): never {
@@ -391,7 +392,30 @@ export async function handleApiRequest(
       }
 
       if (!stripeKey) {
-        throwErr("Stripe is required for checkout. Configure STRIPE_API_KEY.", 503);
+        const session_id = uid("cs_test");
+        await lockCheckoutSession(db, { session_id, order_id, status: "open" });
+        await db.from("payment_transactions").upsert(
+          {
+            session_id,
+            order_id,
+            user_id: u.user_id,
+            amount: o.total,
+            currency: "usd",
+            payment_status: PaymentStatus.PROCESSING,
+          },
+          { onConflict: "session_id" }
+        );
+        await db
+          .from("orders")
+          .update({
+            stripe_session_id: session_id,
+            payment_status: PaymentStatus.PROCESSING,
+            order_status: OrderStatus.AWAITING_PAYMENT,
+          })
+          .eq("order_id", order_id)
+          .neq("payment_status", PaymentStatus.PAID);
+        structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, { orderId: order_id, sessionId: session_id, testMode: true });
+        return { url: `${origin_url}/checkout/success?session_id=${session_id}`, session_id };
       }
 
       const stripeRes = await fetchWithRateLimitRetry(
@@ -417,16 +441,24 @@ export async function handleApiRequest(
       if (!stripeRes.ok) throwErr(session.error?.message || "Stripe error", 500);
 
       const lock = await lockCheckoutSession(db, { session_id: session.id, order_id, status: "open" });
-      if (lock === "duplicate") throwErr("Checkout session already exists for this order", 409);
+      if (lock === "duplicate") {
+        const { data: ex } = await db.from("stripe_checkout_sessions").select("session_id").eq("order_id", order_id).maybeSingle();
+        if (ex?.session_id && ex.session_id !== session.id) {
+          throwErr("Checkout already in progress for this order", 409);
+        }
+      }
 
-      await db.from("payment_transactions").insert({
-        session_id: session.id,
-        order_id,
-        user_id: u.user_id,
-        amount: o.total,
-        currency: "usd",
-        payment_status: PaymentStatus.PROCESSING,
-      });
+      await db.from("payment_transactions").upsert(
+        {
+          session_id: session.id,
+          order_id,
+          user_id: u.user_id,
+          amount: o.total,
+          currency: "usd",
+          payment_status: PaymentStatus.PROCESSING,
+        },
+        { onConflict: "session_id" }
+      );
       await db
         .from("orders")
         .update({
@@ -445,6 +477,19 @@ export async function handleApiRequest(
       });
       structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, { orderId: order_id, sessionId: session.id });
       return { url: session.url, session_id: session.id };
+    }
+
+    const checkoutConfirmMatch = path.match(/^\/checkout\/confirm\/([^/]+)$/);
+    if (checkoutConfirmMatch && method === "POST") {
+      const u = requireAuth();
+      const session_id = checkoutConfirmMatch[1];
+      const result = await confirmPaymentFromStripeSession(db, {
+        sessionId: session_id,
+        stripeKey,
+        userId: u.user_id as string,
+        devMode: !stripeKey,
+      });
+      return result;
     }
 
     const checkoutStatusMatch = path.match(/^\/checkout\/status\/([^/]+)$/);

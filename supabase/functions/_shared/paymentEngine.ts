@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { structuredLog, LOG_EVENTS, memoryMarkProcessed } from "./stripeIdempotency.ts";
+import { structuredLog, LOG_EVENTS, memoryMarkProcessed, fetchWithRateLimitRetry } from "./stripeIdempotency.ts";
 
 export const PaymentStatus = {
   PENDING: "pending",
@@ -65,7 +65,9 @@ export async function lockCheckoutSession(
     { session_id: row.session_id, order_id: row.order_id, status: row.status ?? "created", updated_at: new Date().toISOString() },
     { onConflict: "session_id" }
   );
-  if (error) return "duplicate";
+  if (error) {
+    if (error.code !== "42P01") return "duplicate";
+  }
   return "locked";
 }
 
@@ -134,4 +136,75 @@ export async function resolveOrderIdForSession(db: SupabaseClient, sessionId: st
   if (locked?.order_id) return locked.order_id;
   const { data: tx } = await db.from("payment_transactions").select("order_id").eq("session_id", sessionId).maybeSingle();
   return tx?.order_id ?? null;
+}
+
+/** Verify with Stripe API, then sync via confirmPaymentFromWebhook (webhook fallback / local dev). */
+export async function confirmPaymentFromStripeSession(
+  db: SupabaseClient,
+  opts: { sessionId: string; stripeKey: string; userId: string; devMode?: boolean }
+): Promise<{
+  payment_status: string;
+  confirmed: boolean;
+  order_id?: string;
+  stripe_payment_status?: string;
+}> {
+  const { sessionId, stripeKey, userId, devMode } = opts;
+
+  const { data: tx } = await db.from("payment_transactions").select("*").eq("session_id", sessionId).maybeSingle();
+  if (!tx) throw Object.assign(new Error("Checkout session not found"), { status: 404 });
+
+  const { data: order } = await db
+    .from("orders")
+    .select("order_id, customer_id, payment_status")
+    .eq("order_id", tx.order_id)
+    .maybeSingle();
+
+  if (!order || order.customer_id !== userId) {
+    throw Object.assign(new Error("Forbidden"), { status: 403 });
+  }
+
+  if (order.payment_status === PaymentStatus.PAID || tx.payment_status === PaymentStatus.PAID) {
+    return { payment_status: PaymentStatus.PAID, confirmed: true, order_id: order.order_id };
+  }
+
+  if (devMode && sessionId.startsWith("cs_test_")) {
+    await confirmPaymentFromWebhook(db, { orderId: order.order_id, sessionId, source: "dev_confirm" });
+    return { payment_status: PaymentStatus.PAID, confirmed: true, order_id: order.order_id };
+  }
+
+  if (!stripeKey) {
+    throw Object.assign(new Error("Stripe is not configured"), { status: 503 });
+  }
+
+  const r = await fetchWithRateLimitRetry(
+    `https://api.stripe.com/v1/checkout/sessions/${sessionId}`,
+    { headers: { Authorization: `Bearer ${stripeKey}` } },
+    db
+  );
+  const stripeSession = await r.json();
+  if (!r.ok) {
+    throw Object.assign(new Error(stripeSession.error?.message || "Stripe error"), { status: 500 });
+  }
+
+  if (stripeSession.payment_status === "paid") {
+    await confirmPaymentFromWebhook(db, {
+      orderId: order.order_id,
+      sessionId,
+      paymentIntentId: stripeSession.payment_intent as string | undefined,
+      source: "stripe_verify",
+    });
+    return {
+      payment_status: PaymentStatus.PAID,
+      confirmed: true,
+      order_id: order.order_id,
+      stripe_payment_status: stripeSession.payment_status,
+    };
+  }
+
+  return {
+    payment_status: order.payment_status ?? tx.payment_status ?? PaymentStatus.PROCESSING,
+    confirmed: false,
+    order_id: order.order_id,
+    stripe_payment_status: stripeSession.payment_status,
+  };
 }

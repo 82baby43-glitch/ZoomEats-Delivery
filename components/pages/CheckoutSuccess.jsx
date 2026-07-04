@@ -2,15 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { safeGet } from "@/lib/api";
+import { api, safeGet } from "@/lib/api";
 import Header from "@/components/Header";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
-import { OrderState, PAYMENT_STATE_LABEL, resolveCheckoutStatus } from "@/lib/orderState";
+import { OrderState, PAYMENT_STATE_LABEL } from "@/lib/orderState";
 import { sanitizeOrder, sanitizeOrders } from "@/lib/safeData";
 import { logClientError } from "@/lib/clientErrorLog";
 
-const MAX_ATTEMPTS = 3;
-const RETRY_DELAYS_MS = [1000, 2000, 5000];
+const MAX_ATTEMPTS = 8;
+const RETRY_DELAYS_MS = [1000, 1500, 2000, 2500, 3000, 4000, 5000, 5000];
 
 export default function CheckoutSuccess() {
   const [params] = useSearchParams();
@@ -25,7 +25,6 @@ export default function CheckoutSuccess() {
     hasVerifiedRef.current = false;
   }, [verifyTick]);
 
-  // Hydration-safe: read session_id only on client after mount
   useEffect(() => {
     const id = params.get("session_id");
     setSessionId(id);
@@ -44,15 +43,26 @@ export default function CheckoutSuccess() {
       for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         if (cancelled) return;
         try {
+          // Ask server to verify with Stripe and sync — webhook fallback
+          const confirm = await api.post(`/checkout/confirm/${sessionId}`);
+          if (cancelled) return;
+
+          if (confirm.data?.payment_status === "paid" || confirm.data?.confirmed) {
+            setStatus("paid");
+            const orders = await safeGet("/orders/my", []);
+            const list = sanitizeOrders(orders);
+            const match = list.find((o) => o.stripe_session_id === sessionId) || list[0];
+            if (!cancelled) setOrder(match ? sanitizeOrder(match) : null);
+            return;
+          }
+
           const checkoutData = await safeGet(`/checkout/status/${sessionId}`, {
-            payment_status: "pending",
+            payment_status: "processing",
             status: "open",
           });
           if (cancelled) return;
 
-          const paymentState = resolveCheckoutStatus(checkoutData);
-
-          if (paymentState === OrderState.PAID) {
+          if (checkoutData?.payment_status === "paid" || checkoutData?.cached) {
             setStatus("paid");
             const orders = await safeGet("/orders/my", []);
             const list = sanitizeOrders(orders);
@@ -60,14 +70,9 @@ export default function CheckoutSuccess() {
             return;
           }
 
-          if (paymentState === OrderState.FAILED) {
+          if (checkoutData?.status === "expired" || checkoutData?.stripe_payment_status === "unpaid") {
             setStatus("expired");
             return;
-          }
-
-          if (checkoutData?.rate_limited && attempt < MAX_ATTEMPTS - 1) {
-            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
-            continue;
           }
 
           if (attempt < MAX_ATTEMPTS - 1) {
@@ -113,7 +118,7 @@ export default function CheckoutSuccess() {
             <Loader2 size={48} className="mx-auto animate-spin" style={{ color: "var(--primary)" }} />
             <h1 className="font-display text-3xl font-black mt-4">Processing payment…</h1>
             <p className="mt-2" style={{ color: "var(--muted)" }}>
-              Your payment is still being confirmed. This can take a moment — no need to pay again.
+              Payment received — waiting for confirmation. This usually completes in a few seconds.
             </p>
             <button type="button" className="btn-secondary mt-6" onClick={retryVerify}>
               Check again

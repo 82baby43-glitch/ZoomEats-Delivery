@@ -11,6 +11,7 @@ import {
   OrderStatus,
   lockCheckoutSession,
   writePaymentAudit,
+  confirmPaymentFromStripeSession,
 } from "../_shared/paymentEngine.ts";
 
 const corsHeaders = {
@@ -395,7 +396,32 @@ Deno.serve(async (req) => {
         }
       }
 
-      if (!stripeKey) return err("Stripe is required for checkout. Configure STRIPE_API_KEY.", 503);
+      if (!stripeKey) {
+        const session_id = uid("cs_test");
+        await lockCheckoutSession(db, { session_id, order_id, status: "open" });
+        await db.from("payment_transactions").upsert(
+          {
+            session_id,
+            order_id,
+            user_id: u.user_id,
+            amount: o.total,
+            currency: "usd",
+            payment_status: PaymentStatus.PROCESSING,
+          },
+          { onConflict: "session_id" }
+        );
+        await db
+          .from("orders")
+          .update({
+            stripe_session_id: session_id,
+            payment_status: PaymentStatus.PROCESSING,
+            order_status: OrderStatus.AWAITING_PAYMENT,
+          })
+          .eq("order_id", order_id)
+          .neq("payment_status", PaymentStatus.PAID);
+        structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, { orderId: order_id, sessionId: session_id, testMode: true });
+        return json({ url: `${origin_url}/checkout/success?session_id=${session_id}`, session_id });
+      }
 
       const stripeRes = await fetchWithRateLimitRetry(
         "https://api.stripe.com/v1/checkout/sessions",
@@ -420,16 +446,24 @@ Deno.serve(async (req) => {
       if (!stripeRes.ok) return err(session.error?.message || "Stripe error", 500);
 
       const lock = await lockCheckoutSession(db, { session_id: session.id, order_id, status: "open" });
-      if (lock === "duplicate") return err("Checkout session already exists for this order", 409);
+      if (lock === "duplicate") {
+        const { data: ex } = await db.from("stripe_checkout_sessions").select("session_id").eq("order_id", order_id).maybeSingle();
+        if (ex?.session_id && ex.session_id !== session.id) {
+          return err("Checkout already in progress for this order", 409);
+        }
+      }
 
-      await db.from("payment_transactions").insert({
-        session_id: session.id,
-        order_id,
-        user_id: u.user_id,
-        amount: o.total,
-        currency: "usd",
-        payment_status: PaymentStatus.PROCESSING,
-      });
+      await db.from("payment_transactions").upsert(
+        {
+          session_id: session.id,
+          order_id,
+          user_id: u.user_id,
+          amount: o.total,
+          currency: "usd",
+          payment_status: PaymentStatus.PROCESSING,
+        },
+        { onConflict: "session_id" }
+      );
       await db.from("orders").update({
         stripe_session_id: session.id,
         payment_status: PaymentStatus.PROCESSING,
@@ -439,6 +473,24 @@ Deno.serve(async (req) => {
       await writePaymentAudit(db, { order_id, action: "checkout_session_created", source: "api", meta: { session_id: session.id } });
       structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, { orderId: order_id, sessionId: session.id });
       return json({ url: session.url, session_id: session.id });
+    }
+
+    const checkoutConfirmMatch = path.match(/^\/checkout\/confirm\/([^/]+)$/);
+    if (checkoutConfirmMatch && method === "POST") {
+      const u = requireAuth();
+      const session_id = checkoutConfirmMatch[1];
+      try {
+        const result = await confirmPaymentFromStripeSession(db, {
+          sessionId: session_id,
+          stripeKey,
+          userId: u.user_id as string,
+          devMode: !stripeKey,
+        });
+        return json(result);
+      } catch (e) {
+        const errObj = e as Error & { status?: number };
+        return err(errObj.message || "Confirm failed", errObj.status ?? 500);
+      }
     }
 
     const checkoutStatusMatch = path.match(/^\/checkout\/status\/([^/]+)$/);

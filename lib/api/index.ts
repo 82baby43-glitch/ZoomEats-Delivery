@@ -101,7 +101,8 @@ async function request(path: string, method: string, body?: unknown, params?: Re
     if (cached !== null) return cached;
   }
 
-  const inflight = inflightRequests.get(key);
+  const skipDedupe = path.startsWith("/checkout/confirm/");
+  const inflight = skipDedupe ? undefined : inflightRequests.get(key);
   if (inflight) return inflight;
 
   const promise = invokeBackendApi(path, method, body, params)
@@ -114,10 +115,10 @@ async function request(path: string, method: string, body?: unknown, params?: Re
       throw e;
     })
     .finally(() => {
-      setTimeout(() => inflightRequests.delete(key), DEDUPE_TTL_MS);
+      if (!skipDedupe) setTimeout(() => inflightRequests.delete(key), DEDUPE_TTL_MS);
     });
 
-  inflightRequests.set(key, promise);
+  if (!skipDedupe) inflightRequests.set(key, promise);
   return promise;
 }
 
