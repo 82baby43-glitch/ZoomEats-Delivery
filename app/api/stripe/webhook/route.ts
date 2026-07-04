@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-import { processStripeWebhookEvent } from "@/lib/server/stripeWebhook";
-import { LOG_EVENTS, claimStripeEvent, logStripeEvent, structuredLog } from "@/lib/server/stripeIdempotency";
+import { handleStripeWebhook } from "@/lib/server/stripeWebhook";
 
 export const runtime = "nodejs";
 
@@ -50,25 +49,7 @@ export async function POST(req: NextRequest) {
   }
 
   const db = getSupabaseAdmin();
-
-  const sessionId =
-    event.type === "checkout.session.completed"
-      ? (event.data.object.id as string)
-      : (event.data.object.metadata as Record<string, string> | undefined)?.session_id;
-
-  if ((await claimStripeEvent(db, { event_id: event.id, type: event.type, session_id: sessionId })) === "duplicate") {
-    return new NextResponse("OK", { status: 200 });
-  }
-
-  structuredLog(LOG_EVENTS.WEBHOOK_RECEIVED, { eventId: event.id, type: event.type });
-
-  const processPromise = processStripeWebhookEvent(db, event).catch(async (e) => {
-    console.error("Webhook processing error:", e);
-    await logStripeEvent(db, { event_id: event.id, type: event.type, status: "failed" });
-  });
-
-  // Non-blocking: respond fast, finish processing in background
-  void processPromise;
+  await handleStripeWebhook(db, event, { asyncProcess: true });
 
   return new NextResponse("OK", { status: 200 });
 }

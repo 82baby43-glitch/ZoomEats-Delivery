@@ -40,13 +40,16 @@ export async function dbEventExists(db: SupabaseClient, eventId: string): Promis
 
 export async function logStripeEvent(
   db: SupabaseClient,
-  row: { event_id: string; type: string; session_id?: string | null; status?: string }
+  row: { event_id: string; type: string; session_id?: string | null; payment_intent_id?: string | null; status?: string }
 ) {
   await db.from("stripe_event_log").upsert(
     {
       event_id: row.event_id,
       type: row.type,
+      event_type: row.type,
       session_id: row.session_id ?? null,
+      stripe_session_id: row.session_id ?? null,
+      payment_intent_id: row.payment_intent_id ?? null,
       status: row.status ?? "processed",
       processed_at: new Date().toISOString(),
     },
@@ -67,7 +70,9 @@ export async function claimStripeEvent(
   const { error } = await db.from("stripe_event_log").insert({
     event_id: row.event_id,
     type: row.type,
+    event_type: row.type,
     session_id: row.session_id ?? null,
+    stripe_session_id: row.session_id ?? null,
     status: "processing",
     processed_at: new Date().toISOString(),
   });
@@ -127,38 +132,4 @@ export async function fetchWithRateLimitRetry(
     await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
   }
   throw new Error("fetchWithRateLimitRetry exhausted");
-}
-
-/** Mark order paid only when payment_status is not already 'paid'. */
-export async function markOrderPaidIfNeeded(
-  db: SupabaseClient,
-  opts: { orderId: string; sessionId: string; stripeSessionStatus?: string }
-): Promise<{ updated: boolean }> {
-  const { orderId, sessionId, stripeSessionStatus } = opts;
-
-  const { data: order } = await db
-    .from("orders")
-    .select("payment_status, status")
-    .eq("order_id", orderId)
-    .maybeSingle();
-
-  if (!order || order.payment_status === "paid") {
-    structuredLog(LOG_EVENTS.ORDER_UPDATED, { orderId, sessionId, skipped: true, reason: "already_paid" });
-    memoryMarkProcessed(`sess:${sessionId}`);
-    return { updated: false };
-  }
-
-  const txUpdate: Record<string, string> = { payment_status: "paid" };
-  if (stripeSessionStatus) txUpdate.status = stripeSessionStatus;
-
-  await db.from("payment_transactions").update(txUpdate).eq("session_id", sessionId).neq("payment_status", "paid");
-  await db
-    .from("orders")
-    .update({ payment_status: "paid", status: "placed" })
-    .eq("order_id", orderId)
-    .neq("payment_status", "paid");
-
-  memoryMarkProcessed(`sess:${sessionId}`);
-  structuredLog(LOG_EVENTS.ORDER_UPDATED, { orderId, sessionId, updated: true });
-  return { updated: true };
 }
