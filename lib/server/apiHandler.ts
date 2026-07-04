@@ -1,5 +1,11 @@
 // ZoomEats API — Supabase Edge Function (replaces FastAPI backend)
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  LOG_EVENTS,
+  alreadyProcessedSession,
+  fetchWithRateLimitRetry,
+  structuredLog,
+} from "./stripeIdempotency";
 import { getStripeApiKey } from "./stripeEnv";
 
 function throwErr(message: string, status = 400): never {
@@ -349,6 +355,38 @@ export async function handleApiRequest(
       if (!o) throwErr("Order not found", 404);
       if (o.payment_status === "paid") throwErr("Already paid");
 
+      structuredLog(LOG_EVENTS.CHECKOUT_STARTED, { orderId: order_id, userId: u.user_id });
+
+      if (o.stripe_session_id) {
+        const { data: existingTx } = await db
+          .from("payment_transactions")
+          .select("session_id, payment_status")
+          .eq("session_id", o.stripe_session_id)
+          .maybeSingle();
+        if (existingTx && existingTx.payment_status !== "paid") {
+          structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, {
+            orderId: order_id,
+            sessionId: o.stripe_session_id,
+            reused: true,
+          });
+          if (!stripeKey) {
+            return {
+              url: `${origin_url}/checkout/success?session_id=${o.stripe_session_id}`,
+              session_id: o.stripe_session_id,
+            };
+          }
+          const r = await fetchWithRateLimitRetry(
+            `https://api.stripe.com/v1/checkout/sessions/${o.stripe_session_id}`,
+            { headers: { Authorization: `Bearer ${stripeKey}` } },
+            { orderId: order_id, sessionId: o.stripe_session_id }
+          );
+          const existingSession = await r.json();
+          if (r.ok && existingSession.url) {
+            return { url: existingSession.url, session_id: o.stripe_session_id };
+          }
+        }
+      }
+
       if (!stripeKey) {
         const session_id = uid("cs_test");
         const now = new Date().toISOString();
@@ -365,25 +403,30 @@ export async function handleApiRequest(
         return { url: `${origin_url}/checkout/success?session_id=${session_id}`, session_id };
       }
 
-      const stripeRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${stripeKey}`, "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          mode: "payment",
-          "line_items[0][price_data][currency]": "usd",
-          "line_items[0][price_data][product_data][name]": `ZoomEats Order ${order_id}`,
-          "line_items[0][price_data][unit_amount]": String(Math.round(o.total * 100)),
-          "line_items[0][quantity]": "1",
-          success_url: `${origin_url}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${origin_url}/cart`,
-          "metadata[order_id]": order_id,
-          "metadata[user_id]": u.user_id as string,
-          "payment_intent_data[metadata][order_id]": order_id,
-          "payment_intent_data[metadata][user_id]": u.user_id as string,
-        }),
-      });
+      const stripeRes = await fetchWithRateLimitRetry(
+        "https://api.stripe.com/v1/checkout/sessions",
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${stripeKey}`, "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            mode: "payment",
+            "line_items[0][price_data][currency]": "usd",
+            "line_items[0][price_data][product_data][name]": `ZoomEats Order ${order_id}`,
+            "line_items[0][price_data][unit_amount]": String(Math.round(o.total * 100)),
+            "line_items[0][quantity]": "1",
+            success_url: `${origin_url}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${origin_url}/cart`,
+            "metadata[order_id]": order_id,
+            "metadata[user_id]": u.user_id as string,
+            "payment_intent_data[metadata][order_id]": order_id,
+            "payment_intent_data[metadata][user_id]": u.user_id as string,
+          }),
+        },
+        { orderId: order_id }
+      );
       const session = await stripeRes.json();
       if (!stripeRes.ok) throwErr(session.error?.message || "Stripe error", 500);
+      structuredLog(LOG_EVENTS.STRIPE_SESSION_CREATED, { orderId: order_id, sessionId: session.id });
       const now = new Date().toISOString();
       const { error: txError } = await db.from("payment_transactions").insert({
         session_id: session.id,
@@ -421,13 +464,14 @@ export async function handleApiRequest(
       let orderPaymentStatus = (orderRow?.payment_status as string) ?? tx?.payment_status ?? "pending";
       const amount = (orderRow?.total as number) ?? tx?.amount ?? 0;
 
-      if (orderPaymentStatus === "paid") {
+      if (orderPaymentStatus === "paid" || (await alreadyProcessedSession(db, session_id))) {
         return {
           status: "complete",
           payment_status: "paid",
           order_id: orderRow?.order_id ?? tx?.order_id ?? null,
           amount_total: Math.round(amount * 100),
           currency: "usd",
+          cached: true,
         };
       }
 
@@ -441,10 +485,23 @@ export async function handleApiRequest(
       }
 
       try {
-        const r = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session_id}`, {
-          headers: { Authorization: `Bearer ${stripeKey}` },
-        });
+        const r = await fetchWithRateLimitRetry(
+          `https://api.stripe.com/v1/checkout/sessions/${session_id}`,
+          { headers: { Authorization: `Bearer ${stripeKey}` } },
+          { session_id }
+        );
         const stripeSession = await r.json();
+
+        if (r.status === 429) {
+          return {
+            status: "open",
+            payment_status: orderPaymentStatus,
+            order_id: orderRow?.order_id ?? tx?.order_id ?? null,
+            amount_total: Math.round(amount * 100),
+            currency: "usd",
+            rate_limited: true,
+          };
+        }
 
         if (stripeSession?.error) {
           console.error(JSON.stringify({ stripe_error: stripeSession.error.message, session_id }));
