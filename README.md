@@ -46,4 +46,6 @@ Auth callback URLs:
 2. Enable Google OAuth: Supabase Dashboard → Auth → Providers → Google (or `npm run auth:google`)
    - Google Cloud redirect URI: `https://njrrhckegbfqhwkqkzvw.supabase.co/auth/v1/callback`
 3. Apply RLS migration: `npm run db:migrate` (needs `SUPABASE_ACCESS_TOKEN` or `DATABASE_URL` in `.env.local`)
-4. Deploy Edge Functions: `supabase functions deploy api dispatch-order`
+4. Deploy Edge Functions: `supabase functions deploy api dispatch-order stripe-webhook`
+5. Point Stripe webhook to `/api/stripe/webhook` (Vercel) or the `stripe-webhook` Edge Function URL
+6. Apply idempotency migration: run `supabase/migrations/20260704_stripe_idempotency.sql` in SQL editor or via `npm run db:migrate`
