@@ -112,7 +112,6 @@ async function markOrderPaid(
   const patch: Record<string, unknown> = {
     payment_status: "paid",
     order_status: "confirmed",
-    status: "placed",
     confirmed_at: now,
     updated_at: now,
     webhook_processed_at: now,

@@ -13,7 +13,8 @@
     "functions:deploy": "supabase functions deploy api && supabase functions deploy stripe-webhook --no-verify-jwt && supabase functions deploy dispatch-order --no-verify-jwt && supabase functions deploy routing-engine --no-verify-jwt && supabase functions deploy reconcile-payments --no-verify-jwt",
     "stripe:supabase": "node scripts/setup-stripe-supabase.mjs",
     "stripe:webhook": "node scripts/configure-stripe-webhook.mjs",
-    "stripe:health": "node scripts/check-stripe-health.mjs"
+    "stripe:health": "node scripts/check-stripe-health.mjs",
+    "stripe:live-test": "node scripts/live-stripe-test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",

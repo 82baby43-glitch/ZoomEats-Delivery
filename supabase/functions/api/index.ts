@@ -602,7 +602,6 @@ Deno.serve(async (req) => {
             .update({
               payment_status: "paid",
               order_status: "confirmed",
-              status: "placed",
               confirmed_at: syncedAt,
               updated_at: syncedAt,
               webhook_processed_at: syncedAt,
