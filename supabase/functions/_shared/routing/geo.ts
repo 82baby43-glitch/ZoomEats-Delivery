@@ -1,4 +1,4 @@
-import type { GeoPoint, RouteStop } from "./types";
+import type { GeoPoint, RouteStop } from "./types.ts";
 
 const EARTH_RADIUS_KM = 6371;
 

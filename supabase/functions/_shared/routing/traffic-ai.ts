@@ -1,5 +1,5 @@
-import type { GeoPoint, RoadType, TrafficSegment } from "./types";
-import { estimateRoadType, haversineKm } from "./geo";
+import type { GeoPoint, RoadType, TrafficSegment } from "./types.ts";
+import { estimateRoadType, haversineKm } from "./geo.ts";
 
 /** Historical congestion by hour (0–23) — urban baseline. */
 const HOURLY_CONGESTION: Record<number, number> = {

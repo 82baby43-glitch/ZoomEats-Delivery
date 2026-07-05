@@ -1,4 +1,4 @@
-import type { DriverRouteState, RouteStop } from "./types";
+import type { DriverRouteState, RouteStop } from "./types.ts";
 
 export interface FallbackState {
   active: boolean;

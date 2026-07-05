@@ -1,4 +1,4 @@
-import type { RoutingMetrics } from "./types";
+import type { RoutingMetrics } from "./types.ts";
 
 const metricsStore = new Map<string, RoutingMetrics>();
 const globalMetrics: RoutingMetrics = {
