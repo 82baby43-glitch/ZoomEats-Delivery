@@ -6,7 +6,7 @@ import {
   fetchWithRateLimitRetry,
   structuredLog,
 } from "../_shared/stripeIdempotency.ts";
-import { getStripeApiKey } from "../_shared/stripeEnv.ts";
+import { getStripeApiKey, getStripeWebhookSecret } from "../_shared/stripeEnv.ts";
 import { createRoutingDbAdapter } from "../_shared/routing/db-adapter.ts";
 import { getRoutingMetrics } from "../_shared/routing/metrics.ts";
 import {
@@ -601,6 +601,9 @@ Deno.serve(async (req) => {
             .from("orders")
             .update({
               payment_status: "paid",
+              order_status: "confirmed",
+              status: "placed",
+              confirmed_at: syncedAt,
               updated_at: syncedAt,
               webhook_processed_at: syncedAt,
               ...(paymentIntentId ? { stripe_payment_intent_id: paymentIntentId } : {}),
@@ -795,6 +798,55 @@ Deno.serve(async (req) => {
     }
     if (path.startsWith("/uploads")) {
       return json({ url: "", key: "uploads/placeholder" });
+    }
+
+    if (path === "/stripe/health" && method === "GET") {
+      const webhookSecret = getStripeWebhookSecret();
+      const checks: Record<string, unknown> = {
+        api_key_configured: !!stripeKey,
+        webhook_secret_configured: !!webhookSecret,
+        key_type: stripeKey.startsWith("rk_")
+          ? "restricted"
+          : stripeKey.startsWith("sk_")
+            ? "secret"
+            : stripeKey
+              ? "unknown"
+              : "missing",
+      };
+
+      if (stripeKey) {
+        const r = await fetchWithRateLimitRetry(
+          "https://api.stripe.com/v1/account",
+          { headers: { Authorization: `Bearer ${stripeKey}` } },
+          { health: true }
+        );
+        const acct = await r.json();
+        checks.stripe_reachable = r.ok;
+        if (r.ok) {
+          checks.account_id = acct.id;
+          checks.account_name =
+            acct.settings?.dashboard?.display_name ||
+            acct.business_profile?.name ||
+            acct.email ||
+            null;
+        } else {
+          checks.stripe_error = acct.error?.message ?? `HTTP ${r.status}`;
+        }
+      }
+
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { count } = await db
+        .from("payment_logs")
+        .select("*", { count: "exact", head: true })
+        .gte("processed_at", since);
+      checks.webhook_events_24h = count ?? 0;
+
+      const healthy =
+        !!checks.api_key_configured &&
+        !!checks.webhook_secret_configured &&
+        checks.stripe_reachable === true;
+
+      return json({ status: healthy ? "healthy" : "degraded", checks });
     }
 
     if (path === "/" && method === "GET") {

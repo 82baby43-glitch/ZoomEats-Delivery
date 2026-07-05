@@ -57,6 +57,7 @@ Deno.serve(async (req) => {
     .from("orders")
     .update({
       driver_id: driver.driver_id,
+      status: "assigned_internal",
       delivery_type: "internal",
       tracking_id: trackingId,
       updated_at: new Date().toISOString(),
