@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { api, safeGet } from "@/lib/api";
+import Image from "next/image";
+import { safeGet } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
 import Header from "@/components/Header";
@@ -97,7 +98,17 @@ export default function RestaurantDetail() {
           transition={{ duration: 0.4 }}
         >
           <div className="relative h-56 md:h-72 rounded-2xl overflow-hidden mb-6">
-            <img src={r.cover_url || r.image_url || ""} alt="" className="w-full h-full object-cover" />
+            {(r.cover_url || r.image_url) ? (
+              <Image
+                src={r.cover_url || r.image_url}
+                alt={r.name || "Restaurant"}
+                fill
+                className="object-cover"
+                sizes="(max-width: 768px) 100vw, 1280px"
+              />
+            ) : (
+              <div className="w-full h-full bg-neutral-200" aria-hidden />
+            )}
           </div>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -122,7 +133,17 @@ export default function RestaurantDetail() {
                 <div className="grid md:grid-cols-2 gap-4">
                   {(items || []).map((m) => (
                     <div key={m.item_id || m.name} className="card p-4 flex gap-4" data-testid={`menu-item-${m.item_id}`}>
-                      <img src={m.image_url || ""} alt="" className="w-20 h-20 rounded-xl object-cover" />
+                      {m.image_url ? (
+                        <Image
+                          src={m.image_url}
+                          alt={m.name || "Menu item"}
+                          width={80}
+                          height={80}
+                          className="w-20 h-20 rounded-xl object-cover"
+                        />
+                      ) : (
+                        <div className="w-20 h-20 rounded-xl bg-neutral-200 shrink-0" aria-hidden />
+                      )}
                       <div className="flex-1">
                         <div className="font-bold">{m.name || "Item"}</div>
                         <div className="text-sm mt-1" style={{ color: "var(--muted)" }}>{m.description || ""}</div>
