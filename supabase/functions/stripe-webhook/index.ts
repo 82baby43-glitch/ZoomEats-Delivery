@@ -111,6 +111,8 @@ async function markOrderPaid(
   const now = new Date().toISOString();
   const patch: Record<string, unknown> = {
     payment_status: "paid",
+    order_status: "confirmed",
+    confirmed_at: now,
     updated_at: now,
     webhook_processed_at: now,
   };

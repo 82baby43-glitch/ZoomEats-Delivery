@@ -1,4 +1,4 @@
-import type { RoutingBroadcastPayload, RoutingEventType } from "./types";
+import type { RoutingBroadcastPayload, RoutingEventType } from "./types.ts";
 
 export const ROUTING_CHANNEL_PREFIX = "routing";
 

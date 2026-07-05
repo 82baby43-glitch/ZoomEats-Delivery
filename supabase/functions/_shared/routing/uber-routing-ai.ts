@@ -8,31 +8,31 @@ import type {
   GpsUpdate,
   RouteOptimizationResult,
   RouteStop,
-} from "./types";
-import { ROUTING_CONFIG } from "./types";
-import { annotateStopEtas, computeRouteEta } from "./eta-engine";
+} from "./types.ts";
+import { ROUTING_CONFIG } from "./types.ts";
+import { annotateStopEtas, computeRouteEta } from "./eta-engine.ts";
 import {
   applyFallbackToState,
   enterFallbackMode,
   isInFallbackMode,
   snapshotGoodRoute,
-} from "./fallback";
-import { isNearRouteCorridor, metersBetween } from "./geo";
+} from "./fallback.ts";
+import { isNearRouteCorridor, metersBetween } from "./geo.ts";
 import {
   applyGpsToRouteState,
   getGpsStreamState,
   ingestGpsUpdate,
   shouldTriggerRerouteFromGps,
-} from "./gps-stream";
-import { logOptimization, metricsToLogPayload } from "./metrics";
-import { buildBroadcastPayload, pushRoutingUpdate } from "./realtime-push";
+} from "./gps-stream.ts";
+import { logOptimization, metricsToLogPayload } from "./metrics.ts";
+import { buildBroadcastPayload, pushRoutingUpdate } from "./realtime-push.ts";
 import {
   cacheRouteState,
   getCachedRouteState,
   getIncrementalStops,
   invalidateRouteCache,
-} from "./route-cache";
-import { dijkstraApproxSequence, insertAndReoptimize, sequenceActiveOrders } from "./sequence-engine";
+} from "./route-cache.ts";
+import { dijkstraApproxSequence, insertAndReoptimize, sequenceActiveOrders } from "./sequence-engine.ts";
 
 const lastRerouteAt = new Map<string, number>();
 const lastOptimizeAt = new Map<string, number>();
