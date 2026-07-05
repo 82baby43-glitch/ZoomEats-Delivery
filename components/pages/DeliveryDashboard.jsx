@@ -114,13 +114,18 @@ export default function DeliveryDashboard() {
     return () => clearInterval(t);
   }, [online, coords]);
 
-  const action = async (oid, act) => {
+  const action = async (oid, act, internal = false) => {
     if (!oid) return;
     try {
-      await api.post(`/delivery/orders/${oid}/${act}`);
+      if (internal) {
+        const phase = act === "accept" ? "pickup" : "deliver";
+        await api.post(`/driver/orders/${oid}/${phase}`);
+      } else {
+        await api.post(`/delivery/orders/${oid}/${act}`);
+      }
       await refresh();
     } catch (e) {
-      logClientError("delivery.action", e, { oid, act });
+      logClientError("delivery.action", e, { oid, act, internal });
     }
   };
 
@@ -174,7 +179,12 @@ export default function DeliveryDashboard() {
             </h2>
             <div className="text-sm mb-3" style={{ color: "var(--muted)" }}>
               {route?.total_eta_minutes != null && (
-                <>ETA {Math.round(route.total_eta_minutes)} min · {Number(route.total_distance_km ?? 0).toFixed(1)} km</>
+                <>
+                  ETA {Math.round(route.total_eta_minutes)} min · {Number(route.total_distance_km ?? 0).toFixed(1)} km
+                  {route?.earnings_per_hour_estimate != null && (
+                    <> · ~${Number(route.earnings_per_hour_estimate).toFixed(0)}/hr est.</>
+                  )}
+                </>
               )}
             </div>
             <ol className="space-y-2">
@@ -253,12 +263,12 @@ export default function DeliveryDashboard() {
                     <span className="badge mt-2">{o.status ?? "unknown"}</span>
                   </div>
                   {o.status === "assigned_internal" && (
-                    <button className="btn-primary !py-2" onClick={() => action(o.order_id, "accept")} data-testid={`pickup-${o.order_id}`}>
+                    <button className="btn-primary !py-2" onClick={() => action(o.order_id, "accept", true)} data-testid={`pickup-${o.order_id}`}>
                       Pickup
                     </button>
                   )}
                   {o.status === "picked_up" && (
-                    <button className="btn-primary !py-2" onClick={() => action(o.order_id, "deliver")} data-testid={`deliver-${o.order_id}`}>
+                    <button className="btn-primary !py-2" onClick={() => action(o.order_id, "deliver", true)} data-testid={`deliver-${o.order_id}`}>
                       Mark delivered
                     </button>
                   )}
@@ -305,7 +315,11 @@ export default function DeliveryDashboard() {
                     <div className="badge mt-2">{o.status ?? "unknown"}</div>
                   </div>
                   {o.status === "picked_up" && (
-                    <button className="btn-primary !py-2" onClick={() => action(o.order_id, "deliver")} data-testid={`deliver-mine-${o.order_id}`}>
+                    <button
+                      className="btn-primary !py-2"
+                      onClick={() => action(o.order_id, "deliver", o.delivery_type === "internal")}
+                      data-testid={`deliver-mine-${o.order_id}`}
+                    >
                       Mark delivered
                     </button>
                   )}

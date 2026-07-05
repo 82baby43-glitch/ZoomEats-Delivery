@@ -9,4 +9,5 @@ export * from "./metrics";
 export * from "./fallback";
 export * from "./realtime-push";
 export * from "./uber-routing-ai";
+export * from "./dispatch-routing";
 export * from "./db-adapter";

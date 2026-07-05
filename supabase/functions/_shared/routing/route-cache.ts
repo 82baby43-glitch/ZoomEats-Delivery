@@ -1,4 +1,4 @@
-import type { DriverRouteState, RouteStop } from "./types";
+import type { DriverRouteState, RouteStop } from "./types.ts";
 
 const ROUTE_CACHE_TTL_MS = 30_000;
 const GEO_INDEX_CELL_DEG = 0.02; // ~2km cells

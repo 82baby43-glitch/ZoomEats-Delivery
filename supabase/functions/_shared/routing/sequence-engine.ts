@@ -1,6 +1,6 @@
-import type { ActiveOrderRef, GeoPoint, RouteStop } from "./types";
-import { hasBacktracking } from "./geo";
-import { computeRouteEta } from "./eta-engine";
+import type { ActiveOrderRef, GeoPoint, RouteStop } from "./types.ts";
+import { hasBacktracking } from "./geo.ts";
+import { computeRouteEta } from "./eta-engine.ts";
 
 export interface SequenceOptions {
   start: GeoPoint;
