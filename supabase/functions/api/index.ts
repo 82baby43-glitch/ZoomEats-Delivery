@@ -10,6 +10,7 @@ import { getStripeApiKey } from "../_shared/stripeEnv.ts";
 import { createRoutingDbAdapter } from "../_shared/routing/db-adapter.ts";
 import { getRoutingMetrics } from "../_shared/routing/metrics.ts";
 import {
+  completeRouteStopsForOrder,
   processGpsAndMaybeReroute,
   recalculateOptimalRoute,
   tryInsertOrderIntoRoute,
@@ -353,12 +354,16 @@ Deno.serve(async (req) => {
 
         try {
           const routingDb = createRoutingDbAdapter(db);
-          await processGpsAndMaybeReroute(routingDb, {
-            driver_id: existing.driver_id,
-            lat: body.latitude as number,
-            lng: body.longitude as number,
-            timestamp: now,
-          });
+          await processGpsAndMaybeReroute(
+            routingDb,
+            {
+              driver_id: existing.driver_id,
+              lat: body.latitude as number,
+              lng: body.longitude as number,
+              timestamp: now,
+            },
+            { supabaseUrl, serviceKey }
+          );
         } catch (e) {
           console.warn(JSON.stringify({ routing_gps_skipped: String(e) }));
         }
@@ -392,9 +397,42 @@ Deno.serve(async (req) => {
               total_distance_km: routeState.total_distance_km ?? 0,
               fallback_mode: routeState.fallback_mode ?? false,
               last_reroute_timestamp: routeState.last_reroute_timestamp,
+              earnings_per_hour_estimate: routeState.earnings_per_hour_estimate ?? null,
             }
           : null,
       });
+    }
+
+    const driverOrderMatch = path.match(/^\/driver\/orders\/([^/]+)\/(pickup|deliver)$/);
+    if (driverOrderMatch && method === "POST") {
+      const u = requireRole("delivery");
+      const [, oid, phase] = driverOrderMatch;
+      const { data: d } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
+      if (!d) return err("Driver profile not found", 404);
+      const { data: o } = await db.from("orders").select("*").eq("order_id", oid).maybeSingle();
+      if (!o) return err("Not found", 404);
+      if (o.driver_id !== d.driver_id) return err("Not your delivery", 403);
+
+      const routingDb = createRoutingDbAdapter(db);
+      const runtime = { supabaseUrl, serviceKey };
+
+      if (phase === "pickup") {
+        if (!["assigned_internal", "confirmed", "ready", "preparing", "accepted"].includes(o.status as string)) {
+          return err("Cannot mark pickup for this status", 400);
+        }
+        await db.from("orders").update({ status: "picked_up", updated_at: new Date().toISOString() }).eq("order_id", oid);
+        await completeRouteStopsForOrder(routingDb, d.driver_id, oid, "pickup", runtime);
+      } else {
+        if (o.status !== "picked_up") return err("Order not picked up yet", 400);
+        await db.from("orders").update({ status: "delivered", updated_at: new Date().toISOString() }).eq("order_id", oid);
+        await completeRouteStopsForOrder(routingDb, d.driver_id, oid, "dropoff", runtime);
+        await db
+          .from("drivers")
+          .update({ workload: Math.max(0, (d.workload || 0) - 1), updated_at: new Date().toISOString() })
+          .eq("driver_id", d.driver_id);
+      }
+
+      return json({ ok: true, order_id: oid, phase });
     }
 
     if (path === "/routing/metrics" && method === "GET") {
@@ -428,7 +466,7 @@ Deno.serve(async (req) => {
       const routingDb = createRoutingDbAdapter(db);
       const order = await routingDb.getOrderCoords?.(order_id);
       if (!order) return err("Order not found", 404);
-      return json(await tryInsertOrderIntoRoute(routingDb, driver_id, order));
+      return json(await tryInsertOrderIntoRoute(routingDb, driver_id, order, { supabaseUrl, serviceKey }));
     }
 
     // ---- Checkout ----

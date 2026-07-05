@@ -1,7 +1,7 @@
-import type { GeoPoint, RouteStop } from "./types";
-import { ROUTING_CONFIG } from "./types";
-import { haversineKm, totalRouteDistanceKm } from "./geo";
-import { buildTrafficSegment, type TrafficContext } from "./traffic-ai";
+import type { GeoPoint, RouteStop } from "./types.ts";
+import { ROUTING_CONFIG } from "./types.ts";
+import { haversineKm, totalRouteDistanceKm } from "./geo.ts";
+import { buildTrafficSegment, type TrafficContext } from "./traffic-ai.ts";
 
 export interface EtaOptions {
   trafficCtx?: TrafficContext;

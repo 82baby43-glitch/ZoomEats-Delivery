@@ -1,7 +1,7 @@
-import type { DriverRouteState, GpsStreamState, GpsUpdate } from "./types";
-import { ROUTING_CONFIG } from "./types";
-import { bearingDeg, metersBetween } from "./geo";
-import { recordDriverSpeed } from "./eta-engine";
+import type { DriverRouteState, GpsStreamState, GpsUpdate } from "./types.ts";
+import { ROUTING_CONFIG } from "./types.ts";
+import { bearingDeg, metersBetween } from "./geo.ts";
+import { recordDriverSpeed } from "./eta-engine.ts";
 
 const streamState = new Map<string, GpsStreamState>();
 

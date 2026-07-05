@@ -8,34 +8,66 @@ import type {
   GpsUpdate,
   RouteOptimizationResult,
   RouteStop,
-} from "./types";
-import { ROUTING_CONFIG } from "./types";
-import { annotateStopEtas, computeRouteEta } from "./eta-engine";
+} from "./types.ts";
+import { ROUTING_CONFIG } from "./types.ts";
+import { annotateStopEtas, computeRouteEta } from "./eta-engine.ts";
 import {
   applyFallbackToState,
   enterFallbackMode,
   isInFallbackMode,
   snapshotGoodRoute,
-} from "./fallback";
-import { isNearRouteCorridor, metersBetween } from "./geo";
+} from "./fallback.ts";
+import { isNearRouteCorridor, metersBetween } from "./geo.ts";
 import {
   applyGpsToRouteState,
   getGpsStreamState,
   ingestGpsUpdate,
   shouldTriggerRerouteFromGps,
-} from "./gps-stream";
-import { logOptimization, metricsToLogPayload } from "./metrics";
-import { buildBroadcastPayload, pushRoutingUpdate } from "./realtime-push";
+} from "./gps-stream.ts";
+import { logOptimization, metricsToLogPayload } from "./metrics.ts";
+import { buildBroadcastPayload, pushRoutingUpdate } from "./realtime-push.ts";
 import {
   cacheRouteState,
   getCachedRouteState,
   getIncrementalStops,
   invalidateRouteCache,
-} from "./route-cache";
-import { dijkstraApproxSequence, insertAndReoptimize, sequenceActiveOrders } from "./sequence-engine";
+} from "./route-cache.ts";
+import { dijkstraApproxSequence, insertAndReoptimize, sequenceActiveOrders } from "./sequence-engine.ts";
 
 const lastRerouteAt = new Map<string, number>();
 const lastOptimizeAt = new Map<string, number>();
+const lastContinuousLoopAt = new Map<string, number>();
+
+function estimateEarningsPerHour(totalEtaMinutes: number, activeOrders: number): number {
+  if (totalEtaMinutes <= 0) return 0;
+  const ordersPerHour = (activeOrders / totalEtaMinutes) * 60;
+  return Math.round(ordersPerHour * 8.5 * 100) / 100;
+}
+
+async function persistMetrics(
+  db: RoutingDbAdapter,
+  driverId: string,
+  event: string,
+  extra: Record<string, unknown> = {}
+) {
+  if (!db.logMetric) return;
+  try {
+    await db.logMetric(metricsToLogPayload(driverId, event, extra));
+  } catch {
+    /* non-blocking */
+  }
+}
+
+async function persistFallback(
+  db: RoutingDbAdapter,
+  driverId: string,
+  state: DriverRouteState,
+  reason: string
+) {
+  enterFallbackMode(driverId, state.current_route, reason);
+  const fb = applyFallbackToState({ ...state, fallback_mode: true });
+  await db.saveDriverState(fb);
+}
 
 export interface RoutingDbAdapter {
   getDriverState(driverId: string): Promise<DriverRouteState | null>;
@@ -195,11 +227,16 @@ export async function initializeRouteForOrder(
     total_eta_minutes: result.total_eta_minutes,
     total_distance_km: result.total_distance_km,
     last_reroute_timestamp: result.reroute_applied ? new Date().toISOString() : state.last_reroute_timestamp,
+    earnings_per_hour_estimate: estimateEarningsPerHour(result.total_eta_minutes, state.active_orders.length),
   };
 
   snapshotGoodRoute(state);
   cacheRouteState(state);
   await db.saveDriverState(state);
+
+  if (result.reroute_applied) {
+    await persistMetrics(db, driverId, "route.updated", { improvement_pct: result.improvement_pct, trigger: "new_order" });
+  }
 
   if (runtime?.supabaseUrl && runtime?.serviceKey) {
     await pushRoutingUpdate(
@@ -225,8 +262,10 @@ export async function processGpsAndMaybeReroute(
   state = applyGpsToRouteState(state, update);
 
   const shouldReroute = shouldTriggerRerouteFromGps(update.driver_id, state);
+  let result: RouteOptimizationResult | null = null;
+
   if (shouldReroute) {
-    const result = recalculateOptimalRoute(state, "gps");
+    result = recalculateOptimalRoute(state, "gps");
     if (result.reroute_applied) {
       state = {
         ...state,
@@ -235,8 +274,16 @@ export async function processGpsAndMaybeReroute(
         total_eta_minutes: result.total_eta_minutes,
         total_distance_km: result.total_distance_km,
         last_reroute_timestamp: new Date().toISOString(),
+        earnings_per_hour_estimate: estimateEarningsPerHour(
+          result.total_eta_minutes,
+          state.active_orders.length
+        ),
       };
       snapshotGoodRoute(state);
+      await persistMetrics(db, update.driver_id, "route.updated", {
+        improvement_pct: result.improvement_pct,
+        trigger: "gps",
+      });
 
       if (runtime?.supabaseUrl && runtime?.serviceKey) {
         await pushRoutingUpdate(
@@ -245,6 +292,42 @@ export async function processGpsAndMaybeReroute(
           buildBroadcastPayload("route.updated", update.driver_id, {
             route_state: state,
             improvement_pct: result.improvement_pct,
+          })
+        );
+      }
+    }
+  }
+
+  const lastLoop = lastContinuousLoopAt.get(update.driver_id) ?? 0;
+  if (Date.now() - lastLoop >= ROUTING_CONFIG.CONTINUOUS_LOOP_MS) {
+    lastContinuousLoopAt.set(update.driver_id, Date.now());
+    const loopResult = recalculateOptimalRoute(state, "traffic");
+    if (loopResult.reroute_applied) {
+      state = {
+        ...state,
+        current_route: loopResult.route,
+        remaining_stops: loopResult.route.filter((s) => !s.completed),
+        total_eta_minutes: loopResult.total_eta_minutes,
+        total_distance_km: loopResult.total_distance_km,
+        last_reroute_timestamp: new Date().toISOString(),
+        earnings_per_hour_estimate: estimateEarningsPerHour(
+          loopResult.total_eta_minutes,
+          state.active_orders.length
+        ),
+      };
+      snapshotGoodRoute(state);
+      await persistMetrics(db, update.driver_id, "eta.changed", {
+        improvement_pct: loopResult.improvement_pct,
+        trigger: "continuous_loop",
+      });
+
+      if (runtime?.supabaseUrl && runtime?.serviceKey) {
+        await pushRoutingUpdate(
+          runtime.supabaseUrl,
+          runtime.serviceKey,
+          buildBroadcastPayload("eta.changed", update.driver_id, {
+            route_state: state,
+            improvement_pct: loopResult.improvement_pct,
           })
         );
       }
@@ -305,6 +388,7 @@ export async function tryInsertOrderIntoRoute(
     remaining_stops: optimized,
     total_eta_minutes: afterEta,
     last_reroute_timestamp: new Date().toISOString(),
+    earnings_per_hour_estimate: estimateEarningsPerHour(afterEta, state.active_orders.length + 1),
   };
 
   snapshotGoodRoute(newState);
@@ -359,8 +443,16 @@ export async function runContinuousOptimizationLoop(
           total_eta_minutes: result.total_eta_minutes,
           total_distance_km: result.total_distance_km,
           last_reroute_timestamp: new Date().toISOString(),
+          earnings_per_hour_estimate: estimateEarningsPerHour(
+            result.total_eta_minutes,
+            state.active_orders.length
+          ),
         };
         snapshotGoodRoute(state);
+        await persistMetrics(db, driverId, "eta.changed", {
+          improvement_pct: result.improvement_pct,
+          trigger: "scheduled_loop",
+        });
 
         if (runtime?.supabaseUrl && runtime?.serviceKey) {
           await pushRoutingUpdate(
@@ -380,11 +472,83 @@ export async function runContinuousOptimizationLoop(
       console.error(JSON.stringify({ routing_loop_error: String(e), driver_id: driverId }));
       const state = await db.getDriverState(driverId);
       if (state) {
-        enterFallbackMode(driverId, state.current_route, String(e));
+        await persistFallback(db, driverId, state, String(e));
         invalidateRouteCache(driverId);
       }
     }
   }
+}
+
+/** Mark pickup/dropoff stops complete and re-optimize remaining route. */
+export async function completeRouteStopsForOrder(
+  db: RoutingDbAdapter,
+  driverId: string,
+  orderId: string,
+  phase: "pickup" | "dropoff",
+  runtime?: RoutingRuntimeConfig
+): Promise<DriverRouteState | null> {
+  let state = (await db.getDriverState(driverId)) ?? getCachedRouteState(driverId);
+  if (!state) return null;
+
+  const completeTypes = phase === "pickup" ? new Set(["pickup"]) : new Set(["pickup", "dropoff"]);
+
+  const markStop = (stop: RouteStop): RouteStop => {
+    if (stop.order_id !== orderId) return stop;
+    if (!completeTypes.has(stop.type)) return stop;
+    return { ...stop, completed: true };
+  };
+
+  state = {
+    ...state,
+    current_route: state.current_route.map(markStop),
+    remaining_stops: state.remaining_stops.map(markStop).filter((s) => !s.completed),
+    active_orders:
+      phase === "dropoff"
+        ? state.active_orders.filter((o) => o.order_id !== orderId)
+        : state.active_orders.map((o) =>
+            o.order_id === orderId ? { ...o, picked_up: true, status: "picked_up" } : o
+          ),
+  };
+
+  if (state.remaining_stops.length > 0) {
+    const result = recalculateOptimalRoute(state, "stack");
+    state = {
+      ...state,
+      current_route: result.route,
+      remaining_stops: result.route.filter((s) => !s.completed),
+      total_eta_minutes: result.total_eta_minutes,
+      total_distance_km: result.total_distance_km,
+      earnings_per_hour_estimate: estimateEarningsPerHour(
+        result.total_eta_minutes,
+        state.active_orders.length
+      ),
+    };
+  } else {
+    state = {
+      ...state,
+      current_route: [],
+      total_eta_minutes: 0,
+      total_distance_km: 0,
+      earnings_per_hour_estimate: 0,
+    };
+  }
+
+  snapshotGoodRoute(state);
+  cacheRouteState(state);
+  await db.saveDriverState(state);
+
+  const event = phase === "pickup" ? "stack.modified" : "route.updated";
+  await persistMetrics(db, driverId, event, { order_id: orderId, phase });
+
+  if (runtime?.supabaseUrl && runtime?.serviceKey) {
+    await pushRoutingUpdate(
+      runtime.supabaseUrl,
+      runtime.serviceKey,
+      buildBroadcastPayload(event, driverId, { route_state: state })
+    );
+  }
+
+  return state;
 }
 
 /** Resolve competing route proposals — lower ETA wins. */

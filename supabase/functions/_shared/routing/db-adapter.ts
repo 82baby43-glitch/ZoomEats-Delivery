@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import type { ActiveOrderRef, DriverRouteState } from "./types";
-import type { RoutingDbAdapter } from "./uber-routing-ai";
+import type { ActiveOrderRef, DriverRouteState } from "./types.ts";
+import type { RoutingDbAdapter } from "./uber-routing-ai.ts";
 
 /** Supabase persistence adapter for routing state (used by API + edge). */
 export function createRoutingDbAdapter(db: SupabaseClient): RoutingDbAdapter {

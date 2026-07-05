@@ -1,7 +1,13 @@
 // Supabase Edge Function: dispatch-order
-// Triggered by Postgres on paid orders. Assigns nearest available driver.
+// Triggered by Postgres on paid orders. Assigns driver via routing intelligence layer.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { createRoutingDbAdapter } from "../_shared/routing/db-adapter.ts";
+import { selectOptimalDriverForOrder } from "../_shared/routing/dispatch-routing.ts";
+import {
+  initializeRouteForOrder,
+  tryInsertOrderIntoRoute,
+} from "../_shared/routing/uber-routing-ai.ts";
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
@@ -11,6 +17,8 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const db = createClient(supabaseUrl, serviceKey);
+  const routingDb = createRoutingDbAdapter(db);
+  const runtime = { supabaseUrl, serviceKey };
 
   let payload: { record?: { order_id?: string }; order_id?: string };
   try {
@@ -31,20 +39,54 @@ Deno.serve(async (req) => {
   }
 
   if (order.driver_id) {
+    const orderRef = await routingDb.getOrderCoords?.(orderId);
+    if (orderRef) {
+      try {
+        const inserted = await tryInsertOrderIntoRoute(routingDb, order.driver_id, orderRef, runtime);
+        if (inserted.inserted) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              order_id: orderId,
+              driver_id: order.driver_id,
+              routing: "inserted_into_stack",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+      } catch (e) {
+        console.warn(JSON.stringify({ routing_insert_skipped: String(e), order_id: orderId }));
+      }
+    }
     return new Response(JSON.stringify({ skipped: true, reason: "driver_assigned", driver_id: order.driver_id }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  const { data: drivers } = await db
-    .from("drivers")
-    .select("*")
-    .eq("availability", true)
-    .order("workload", { ascending: true })
-    .limit(1);
+  const orderRef = await routingDb.getOrderCoords?.(orderId);
+  if (!orderRef) {
+    return new Response(JSON.stringify({ error: "order_coords_missing" }), { status: 404 });
+  }
 
-  const driver = drivers?.[0];
+  const proposal = await selectOptimalDriverForOrder(db, routingDb, orderRef);
+
+  let driver = null;
+  if (proposal) {
+    const { data } = await db.from("drivers").select("*").eq("driver_id", proposal.driverId).maybeSingle();
+    driver = data;
+  }
+
+  if (!driver) {
+    const { data: drivers } = await db
+      .from("drivers")
+      .select("*")
+      .eq("availability", true)
+      .order("workload", { ascending: true })
+      .limit(1);
+    driver = drivers?.[0] ?? null;
+  }
+
   if (!driver) {
     return new Response(JSON.stringify({ ok: true, order_id: orderId, driver_id: null, reason: "no_drivers" }), {
       status: 200,
@@ -57,6 +99,7 @@ Deno.serve(async (req) => {
     .from("orders")
     .update({
       driver_id: driver.driver_id,
+      status: "assigned_internal",
       delivery_type: "internal",
       tracking_id: trackingId,
       updated_at: new Date().toISOString(),
@@ -84,27 +127,30 @@ Deno.serve(async (req) => {
     driver_id: driver.driver_id,
   });
 
-  // Routing intelligence layer — initialize live route (non-blocking)
+  const routingMode = proposal?.mode ?? "init";
   try {
-    await fetch(`${supabaseUrl}/functions/v1/routing-engine?action=init`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${serviceKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        driver_id: driver.driver_id,
-        order_id: orderId,
-        lat: driver.latitude ?? 0,
-        lng: driver.longitude ?? 0,
-      }),
-    });
+    if (routingMode === "insert") {
+      await tryInsertOrderIntoRoute(routingDb, driver.driver_id, orderRef, runtime);
+    } else {
+      await initializeRouteForOrder(
+        routingDb,
+        driver.driver_id,
+        orderRef,
+        { lat: driver.latitude ?? 0, lng: driver.longitude ?? 0 },
+        runtime
+      );
+    }
   } catch (e) {
-    console.warn(JSON.stringify({ routing_init_skipped: String(e), order_id: orderId }));
+    console.warn(JSON.stringify({ routing_hook_skipped: String(e), order_id: orderId, mode: routingMode }));
   }
 
-  return new Response(JSON.stringify({ ok: true, order_id: orderId, driver_id: driver.driver_id }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      order_id: orderId,
+      driver_id: driver.driver_id,
+      routing: routingMode,
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
 });
