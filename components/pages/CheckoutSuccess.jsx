@@ -11,8 +11,8 @@ const MAX_ATTEMPTS = 5;
 const RETRY_DELAYS_MS = [1000, 2000, 3000, 5000, 8000];
 
 export default function CheckoutSuccess() {
-  const [params] = useSearchParams();
-  const sessionId = params.get("session_id");
+  const searchParams = useSearchParams();
+  const sessionId = searchParams.get("session_id");
   const [status, setStatus] = useState(sessionId ? "polling" : "error");
   const [order, setOrder] = useState(null);
   const router = useRouter();
