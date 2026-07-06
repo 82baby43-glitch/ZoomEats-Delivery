@@ -14,6 +14,8 @@ import {
   recalculateOptimalRoute,
   tryInsertOrderIntoRoute,
 } from "../dispatch/routing/uber-routing-ai";
+import { handleComplianceRequest } from "./complianceHandler";
+import { normalizeRole } from "../compliance/authz";
 
 function throwErr(message: string, status = 400): never {
   const e = new Error(message) as Error & { status?: number };
@@ -91,23 +93,32 @@ export async function handleApiRequest(
   };
   const requireRole = (...roles: string[]) => {
     const u = requireAuth();
-    if (!roles.includes(u.role as string)) throw { status: 403, message: `Requires role: ${roles}` };
+    const userRole = normalizeRole(String(u.role || ""));
+    const expanded = roles.flatMap((r) => [r, normalizeRole(r)]);
+    if (!expanded.includes(userRole) && !expanded.includes(u.role as string)) {
+      throw { status: 403, message: `Requires role: ${roles.join(", ")}` };
+    }
     return u;
   };
 
+  const complianceCtx = {
+    path,
+    method,
+    body,
+    params,
+    user,
+    requireAuth,
+    requireRole,
+  };
+
   try {
+    const complianceResult = await handleComplianceRequest(db, complianceCtx);
+    if (complianceResult !== null) return complianceResult;
+
     // ---- Auth ----
     if (path === "/auth/me" && method === "GET") {
       const u = requireAuth();
       return u;
-    }
-    if (path === "/auth/role" && method === "POST") {
-      const u = requireAuth();
-      const role = body.role as string;
-      if (!["customer", "vendor", "delivery"].includes(role)) throwErr("Invalid role");
-      if (u.role === "admin") throwErr("Admin role cannot be changed");
-      const { data } = await db.from("users").update({ role }).eq("user_id", u.user_id).select().single();
-      return data;
     }
 
     // ---- Restaurants (public) ----
@@ -773,13 +784,6 @@ export async function handleApiRequest(
         stats: { orders: todaysOrders?.length || 0, paid_orders: paid.length, gmv: Math.round(gmv * 100) / 100, pending_approvals: pending || 0 },
       };
     }
-    if (path.startsWith("/admin/compliance") || path.startsWith("/agreements")) {
-      return { ok: true, items: [], reviews: [] };
-    }
-    if (path.startsWith("/uploads")) {
-      return { url: "", key: "uploads/placeholder" };
-    }
-
     if (path === "/" && method === "GET") {
       return { app: "ZoomEats", db: "supabase", status: "ok" };
     }
