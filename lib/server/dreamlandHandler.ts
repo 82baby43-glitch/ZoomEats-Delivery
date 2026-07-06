@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildDreamlandSystemPrompt, DREAMLAND_SEED_MESSAGE } from "../dreamland/prompts";
 import { moodPhrase } from "../dreamland/emotions";
+import { classifyIntent, conversationalFallback, shouldRecommend } from "../dreamland/intent";
+import { buildContext } from "../dreamland/context";
 import { buildCollections, buildHomeSections } from "../dreamland/collections";
 import {
   generateRecommendations,
@@ -141,21 +143,27 @@ export async function handleDreamlandRequest(
     const sessionId = await ensureSession(db, userId, body.session_id as string | undefined);
     await learnFromText(db, userId, text);
 
-    const { recommendations, mood, cravings, ctx } = await generateRecommendations(db, {
-      userId,
-      text,
-      budgetMax: body.budget_max != null ? Number(body.budget_max) : undefined,
-      wantsHealthy: body.wants_healthy != null ? Boolean(body.wants_healthy) : undefined,
-      wantsFast: body.wants_fast != null ? Boolean(body.wants_fast) : undefined,
-      weather: body.weather as string | undefined,
-    });
+    const intent = classifyIntent(text);
+    const wantsFood = shouldRecommend(intent, text);
+
+    const { recommendations, mood, cravings, ctx } = wantsFood
+      ? await generateRecommendations(db, {
+          userId,
+          text,
+          budgetMax: body.budget_max != null ? Number(body.budget_max) : undefined,
+          wantsHealthy: body.wants_healthy != null ? Boolean(body.wants_healthy) : undefined,
+          wantsFast: body.wants_fast != null ? Boolean(body.wants_fast) : undefined,
+          weather: body.weather as string | undefined,
+        })
+      : { recommendations: [], mood: null, cravings: [], ctx: buildContext() };
 
     const state = await loadUserState(db, userId);
-    const contextBlob = formatRecContext(recommendations);
+    const contextBlob = wantsFood ? formatRecContext(recommendations) : "";
     const system = buildDreamlandSystemPrompt({
       mood,
       contextBlob,
       memoryBlob: memoryBlob(state),
+      intent,
     });
 
     const history = await loadConversationHistory(db, sessionId);
@@ -164,15 +172,13 @@ export async function handleDreamlandRequest(
       { role: "user", content: text },
     ];
 
-    let reply = mood
-      ? `${moodPhrase(mood)} `
-      : "I got you. ";
+    let reply = conversationalFallback(intent, String(u.name || "").split(" ")[0] || undefined);
 
-    if (recommendations[0]) {
+    if (wantsFood && recommendations[0]) {
       const top = recommendations[0];
-      reply += `${top.why} Check out **${top.restaurant_name}** — ${top.match_score}% ${top.match_label}.`;
-    } else {
-      reply += "Browse our featured restaurants — something good is always nearby.";
+      reply = mood
+        ? `${moodPhrase(mood)} ${top.why} I'd go with ${top.restaurant_name} — ${top.match_score}% ${top.match_label}.`
+        : `${top.why} Check out ${top.restaurant_name} — ${top.match_score}% ${top.match_label}.`;
     }
 
     if (anthropicKey) {
@@ -186,7 +192,7 @@ export async function handleDreamlandRequest(
           },
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
-            max_tokens: 400,
+            max_tokens: 500,
             system,
             messages,
           }),
@@ -206,10 +212,12 @@ export async function handleDreamlandRequest(
       role: "assistant",
       text: reply,
       mood,
-      recommendations: recommendations.slice(0, 3),
+      recommendations: wantsFood ? recommendations.slice(0, 3) : [],
     });
 
-    await persistRecommendations(db, userId, sessionId, recommendations, mood);
+    if (wantsFood) {
+      await persistRecommendations(db, userId, sessionId, recommendations, mood);
+    }
 
     if (mood) {
       await db.from("dreamland_profiles").update({ last_mood: mood, updated_at: new Date().toISOString() }).eq("user_id", userId);

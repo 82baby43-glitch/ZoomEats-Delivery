@@ -7,6 +7,7 @@ import ChatMessage from "@/components/chatbot/ChatMessage";
 import ChatTyping from "@/components/chatbot/ChatTyping";
 import ChatInput from "@/components/chatbot/ChatInput";
 import DreamlandAvatar from "@/components/dreamland/DreamlandAvatar";
+import { DREAMLAND_CHAT_SUBTITLE } from "@/lib/dreamland/prompts";
 import { useDreamlandChat } from "@/components/chatbot/useChat";
 
 export default function Chatbot() {
@@ -65,7 +66,7 @@ export default function Chatbot() {
               <DreamlandAvatar size={36} pulse />
               <div>
                 <div className="font-display font-black">Dreamland</div>
-                <div className="text-xs opacity-70">Your emotionally intelligent food guide</div>
+                <div className="text-xs opacity-70">{DREAMLAND_CHAT_SUBTITLE}</div>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3" data-testid="chatbot-messages">
