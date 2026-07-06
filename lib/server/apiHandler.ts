@@ -17,6 +17,7 @@ import {
 import { handleComplianceRequest } from "./complianceHandler";
 import { handleDreamlandRequest } from "./dreamlandHandler";
 import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
+import { handleStripeAdminRequest } from "./stripeAdmin";
 import { normalizeRole } from "../compliance/authz";
 
 function throwErr(message: string, status = 400): never {
@@ -119,6 +120,9 @@ export async function handleApiRequest(
 
     const uberDirectResult = await handleUberDirectAdminRequest(db, complianceCtx);
     if (uberDirectResult !== null) return uberDirectResult;
+
+    const stripeResult = await handleStripeAdminRequest(db, complianceCtx);
+    if (stripeResult !== null) return stripeResult;
 
     const dreamlandResult = await handleDreamlandRequest(db, {
       path,
