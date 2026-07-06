@@ -1,5 +1,5 @@
 // Supabase Edge Function: dispatch-order
-// Triggered by Postgres on paid orders. Assigns driver via routing intelligence layer.
+// Triggered by Postgres on paid orders. Assigns internal driver or Uber Direct fallback.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { createRoutingDbAdapter } from "../_shared/routing/db-adapter.ts";
@@ -8,6 +8,134 @@ import {
   initializeRouteForOrder,
   tryInsertOrderIntoRoute,
 } from "../_shared/routing/uber-routing-ai.ts";
+import {
+  buildManifestFromOrderItems,
+  dispatchOrderViaUberDirect,
+  type DispatchOrderContext,
+} from "../_shared/uberDirect.ts";
+import { getUberDirectConfig } from "../_shared/uberDirectEnv.ts";
+
+type OrderRow = {
+  order_id: string;
+  payment_status?: string;
+  driver_id?: string | null;
+  delivery_type?: string | null;
+  status?: string;
+  customer_name?: string;
+  address?: string;
+  customer_lat?: number | null;
+  customer_lng?: number | null;
+  restaurant_id?: string;
+  restaurant_name?: string;
+  items?: Array<{ name?: string; quantity?: number; price?: number }>;
+  total?: number;
+};
+
+type RestaurantRow = {
+  name?: string;
+  address?: string;
+  phone?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+};
+
+async function loadUberDispatchContext(
+  db: ReturnType<typeof createClient>,
+  order: OrderRow
+): Promise<DispatchOrderContext | null> {
+  if (!order.address?.trim()) return null;
+
+  let restaurant: RestaurantRow | null = null;
+  if (order.restaurant_id) {
+    const { data } = await db
+      .from("restaurants")
+      .select("name,address,phone,latitude,longitude")
+      .eq("restaurant_id", order.restaurant_id)
+      .maybeSingle();
+    restaurant = data;
+  }
+
+  const restaurantAddress = restaurant?.address || order.restaurant_name || "Restaurant";
+  const { items, manifestTotalCents } = buildManifestFromOrderItems(order.items, Number(order.total) || 0);
+
+  return {
+    orderId: order.order_id,
+    customerName: order.customer_name || "Customer",
+    customerAddress: order.address,
+    customerLat: order.customer_lat,
+    customerLng: order.customer_lng,
+    restaurantName: restaurant?.name || order.restaurant_name || "Restaurant",
+    restaurantAddress,
+    restaurantPhone: restaurant?.phone,
+    pickupLat: restaurant?.latitude,
+    pickupLng: restaurant?.longitude,
+    items,
+    manifestTotalCents,
+  };
+}
+
+async function assignUberDirect(
+  db: ReturnType<typeof createClient>,
+  order: OrderRow
+): Promise<Response> {
+  const ctx = await loadUberDispatchContext(db, order);
+  if (!ctx) {
+    return new Response(JSON.stringify({ error: "uber_context_missing", order_id: order.order_id }), {
+      status: 422,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const uberDelivery = await dispatchOrderViaUberDirect(ctx);
+  const trackingId = uberDelivery.id || `uber_${order.order_id}`;
+  const eta = uberDelivery.dropoff_eta || uberDelivery.pickup_eta || null;
+
+  const { error: updateError } = await db
+    .from("orders")
+    .update({
+      status: "assigned_uber",
+      delivery_type: "uber",
+      tracking_id: trackingId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("order_id", order.order_id)
+    .eq("payment_status", "paid")
+    .is("driver_id", null);
+
+  if (updateError) {
+    console.error(JSON.stringify({ error: updateError.message, order_id: order.order_id }));
+    return new Response(JSON.stringify({ error: updateError.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  await db.from("deliveries").insert({
+    delivery_id: `dlv_${crypto.randomUUID().slice(0, 12)}`,
+    order_id: order.order_id,
+    provider: "uber",
+    tracking_id: trackingId,
+    uber_delivery_id: uberDelivery.id,
+    status: uberDelivery.status || "assigned",
+    eta,
+    meta: {
+      tracking_url: uberDelivery.tracking_url,
+      quote_id: uberDelivery.quote_id,
+      provider: "uber_direct",
+    },
+  });
+
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      order_id: order.order_id,
+      delivery_type: "uber",
+      uber_delivery_id: uberDelivery.id,
+      tracking_url: uberDelivery.tracking_url,
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+}
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
@@ -19,6 +147,7 @@ Deno.serve(async (req) => {
   const db = createClient(supabaseUrl, serviceKey);
   const routingDb = createRoutingDbAdapter(db);
   const runtime = { supabaseUrl, serviceKey };
+  const uberCfg = getUberDirectConfig();
 
   let payload: { record?: { order_id?: string }; order_id?: string };
   try {
@@ -36,6 +165,13 @@ Deno.serve(async (req) => {
 
   if (!order || order.payment_status !== "paid") {
     return new Response(JSON.stringify({ skipped: true, reason: "not_paid" }), { status: 200 });
+  }
+
+  if (order.delivery_type === "uber" || order.status === "assigned_uber") {
+    return new Response(JSON.stringify({ skipped: true, reason: "uber_already_assigned" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   if (order.driver_id) {
@@ -69,6 +205,18 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "order_coords_missing" }), { status: 404 });
   }
 
+  if (uberCfg?.enabled && uberCfg.preferred) {
+    try {
+      return await assignUberDirect(db, order as OrderRow);
+    } catch (e) {
+      console.error(JSON.stringify({ uber_direct_failed: String(e), order_id: orderId }));
+      return new Response(JSON.stringify({ error: "uber_direct_failed", detail: String(e) }), {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
   const proposal = await selectOptimalDriverForOrder(db, routingDb, orderRef);
 
   let driver = null;
@@ -88,6 +236,18 @@ Deno.serve(async (req) => {
   }
 
   if (!driver) {
+    if (uberCfg?.enabled) {
+      try {
+        return await assignUberDirect(db, order as OrderRow);
+      } catch (e) {
+        console.error(JSON.stringify({ uber_direct_failed: String(e), order_id: orderId }));
+        return new Response(
+          JSON.stringify({ ok: true, order_id: orderId, driver_id: null, reason: "no_drivers_uber_failed", detail: String(e) }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     return new Response(JSON.stringify({ ok: true, order_id: orderId, driver_id: null, reason: "no_drivers" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
