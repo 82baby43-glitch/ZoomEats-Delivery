@@ -18,6 +18,8 @@ import { handleComplianceRequest } from "./complianceHandler";
 import { handleDreamlandRequest } from "./dreamlandHandler";
 import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { handleStripeAdminRequest } from "./stripeAdmin";
+import { handleGeocodeAdminRequest } from "./geocodeAdmin";
+import { geocodeOrderAddress } from "./geocodeAdmin";
 import { normalizeRole } from "../compliance/authz";
 
 function throwErr(message: string, status = 400): never {
@@ -123,6 +125,9 @@ export async function handleApiRequest(
 
     const stripeResult = await handleStripeAdminRequest(db, complianceCtx);
     if (stripeResult !== null) return stripeResult;
+
+    const geocodeResult = await handleGeocodeAdminRequest(db, complianceCtx);
+    if (geocodeResult !== null) return geocodeResult;
 
     const dreamlandResult = await handleDreamlandRequest(db, {
       path,
@@ -261,6 +266,8 @@ export async function handleApiRequest(
       const subtotal = Math.round(repriced.reduce((s, it) => s + it.price * it.quantity, 0) * 100) / 100;
       const delivery_fee = 2.99;
       const total = Math.round((subtotal + delivery_fee) * 100) / 100;
+      const deliveryAddress = String(body.address || "").trim();
+      const geo = deliveryAddress ? await geocodeOrderAddress(deliveryAddress, u.name as string) : null;
       const order = {
         order_id: uid("ord"),
         customer_id: u.user_id,
@@ -271,7 +278,9 @@ export async function handleApiRequest(
         subtotal,
         delivery_fee,
         total,
-        address: body.address || "",
+        address: deliveryAddress,
+        customer_lat: geo?.latitude ?? null,
+        customer_lng: geo?.longitude ?? null,
         notes: body.notes || "",
         status: "pending_payment",
         payment_status: "pending",

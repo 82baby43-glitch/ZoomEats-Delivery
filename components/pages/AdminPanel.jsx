@@ -12,6 +12,7 @@ import ActivityFeed from "@/components/admin/ActivityFeed";
 import AttentionTab from "@/components/admin/AttentionTab";
 import ApprovalsTab from "@/components/admin/ApprovalsTab";
 import ComplianceDossier from "@/components/admin/ComplianceDossier";
+import GeocodeRestaurantsButton from "@/components/admin/GeocodeRestaurantsButton";
 import { UsersTable, RestaurantsList, OrdersTable } from "@/components/admin/Tables";
 import { sanitizeActivity, sanitizeAttention, sanitizeMetrics, sanitizeOrders, sanitizeRestaurants, sanitizeUsers } from "@/lib/safeData";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
@@ -152,6 +153,7 @@ export default function AdminPanel() {
           <Link href="/admin/stripe" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-stripe-link">
             <CreditCard size={16} /> Stripe
           </Link>
+          <GeocodeRestaurantsButton />
           <Link
             href="/admin/import-restaurants"
             className="btn-ghost inline-flex items-center gap-2 text-sm"

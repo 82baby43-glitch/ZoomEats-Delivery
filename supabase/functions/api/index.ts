@@ -25,6 +25,7 @@ import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
 import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
+import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geocodeAdmin.ts";
 import { normalizeRole } from "../_shared/complianceAuthz.ts";
 
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
@@ -151,6 +152,9 @@ Deno.serve(async (req) => {
 
     const stripeResult = await handleStripeAdminRequest(db, complianceCtx);
     if (stripeResult !== null) return json(stripeResult);
+
+    const geocodeResult = await handleGeocodeAdminRequest(db, complianceCtx);
+    if (geocodeResult !== null) return json(geocodeResult);
 
     const dreamlandResult = await handleDreamlandRequest(db, {
       path,
@@ -289,6 +293,8 @@ Deno.serve(async (req) => {
       const subtotal = Math.round(repriced.reduce((s, it) => s + it.price * it.quantity, 0) * 100) / 100;
       const delivery_fee = 2.99;
       const total = Math.round((subtotal + delivery_fee) * 100) / 100;
+      const deliveryAddress = String(body.address || "").trim();
+      const geo = deliveryAddress ? await geocodeOrderAddress(deliveryAddress, u.name as string) : null;
       const order = {
         order_id: uid("ord"),
         customer_id: u.user_id,
@@ -299,7 +305,9 @@ Deno.serve(async (req) => {
         subtotal,
         delivery_fee,
         total,
-        address: body.address || "",
+        address: deliveryAddress,
+        customer_lat: geo?.latitude ?? null,
+        customer_lng: geo?.longitude ?? null,
         notes: body.notes || "",
         status: "pending_payment",
         payment_status: "pending",

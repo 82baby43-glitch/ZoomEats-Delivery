@@ -14,7 +14,9 @@
     "stripe:supabase": "node scripts/setup-stripe-supabase.mjs",
     "compliance:test": "node scripts/compliance-test.mjs",
     "auth:redirects": "node scripts/sync-auth-redirects.mjs",
-    "signup:test": "node scripts/signup-test.mjs"
+    "signup:test": "node scripts/signup-test.mjs",
+    "geocode:restaurants": "node scripts/geocode-restaurants.mjs",
+    "launch:readiness": "node scripts/launch-readiness.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",
