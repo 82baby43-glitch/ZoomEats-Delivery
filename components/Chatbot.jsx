@@ -9,22 +9,14 @@ import ChatInput from "@/components/chatbot/ChatInput";
 import DreamlandAvatar from "@/components/dreamland/DreamlandAvatar";
 import { useDreamlandChat } from "@/components/chatbot/useChat";
 
-export default function Chatbot({ initialMessage }) {
+export default function Chatbot() {
   const [open, setOpen] = useState(false);
-  const { msgs, busy, send, injectMessage } = useDreamlandChat(open);
+  const { msgs, busy, send } = useDreamlandChat(open);
   const endRef = useRef();
-  const injected = useRef(false);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, busy]);
-
-  useEffect(() => {
-    if (open && initialMessage && !injected.current) {
-      injected.current = true;
-      injectMessage(initialMessage);
-    }
-  }, [open, initialMessage, injectMessage]);
 
   return (
     <>
