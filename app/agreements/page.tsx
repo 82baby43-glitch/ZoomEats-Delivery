@@ -1,10 +1,10 @@
-import { Protected } from "@/components/Protected";
-import AgreementCenter from "@/components/pages/AgreementCenter";
+import { ComplianceGate } from "@/components/ComplianceGate";
+import RoleAgreementCenter from "@/components/pages/RoleAgreementCenter";
 
 export default function AgreementsPage() {
   return (
-    <Protected>
-      <AgreementCenter />
-    </Protected>
+    <ComplianceGate roles={["delivery", "driver", "vendor", "restaurant"]} requireCompliance={false} loginPath="/login">
+      <RoleAgreementCenter roleLabel="Platform" />
+    </ComplianceGate>
   );
 }

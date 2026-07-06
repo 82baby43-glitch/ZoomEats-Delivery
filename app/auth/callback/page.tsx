@@ -3,7 +3,15 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { ensureUserProfile } from "@/lib/auth";
+import { ensureUserProfile, getCurrentUser } from "@/lib/auth";
+
+const ROLE_HOME: Record<string, string> = {
+  admin: "/admin",
+  delivery: "/driver/dashboard",
+  vendor: "/restaurant/dashboard",
+  dispatcher: "/dispatcher",
+  customer: "/",
+};
 
 export default function AuthCallbackPage() {
   const router = useRouter();
@@ -26,7 +34,6 @@ export default function AuthCallbackPage() {
             const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
             if (exchangeError) throw exchangeError;
           } else if (hashParams.get("access_token")) {
-            // PKCE / implicit hash handled by detectSessionInUrl
             await new Promise((r) => setTimeout(r, 500));
           }
         }
@@ -35,14 +42,21 @@ export default function AuthCallbackPage() {
         if (confirmedError) throw confirmedError;
         const confirmed = confirmedData?.session;
         if (!confirmed) {
-          router.replace("/?error=auth_failed");
+          router.replace("/login?error=auth_failed");
           return;
         }
 
         await ensureUserProfile();
-        if (!cancelled) router.replace("/");
+        const profile = await getCurrentUser();
+        const storedRedirect = sessionStorage.getItem("auth_redirect");
+        sessionStorage.removeItem("auth_redirect");
+
+        const defaultHome = ROLE_HOME[profile?.role || "customer"] || "/onboarding";
+        const target = storedRedirect || defaultHome;
+
+        if (!cancelled) router.replace(target);
       } catch {
-        if (!cancelled) router.replace("/?error=auth_failed");
+        if (!cancelled) router.replace("/login?error=auth_failed");
       }
     })();
 

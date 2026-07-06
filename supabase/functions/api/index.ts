@@ -21,6 +21,8 @@ import {
   runGooglePlacesImport,
   sanitizeImportString,
 } from "../_shared/googlePlacesImport.ts";
+import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
+import { normalizeRole } from "../_shared/complianceAuthz.ts";
 
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
 
@@ -119,23 +121,32 @@ Deno.serve(async (req) => {
   };
   const requireRole = (...roles: string[]) => {
     const u = requireAuth();
-    if (!roles.includes(u.role as string)) throw { status: 403, message: `Requires role: ${roles}` };
+    const userRole = normalizeRole(String(u.role || ""));
+    const expanded = roles.flatMap((r) => [r, normalizeRole(r)]);
+    if (!expanded.includes(userRole) && !expanded.includes(u.role as string)) {
+      throw { status: 403, message: `Requires role: ${roles.join(", ")}` };
+    }
     return u;
   };
 
+  const complianceCtx = {
+    path,
+    method,
+    body,
+    params,
+    user,
+    requireAuth,
+    requireRole,
+  };
+
   try {
+    const complianceResult = await handleComplianceRequest(db, complianceCtx);
+    if (complianceResult !== null) return json(complianceResult);
+
     // ---- Auth ----
     if (path === "/auth/me" && method === "GET") {
       const u = requireAuth();
       return json(u);
-    }
-    if (path === "/auth/role" && method === "POST") {
-      const u = requireAuth();
-      const role = body.role as string;
-      if (!["customer", "vendor", "delivery"].includes(role)) return err("Invalid role");
-      if (u.role === "admin") return err("Admin role cannot be changed");
-      const { data } = await db.from("users").update({ role }).eq("user_id", u.user_id).select().single();
-      return json(data);
     }
 
     // ---- Restaurants (public) ----
@@ -889,13 +900,6 @@ Deno.serve(async (req) => {
       }
 
       return json({ import_id: importId, status: "started" });
-    }
-
-    if (path.startsWith("/admin/compliance") || path.startsWith("/agreements")) {
-      return json({ ok: true, items: [], reviews: [] });
-    }
-    if (path.startsWith("/uploads")) {
-      return json({ url: "", key: "uploads/placeholder" });
     }
 
     if (path === "/" && method === "GET") {

@@ -1,10 +1,10 @@
-import { Protected } from "@/components/Protected";
+import { ComplianceGate } from "@/components/ComplianceGate";
 import DisclosureForm from "@/components/pages/DisclosureForm";
 
 export default function DisclosurePage() {
   return (
-    <Protected roles={["delivery"]}>
+    <ComplianceGate roles={["delivery", "driver"]} loginPath="/driver/login">
       <DisclosureForm />
-    </Protected>
+    </ComplianceGate>
   );
 }
