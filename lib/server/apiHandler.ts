@@ -21,6 +21,7 @@ import { handleStripeAdminRequest } from "./stripeAdmin";
 import { handleGeocodeAdminRequest } from "./geocodeAdmin";
 import { geocodeOrderAddress } from "./geocodeAdmin";
 import { normalizeRole } from "../compliance/authz";
+import { filterPublicRestaurants, isTestRestaurantName } from "../restaurants";
 
 function throwErr(message: string, status = 400): never {
   const e = new Error(message) as Error & { status?: number };
@@ -147,18 +148,18 @@ export async function handleApiRequest(
 
     // ---- Restaurants (public) ----
     if (path === "/restaurants" && method === "GET") {
-      let q = db.from("restaurants").select("*").eq("approved", true).order("rating", { ascending: false });
+      let q = db.from("restaurants").select("*").eq("approved", true).not("name", "ilike", "TEST_%").order("rating", { ascending: false });
       const search = params.q;
       if (search) q = q.or(`name.ilike.%${search}%,description.ilike.%${search}%,cuisine.ilike.%${search}%`);
       const { data } = await q;
-      return data || [];
+      return filterPublicRestaurants(data || []);
     }
 
     const restMatch = path.match(/^\/restaurants\/([^/]+)$/);
     if (restMatch && method === "GET") {
       const rid = restMatch[1];
       const { data: restaurant } = await db.from("restaurants").select("*").eq("restaurant_id", rid).maybeSingle();
-      if (!restaurant) throwErr("Not found", 404);
+      if (!restaurant || isTestRestaurantName(restaurant.name)) throwErr("Not found", 404);
       const { data: menu } = await db.from("menu_items").select("*").eq("restaurant_id", rid).eq("available", true);
       return { restaurant, menu: menu || [] };
     }

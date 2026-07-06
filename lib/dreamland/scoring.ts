@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { filterPublicRestaurants } from "../restaurants";
 import type { Mood } from "./emotions";
 import { moodCuisines } from "./emotions";
 import { itemMatchesCraving } from "./cravings";
@@ -202,10 +203,12 @@ export async function loadRestaurantData(db: SupabaseClient) {
     .from("restaurants")
     .select("restaurant_id,name,cuisine,rating,delivery_time_min,image_url,description,accepting_orders")
     .eq("approved", true)
+    .not("name", "ilike", "TEST_%")
     .order("rating", { ascending: false })
     .limit(50);
 
-  const ids = (restaurants || []).map((r) => r.restaurant_id);
+  const publicRestaurants = filterPublicRestaurants(restaurants);
+  const ids = publicRestaurants.map((r) => r.restaurant_id);
   const { data: menuItems } = ids.length
     ? await db.from("menu_items").select("item_id,restaurant_id,name,price,category,available").in("restaurant_id", ids).eq("available", true)
     : { data: [] };
@@ -224,7 +227,7 @@ export async function loadRestaurantData(db: SupabaseClient) {
   const maxOrders = Math.max(1, ...countMap.values());
 
   return {
-    restaurants: (restaurants || []) as RestaurantRow[],
+    restaurants: publicRestaurants as RestaurantRow[],
     menuItems: (menuItems || []) as MenuRow[],
     orderCounts: countMap,
     maxOrders,
