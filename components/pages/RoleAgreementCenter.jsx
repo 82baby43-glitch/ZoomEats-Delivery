@@ -5,23 +5,17 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { collectClientMeta } from "@/lib/compliance/clientMeta";
+import AgreementSigningCard from "@/components/compliance/AgreementSigningCard";
+import { isSignatureComplete } from "@/components/compliance/AgreementSignaturePanel";
 
-function clientMeta() {
-  if (typeof window === "undefined") return {};
-  const ua = navigator.userAgent;
-  return {
-    user_agent: ua,
-    browser: /Chrome|Firefox|Safari|Edge/.exec(ua)?.[0] || "unknown",
-    device: /Mobile|Android|iPhone/i.test(ua) ? "mobile" : "desktop",
-  };
-}
-
-export default function RoleAgreementCenter({ roleLabel }) {
+export default function RoleAgreementCenter({ roleLabel, onComplete = null, stayOnComplete = false }) {
   const { user, refresh } = useAuth();
   const router = useRouter();
   const [agreements, setAgreements] = useState([]);
   const [checks, setChecks] = useState({});
-  const [signatures, setSignatures] = useState({});
+  const [sigByType, setSigByType] = useState({});
+  const [scrollByType, setScrollByType] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -32,37 +26,52 @@ export default function RoleAgreementCenter({ roleLabel }) {
       setAgreements(list);
       const c = {};
       const s = {};
+      const sc = {};
       list.forEach((a) => {
         if (a.accepted) c[a.type] = true;
-        if (a.acceptance?.typed_name) s[a.type] = a.acceptance.typed_name;
+        if (a.acceptance?.typed_name) s[a.type] = { typed_name: a.acceptance.typed_name, initials: a.acceptance.initials, signature_method: a.acceptance.signature_method || "typed" };
+        sc[a.type] = Boolean(a.accepted);
       });
       setChecks(c);
-      setSignatures(s);
+      setSigByType(s);
+      setScrollByType(sc);
     }).catch((e) => setError(e?.message || "Failed to load agreements"));
   }, [user]);
 
-  const toggle = (type) => setChecks((prev) => ({ ...prev, [type]: !prev[type] }));
-  const setSig = (type, val) => setSignatures((prev) => ({ ...prev, [type]: val }));
-
   const pending = agreements.filter((a) => a.required && !a.accepted);
   const allReady = pending.every((a) => {
-    if (a.kind === "checkbox") return checks[a.type];
-    return checks[a.type] && (signatures[a.type] || "").trim().length > 1;
+    if (!checks[a.type] || !scrollByType[a.type]) return false;
+    return isSignatureComplete(sigByType[a.type], a.kind);
   });
+
+  const downloadPdf = async (acceptanceId) => {
+    try {
+      const r = await api.get(`/agreements/${acceptanceId}/pdf`);
+      if (r?.data?.url) window.open(r.data.url, "_blank");
+    } catch (e) {
+      alert(e?.message || "PDF unavailable");
+    }
+  };
 
   const submitAll = async () => {
     setBusy(true);
     setError("");
     try {
-      const meta = clientMeta();
+      const meta = await collectClientMeta();
       const batch = pending.map((a) => ({
         agreement_type: a.type,
-        typed_name: signatures[a.type] || user?.name || "",
         consent_checkbox: Boolean(checks[a.type]),
+        scroll_read: Boolean(scrollByType[a.type]),
+        ...sigByType[a.type],
+        typed_name: sigByType[a.type]?.typed_name || user?.name || "",
         ...meta,
       }));
       await api.post("/agreements/batch-accept", { agreements: batch, ...meta });
       await refresh();
+      if (stayOnComplete && onComplete) {
+        onComplete();
+        return;
+      }
       const statusRes = await api.get("/auth/compliance-status");
       const status = statusRes?.data;
       if (status?.can_access_dashboard) {
@@ -83,45 +92,28 @@ export default function RoleAgreementCenter({ roleLabel }) {
       <div className="max-w-3xl mx-auto px-6 py-12">
         <h1 className="font-display text-3xl font-bold">{roleLabel} Agreement Center</h1>
         <p className="mt-2" style={{ color: "var(--muted)" }}>
-          Accept all required agreements before you can access your dashboard.
+          Scroll to read each agreement, sign with draw/type/upload, and provide initials. Signed PDFs are archived automatically.
         </p>
         {error && <p className="mt-4 text-red-400 text-sm">{error}</p>}
 
         <div className="mt-8 space-y-4">
           {agreements.map((a) => (
-            <div key={a.type} className="card p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="font-bold">{a.title}</h3>
-                  <p className="text-sm mt-2" style={{ color: "var(--muted)" }}>{a.body}</p>
-                  {a.accepted && (
-                    <p className="text-xs mt-2 text-green-400">Accepted</p>
-                  )}
-                </div>
-                {a.required && <span className="text-xs font-bold text-amber-400">Required</span>}
-              </div>
-              {!a.accepted && (
-                <div className="mt-4 space-y-3">
-                  {a.kind === "signature" && (
-                    <input
-                      className="input-field w-full"
-                      placeholder="Type your full legal name"
-                      value={signatures[a.type] || ""}
-                      onChange={(e) => setSig(a.type, e.target.value)}
-                    />
-                  )}
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={Boolean(checks[a.type])} onChange={() => toggle(a.type)} />
-                    I agree to the {a.title}
-                  </label>
-                </div>
-              )}
-            </div>
+            <AgreementSigningCard
+              key={a.type}
+              agreement={a}
+              sig={sigByType[a.type] || {}}
+              onSigChange={(sig) => setSigByType((prev) => ({ ...prev, [a.type]: sig }))}
+              scrolled={scrollByType[a.type]}
+              onScrolled={() => setScrollByType((prev) => ({ ...prev, [a.type]: true }))}
+              checked={checks[a.type]}
+              onToggle={() => setChecks((prev) => ({ ...prev, [a.type]: !prev[a.type] }))}
+              onDownloadPdf={a.acceptance?.acceptance_id ? () => downloadPdf(a.acceptance.acceptance_id) : undefined}
+            />
           ))}
         </div>
 
         {pending.length > 0 && (
-          <button className="btn-primary mt-8" disabled={!allReady || busy} onClick={submitAll}>
+          <button className="btn-primary mt-8" disabled={!allReady || busy} onClick={submitAll} data-testid="submit-agreements">
             {busy ? "Saving…" : "Submit all agreements"}
           </button>
         )}

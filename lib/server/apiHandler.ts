@@ -43,6 +43,19 @@ function computePriceHash(items: Array<{ item_id: string; name: string; price: n
   return `h${Math.abs(h).toString(16)}`;
 }
 
+function assertRestaurantAcceptingOrders(rest: Record<string, unknown> | null) {
+  if (!rest) return;
+  const payoutReady = Boolean(
+    rest.stripe_connect_complete &&
+    rest.payouts_enabled &&
+    !rest.requires_reverification &&
+    rest.accepting_orders !== false
+  );
+  if (!payoutReady) {
+    throwErr("This restaurant is not accepting orders until payout setup is complete.", 403);
+  }
+}
+
 export async function handleApiRequest(
   db: SupabaseClient,
   opts: {
@@ -203,6 +216,139 @@ export async function handleApiRequest(
       await db.from("menu_items").delete().eq("item_id", delMenuMatch[1]).eq("restaurant_id", rest.restaurant_id);
       return { ok: true };
     }
+
+    if (path === "/vendor/media/presign" && method === "POST") {
+      const u = requireRole("vendor");
+      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).limit(1).maybeSingle();
+      if (!rest) throwErr("Create restaurant first");
+      const kind = String(body.kind || "original");
+      const fileName = String(body.file_name || "photo.jpg");
+      const contentType = String(body.content_type || "image/jpeg");
+      const enhancementId = String(body.enhancement_id || uid("enh"));
+      const storagePath = `${rest.restaurant_id}/${enhancementId}/${kind}_${Date.now()}_${fileName}`;
+      const { data: signed, error } = await db.storage.from("restaurant-media").createSignedUploadUrl(storagePath);
+      if (error) throwErr(error.message, 500);
+      return {
+        enhancement_id: enhancementId,
+        upload_url: signed?.signedUrl,
+        storage_path: storagePath,
+        token: signed?.token,
+      };
+    }
+
+    if (path === "/vendor/media/enhancements" && method === "GET") {
+      const u = requireRole("vendor");
+      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).limit(1).maybeSingle();
+      if (!rest) return [];
+      const { data } = await db
+        .from("menu_photo_enhancements")
+        .select("*")
+        .eq("restaurant_id", rest.restaurant_id)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      const rows = data || [];
+      const enriched = await Promise.all(rows.map(async (row) => {
+        const urls: Record<string, string | null> = {};
+        if (row.original_path) {
+          const { data: s } = await db.storage.from("restaurant-media").createSignedUrl(row.original_path as string, 3600);
+          urls.original_url = s?.signedUrl || null;
+        }
+        if (row.enhanced_path) {
+          const { data: s } = await db.storage.from("restaurant-media").createSignedUrl(row.enhanced_path as string, 3600);
+          urls.enhanced_url = s?.signedUrl || null;
+        }
+        if (row.published_url) urls.published_url = row.published_url as string;
+        return { ...row, ...urls };
+      }));
+      return enriched;
+    }
+
+    if (path === "/vendor/media/enhancements" && method === "POST") {
+      const u = requireRole("vendor");
+      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).limit(1).maybeSingle();
+      if (!rest) throwErr("Create restaurant first");
+      const enhancementId = String(body.enhancement_id || uid("enh"));
+      const originalPath = String(body.original_path || "");
+      const enhancedPath = String(body.enhanced_path || "");
+      if (!originalPath) throwErr("original_path required");
+      await db.from("menu_photo_enhancements").upsert({
+        enhancement_id: enhancementId,
+        restaurant_id: rest.restaurant_id,
+        user_id: u.user_id,
+        original_path: originalPath,
+        enhanced_path: enhancedPath || null,
+        status: enhancedPath ? "enhanced" : "pending",
+        approved: false,
+        metadata: body.metadata || {},
+      }, { onConflict: "enhancement_id" });
+      return { enhancement_id: enhancementId, status: enhancedPath ? "enhanced" : "pending" };
+    }
+
+    const mediaApproveMatch = path.match(/^\/vendor\/media\/enhancements\/([^/]+)\/approve$/);
+    if (mediaApproveMatch && method === "POST") {
+      const u = requireRole("vendor");
+      const enhancementId = mediaApproveMatch[1];
+      const { data: row } = await db.from("menu_photo_enhancements").select("*").eq("enhancement_id", enhancementId).eq("user_id", u.user_id).maybeSingle();
+      if (!row) throwErr("Enhancement not found", 404);
+      if (!row.enhanced_path) throwErr("Enhanced image not ready");
+
+      const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+      const publishedPath = `${row.restaurant_id}/published/${enhancementId}.jpg`;
+      const { data: fileData, error: dlErr } = await db.storage.from("restaurant-media").download(row.enhanced_path as string);
+      if (dlErr || !fileData) throwErr("Could not read enhanced image", 500);
+      const bytes = await fileData.arrayBuffer();
+      const { error: upErr } = await db.storage.from("restaurant-media").upload(publishedPath, bytes, {
+        contentType: "image/jpeg",
+        upsert: true,
+      });
+      if (upErr) throwErr(upErr.message, 500);
+
+      const publishedUrl = supabaseUrl
+        ? `${supabaseUrl}/storage/v1/object/public/restaurant-media/${publishedPath}`
+        : publishedPath;
+
+      let menuItemId = row.menu_item_id as string | null;
+      if (body.menu_item) {
+        const item = body.menu_item as Record<string, unknown>;
+        menuItemId = uid("item");
+        await db.from("menu_items").insert({
+          item_id: menuItemId,
+          restaurant_id: row.restaurant_id,
+          name: item.name || "Menu item",
+          description: item.description || "",
+          price: item.price || 0,
+          image_url: publishedUrl,
+          category: item.category || "Mains",
+          available: true,
+        });
+      } else if (body.menu_item_id) {
+        menuItemId = String(body.menu_item_id);
+        await db.from("menu_items").update({ image_url: publishedUrl }).eq("item_id", menuItemId).eq("restaurant_id", row.restaurant_id);
+      }
+
+      await db.from("menu_photo_enhancements").update({
+        status: "approved",
+        approved: true,
+        published_path: publishedPath,
+        published_url: publishedUrl,
+        menu_item_id: menuItemId,
+        approved_at: new Date().toISOString(),
+      }).eq("enhancement_id", enhancementId);
+
+      return { ok: true, enhancement_id: enhancementId, published_url: publishedUrl, menu_item_id: menuItemId };
+    }
+
+    const mediaRejectMatch = path.match(/^\/vendor\/media\/enhancements\/([^/]+)\/reject$/);
+    if (mediaRejectMatch && method === "POST") {
+      const u = requireRole("vendor");
+      const enhancementId = mediaRejectMatch[1];
+      await db.from("menu_photo_enhancements").update({
+        status: "rejected",
+        approved: false,
+      }).eq("enhancement_id", enhancementId).eq("user_id", u.user_id);
+      return { ok: true };
+    }
+
     if (path === "/vendor/orders" && method === "GET") {
       const u = requireRole("vendor");
       const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).limit(1).maybeSingle();
@@ -215,8 +361,9 @@ export async function handleApiRequest(
       const u = requireRole("vendor");
       const newStatus = body.status as string;
       if (!["accepted", "preparing", "ready"].includes(newStatus)) throwErr("Invalid status");
-      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).limit(1).maybeSingle();
+      const { data: rest } = await db.from("restaurants").select("*").eq("owner_id", u.user_id).limit(1).maybeSingle();
       if (!rest) throwErr("No restaurant", 404);
+      if (newStatus === "accepted") assertRestaurantAcceptingOrders(rest);
       await db.from("orders").update({ status: newStatus }).eq("order_id", vendorStatusMatch[1]).eq("restaurant_id", rest.restaurant_id);
       return { ok: true };
     }
@@ -229,6 +376,7 @@ export async function handleApiRequest(
       if (!items.length) throwErr("Empty cart");
       const { data: rest } = await db.from("restaurants").select("*").eq("restaurant_id", restaurant_id).maybeSingle();
       if (!rest) throwErr("Restaurant not found", 404);
+      assertRestaurantAcceptingOrders(rest);
       const ids = items.map((i) => i.item_id);
       const { data: menuRows } = await db.from("menu_items").select("*").in("item_id", ids).eq("restaurant_id", restaurant_id).eq("available", true);
       const canonical = Object.fromEntries((menuRows || []).map((m) => [m.item_id, m]));

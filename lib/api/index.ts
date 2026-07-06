@@ -174,3 +174,73 @@ export function apiData<T>(response: { data?: T | null } | null | undefined, fal
 export const getWalletBalance = () => api.get("/wallet/balance");
 export const getWalletTransactions = () => api.get("/wallet/transactions");
 export const requestWalletPayout = (amount: number) => api.post("/wallet/payout", { amount });
+
+export const getConnectStatus = (entityType: "driver" | "restaurant") =>
+  api.get(entityType === "restaurant" ? "/connect/restaurant/status" : "/connect/driver/status");
+
+export const startConnectOnboarding = (entityType: "driver" | "restaurant", returnUrl?: string) =>
+  api.post(entityType === "restaurant" ? "/connect/restaurant/onboard" : "/connect/driver/onboard", { return_url: returnUrl });
+
+export const startConnectReverification = (returnUrl?: string) =>
+  api.post("/connect/reverify", { return_url: returnUrl });
+
+export const getPayoutNotifications = () => api.get("/notifications");
+
+export const getNotifications = () => api.get("/notifications");
+export const markNotificationRead = (id: string) => api.post(`/notifications/${id}/read`, {});
+export const markAllNotificationsRead = () => api.post("/notifications/read-all", {});
+export const getNotificationPreferences = () => api.get("/notifications/preferences");
+export const updateNotificationPreferences = (body: Record<string, unknown>) => api.put("/notifications/preferences", body);
+export const runNotificationScan = () => api.post("/admin/notifications/scan", {});
+
+export const getAdminPayoutDashboard = () => api.get("/admin/connect/dashboard");
+
+export const getComplianceOverview = (params: Record<string, string> = {}) =>
+  api.get("/admin/compliance/overview", { params });
+
+export const exportComplianceCsv = (params: Record<string, string> = {}) =>
+  api.get("/admin/compliance/export/csv", { params });
+
+export const exportCompliancePdf = (params: Record<string, string> = {}) =>
+  api.get("/admin/compliance/export/pdf", { params });
+
+export const getComplianceAudit = (params: Record<string, string> = {}) =>
+  api.get("/admin/compliance/audit", { params });
+
+export const presignRestaurantMedia = (body: Record<string, unknown>) =>
+  api.post("/vendor/media/presign", body);
+
+export const saveMediaEnhancement = (body: Record<string, unknown>) =>
+  api.post("/vendor/media/enhancements", body);
+
+export const getMediaEnhancements = () => api.get("/vendor/media/enhancements");
+
+export const approveMediaEnhancement = (id: string, body: Record<string, unknown> = {}) =>
+  api.post(`/vendor/media/enhancements/${id}/approve`, body);
+
+export const rejectMediaEnhancement = (id: string) =>
+  api.post(`/vendor/media/enhancements/${id}/reject`, {});
+
+export const getTaxDashboard = (year: number) =>
+  api.get("/tax/dashboard", { params: { year: String(year) } });
+
+export const presignW9Upload = (body: Record<string, unknown>) =>
+  api.post("/tax/w9/presign", body);
+
+export const submitW9Document = (path: string) =>
+  api.post("/tax/w9/submit", { path });
+
+export const getAdminTaxDashboard = (year: number) =>
+  api.get("/admin/tax/dashboard", { params: { year: String(year) } });
+
+export const syncTaxPayments = (year: number) =>
+  api.post("/admin/tax/sync-payments", { year });
+
+export const export1099NecCsv = (year: number) =>
+  api.get("/admin/tax/export/1099-nec", { params: { year: String(year) } });
+
+export const exportIrsTaxCsv = (year: number) =>
+  api.get("/admin/tax/export/irs-csv", { params: { year: String(year) } });
+
+export const generateYearEndTaxReport = (year: number) =>
+  api.get("/admin/tax/year-end", { params: { year: String(year) } });
