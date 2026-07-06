@@ -22,6 +22,13 @@ import {
   notifyMissingCompliance,
   scanComplianceNotifications,
 } from "../compliance/notifications";
+import {
+  buildComplianceOverview,
+  complianceOverviewToCsv,
+  fetchComplianceAudit,
+  filterComplianceRows,
+} from "../compliance/complianceDashboard";
+import { generateComplianceReportPdf } from "../compliance/generateComplianceReportPdf";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -584,28 +591,87 @@ export async function handleComplianceRequest(
 
   if (path === "/admin/compliance/dashboard" && method === "GET") {
     requireRole("admin");
-    const [{ data: pendingUsers }, { data: acceptances }, { data: driverDocs }, { data: bgChecks }] = await Promise.all([
-      db.from("users").select("user_id,role,approval_status,agreement_complete").in("role", ["delivery", "vendor"]).in("approval_status", ["pending", "review", "verification", "documents_missing"]),
-      db.from("agreement_acceptances").select("acceptance_id"),
-      db.from("driver_documents").select("document_id,status,expires_at,document_type"),
-      db.from("background_checks").select("check_id,status"),
-    ]);
-    const expiredDocs = (driverDocs || []).filter((d) => d.expires_at && new Date(d.expires_at) < new Date());
-    const pendingBg = (bgChecks || []).filter((b) => b.status === "pending");
-    const missingAgreements = (pendingUsers || []).filter((u) => !u.agreement_complete);
-    const totalPartners = (pendingUsers || []).length;
-    const compliant = totalPartners === 0 ? 100 : Math.round(((totalPartners - missingAgreements.length) / Math.max(totalPartners, 1)) * 100);
+    const overview = await buildComplianceOverview(db);
     return {
       stats: {
-        pending_approvals: totalPartners,
-        missing_agreements: missingAgreements.length,
-        expired_documents: expiredDocs.length,
-        pending_background_checks: pendingBg.length,
-        total_signatures: acceptances?.length || 0,
-        compliance_percentage: compliant,
+        pending_approvals: overview.stats.pending_approvals,
+        missing_agreements: overview.stats.missing_agreements,
+        expired_documents: overview.stats.expired_licenses + overview.stats.expired_insurance,
+        expired_licenses: overview.stats.expired_licenses,
+        expired_insurance: overview.stats.expired_insurance,
+        pending_background_checks: overview.stats.pending_background_checks,
+        total_signatures: overview.stats.total_signatures,
+        compliance_percentage: overview.stats.compliance_percentage,
+        drivers_total: overview.stats.drivers_total,
+        drivers_approved: overview.stats.drivers_approved,
+        restaurants_total: overview.stats.restaurants_total,
+        restaurants_approved: overview.stats.restaurants_approved,
+        compliant_partners: overview.stats.compliant_partners,
+        total_partners: overview.stats.total_partners,
       },
-      pending_users: pendingUsers || [],
+      pending_users: [...overview.drivers, ...overview.restaurants]
+        .filter((r) => r.issues.includes("pending_approval"))
+        .map((r) => ({ user_id: r.user_id, role: r.role, approval_status: r.approval_status, agreement_complete: r.agreement_complete })),
     };
+  }
+
+  if (path === "/admin/compliance/overview" && method === "GET") {
+    requireRole("admin");
+    const overview = await buildComplianceOverview(db);
+    const filterOpts = {
+      q: params.q,
+      role: params.role,
+      status: params.status,
+      issue: params.issue,
+    };
+    const allRows = [...overview.drivers, ...overview.restaurants];
+    const filtered = filterComplianceRows(allRows, filterOpts);
+    return {
+      ...overview,
+      filtered_rows: filtered,
+      filters: filterOpts,
+    };
+  }
+
+  if (path === "/admin/compliance/export/csv" && method === "GET") {
+    requireRole("admin");
+    const overview = await buildComplianceOverview(db);
+    const filterOpts = { q: params.q, role: params.role, status: params.status, issue: params.issue };
+    const rows = filterComplianceRows([...overview.drivers, ...overview.restaurants], filterOpts);
+    const csv = complianceOverviewToCsv(overview, rows);
+    return { csv, filename: `zoomeats-compliance-${new Date().toISOString().slice(0, 10)}.csv`, row_count: rows.length };
+  }
+
+  if (path === "/admin/compliance/export/pdf" && method === "GET") {
+    requireRole("admin");
+    const overview = await buildComplianceOverview(db);
+    const filterOpts = { q: params.q, role: params.role, status: params.status, issue: params.issue };
+    const rows = filterComplianceRows([...overview.drivers, ...overview.restaurants], filterOpts);
+    const bytes = await generateComplianceReportPdf(overview, rows);
+    let pdf_base64 = "";
+    if (typeof Buffer !== "undefined") {
+      pdf_base64 = Buffer.from(bytes).toString("base64");
+    } else {
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      pdf_base64 = btoa(binary);
+    }
+    return {
+      pdf_base64,
+      filename: `zoomeats-compliance-${new Date().toISOString().slice(0, 10)}.pdf`,
+      row_count: rows.length,
+    };
+  }
+
+  if (path === "/admin/compliance/audit" && method === "GET") {
+    requireRole("admin");
+    const logs = await fetchComplianceAudit(db, {
+      limit: Number(params.limit || 50),
+      offset: Number(params.offset || 0),
+      event_type: params.event_type,
+      user_id: params.user_id,
+    });
+    return { logs, count: logs.length };
   }
 
   const dossierMatch = path.match(/^\/admin\/compliance\/users\/([^/]+)\/dossier$/);

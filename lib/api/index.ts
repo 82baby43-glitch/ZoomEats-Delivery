@@ -194,3 +194,15 @@ export const updateNotificationPreferences = (body: Record<string, unknown>) => 
 export const runNotificationScan = () => api.post("/admin/notifications/scan", {});
 
 export const getAdminPayoutDashboard = () => api.get("/admin/connect/dashboard");
+
+export const getComplianceOverview = (params: Record<string, string> = {}) =>
+  api.get("/admin/compliance/overview", { params });
+
+export const exportComplianceCsv = (params: Record<string, string> = {}) =>
+  api.get("/admin/compliance/export/csv", { params });
+
+export const exportCompliancePdf = (params: Record<string, string> = {}) =>
+  api.get("/admin/compliance/export/pdf", { params });
+
+export const getComplianceAudit = (params: Record<string, string> = {}) =>
+  api.get("/admin/compliance/audit", { params });
