@@ -11,6 +11,7 @@ import AttentionSummary from "@/components/admin/AttentionSummary";
 import ActivityFeed from "@/components/admin/ActivityFeed";
 import AttentionTab from "@/components/admin/AttentionTab";
 import ApprovalsTab from "@/components/admin/ApprovalsTab";
+import ComplianceDossier from "@/components/admin/ComplianceDossier";
 import { UsersTable, RestaurantsList, OrdersTable } from "@/components/admin/Tables";
 import { sanitizeActivity, sanitizeAttention, sanitizeMetrics, sanitizeOrders, sanitizeRestaurants, sanitizeUsers } from "@/lib/safeData";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
@@ -32,6 +33,7 @@ export default function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [dossierUserId, setDossierUserId] = useState(null);
 
   const loadApprovals = useCallback(async () => {
     try {
@@ -141,6 +143,9 @@ export default function AdminPanel() {
       <div className="max-w-7xl mx-auto px-6 md:px-12 py-12">
         <PulseHeader since={since} onRefresh={retryAll} />
         <div className="mt-4 flex flex-wrap gap-3">
+          <Link href="/admin/compliance" className="btn-primary inline-flex items-center gap-2 text-sm">
+            Compliance Center
+          </Link>
           <Link
             href="/admin/import-restaurants"
             className="btn-ghost inline-flex items-center gap-2 text-sm"
@@ -209,7 +214,7 @@ export default function AdminPanel() {
                 </div>
               )}
               {tab === "approvals" && (
-                <ApprovalsTab onChanged={refreshAll} />
+                <ApprovalsTab onChanged={refreshAll} onReview={setDossierUserId} />
               )}
               {tab === "attention" && <AttentionTab attention={attention} onApprove={approve} />}
               {tab === "users" && <UsersTable users={users} />}
@@ -218,6 +223,9 @@ export default function AdminPanel() {
             </>
           )}
         </div>
+        {dossierUserId && (
+          <ComplianceDossier userId={dossierUserId} onClose={() => setDossierUserId(null)} onAction={refreshAll} />
+        )}
       </div>
     </div>
   );
