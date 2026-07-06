@@ -18,6 +18,7 @@ export function UsersTable({ users }) {
             <th className="text-left p-3">Name</th>
             <th className="text-left p-3">Email</th>
             <th className="text-left p-3">Role</th>
+            <th className="text-left p-3">Status</th>
           </tr>
         </thead>
         <tbody>
@@ -26,6 +27,11 @@ export function UsersTable({ users }) {
               <td className="p-3 font-bold">{u.name}</td>
               <td className="p-3">{u.email}</td>
               <td className="p-3"><span className="badge">{u.role}</span></td>
+              <td className="p-3">
+                <span className={`badge ${u.approval_status === "approved" ? "text-green-400" : "text-amber-400"}`}>
+                  {u.approval_status || "approved"}
+                </span>
+              </td>
             </tr>
           ))}
         </tbody>

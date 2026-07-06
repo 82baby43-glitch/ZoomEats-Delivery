@@ -734,8 +734,24 @@ export async function handleApiRequest(
     }
     const approveMatch = path.match(/^\/admin\/restaurants\/([^/]+)\/approve$/);
     if (approveMatch && method === "POST") {
-      requireRole("admin");
-      await db.from("restaurants").update({ approved: true }).eq("restaurant_id", approveMatch[1]);
+      const admin = requireRole("admin");
+      const restaurantId = approveMatch[1];
+      const { data: rest } = await db.from("restaurants").select("owner_id").eq("restaurant_id", restaurantId).maybeSingle();
+      await db.from("restaurants").update({
+        approved: true,
+        approval_status: "approved",
+        active: true,
+      }).eq("restaurant_id", restaurantId);
+      if (rest?.owner_id) {
+        await db.from("users").update({ approval_status: "approved", active: true }).eq("user_id", rest.owner_id);
+        await db.from("compliance_reviews").update({
+          status: "approved",
+          approval_status: "approved",
+          reviewed_by: admin.user_id,
+          reviewed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("user_id", rest.owner_id).in("status", ["pending"]);
+      }
       return { ok: true };
     }
     if (path === "/admin/orders" && method === "GET") {

@@ -10,6 +10,7 @@ import DigestCard from "@/components/admin/DigestCard";
 import AttentionSummary from "@/components/admin/AttentionSummary";
 import ActivityFeed from "@/components/admin/ActivityFeed";
 import AttentionTab from "@/components/admin/AttentionTab";
+import ApprovalsTab from "@/components/admin/ApprovalsTab";
 import { UsersTable, RestaurantsList, OrdersTable } from "@/components/admin/Tables";
 import { sanitizeActivity, sanitizeAttention, sanitizeMetrics, sanitizeOrders, sanitizeRestaurants, sanitizeUsers } from "@/lib/safeData";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
@@ -30,6 +31,17 @@ export default function AdminPanel() {
   const [since, setSince] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
+
+  const loadApprovals = useCallback(async () => {
+    try {
+      const r = await api.get("/admin/approvals/pending");
+      const list = Array.isArray(r?.data) ? r.data : [];
+      setPendingApprovals(list.length);
+    } catch (e) {
+      logClientError("admin.approvals", e);
+    }
+  }, []);
 
   const loadFast = useCallback(async () => {
     try {
@@ -69,13 +81,14 @@ export default function AdminPanel() {
   useEffect(() => {
     loadFast();
     loadFull();
-  }, [loadFast, loadFull]);
+    loadApprovals();
+  }, [loadFast, loadFull, loadApprovals]);
 
   useEffect(() => {
-    const a = setInterval(loadFast, 8000);
+    const a = setInterval(() => { loadFast(); loadApprovals(); }, 8000);
     const b = setInterval(() => setSince((s) => s + 1), 1000);
     return () => { clearInterval(a); clearInterval(b); };
-  }, [loadFast]);
+  }, [loadFast, loadApprovals]);
 
   const fetchDigest = async () => {
     setDigestLoading(true);
@@ -89,22 +102,28 @@ export default function AdminPanel() {
     }
   };
 
+  const refreshAll = () => {
+    loadFast();
+    loadFull();
+    loadApprovals();
+  };
+
   const approve = async (rid) => {
     if (!rid) return;
     try {
       await api.post(`/admin/restaurants/${rid}/approve`);
-      await Promise.all([loadFast(), loadFull()]);
+      await Promise.all([loadFast(), loadFull(), loadApprovals()]);
     } catch (e) {
       logClientError("admin.approve", e);
     }
   };
 
   const counts = attention?.counts ?? { pending: 0, stuck: 0, failed: 0 };
-  const totalAttention = counts.pending + counts.stuck + counts.failed;
 
   const tabs = [
     { id: "pulse", label: "Pulse" },
-    { id: "attention", label: `Attention${totalAttention ? ` · ${totalAttention}` : ""}` },
+    { id: "approvals", label: `Approvals${pendingApprovals ? ` · ${pendingApprovals}` : ""}` },
+    { id: "attention", label: `Attention${counts.pending + counts.stuck + counts.failed ? ` · ${counts.pending + counts.stuck + counts.failed}` : ""}` },
     { id: "users", label: "Users" },
     { id: "restaurants", label: "Restaurants" },
     { id: "orders", label: "Orders" },
@@ -113,8 +132,7 @@ export default function AdminPanel() {
   const retryAll = () => {
     setLoading(true);
     setLoadError(false);
-    loadFast();
-    loadFull();
+    refreshAll();
   };
 
   return (
@@ -122,7 +140,7 @@ export default function AdminPanel() {
       <Header />
       <div className="max-w-7xl mx-auto px-6 md:px-12 py-12">
         <PulseHeader since={since} onRefresh={retryAll} />
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap gap-3">
           <Link
             href="/admin/import-restaurants"
             className="btn-ghost inline-flex items-center gap-2 text-sm"
@@ -157,13 +175,21 @@ export default function AdminPanel() {
               data-testid={`admin-tab-${t.id}`}
             >
               {t.label}
-              {t.id === "attention" && totalAttention > 0 && (
+              {t.id === "approvals" && pendingApprovals > 0 && (
+                <span
+                  className="text-xs font-bold rounded-full w-5 h-5 inline-flex items-center justify-center"
+                  style={{ background: "var(--primary)", color: "#0A0A0A" }}
+                >
+                  {pendingApprovals}
+                </span>
+              )}
+              {t.id === "attention" && (counts.pending + counts.stuck + counts.failed) > 0 && (
                 <span
                   className="text-xs font-bold rounded-full w-5 h-5 inline-flex items-center justify-center"
                   style={{ background: "var(--primary)", color: "#0A0A0A" }}
                   data-testid="attention-badge"
                 >
-                  {totalAttention}
+                  {counts.pending + counts.stuck + counts.failed}
                 </span>
               )}
             </button>
@@ -178,9 +204,12 @@ export default function AdminPanel() {
               {tab === "pulse" && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <DigestCard digest={digest} loading={digestLoading} onGenerate={fetchDigest} />
-                  <AttentionSummary counts={counts} onResolve={() => setTab("attention")} />
+                  <AttentionSummary counts={{ ...counts, pending: counts.pending + pendingApprovals }} onResolve={() => setTab("approvals")} />
                   <ActivityFeed events={activity} />
                 </div>
+              )}
+              {tab === "approvals" && (
+                <ApprovalsTab onChanged={refreshAll} />
               )}
               {tab === "attention" && <AttentionTab attention={attention} onApprove={approve} />}
               {tab === "users" && <UsersTable users={users} />}

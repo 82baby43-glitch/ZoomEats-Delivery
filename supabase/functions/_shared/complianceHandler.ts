@@ -17,6 +17,72 @@ function throwErr(message: string, status = 400): never {
   throw e;
 }
 
+function resolveApprovalAction(action: string) {
+  if (action === "approve") return { approvalStatus: "approved", reviewStatus: "approved", active: true };
+  if (action === "reject") return { approvalStatus: "rejected", reviewStatus: "rejected", active: false };
+  if (action === "request_info") return { approvalStatus: "documents_missing", reviewStatus: "pending", active: false };
+  if (action === "suspend") return { approvalStatus: "suspended", reviewStatus: "suspended", active: false };
+  throwErr("Invalid action");
+}
+
+async function applyUserApproval(
+  db: SupabaseClient,
+  admin: Record<string, unknown>,
+  userId: string,
+  action: string,
+  notes?: string | null
+) {
+  const { approvalStatus, reviewStatus, active } = resolveApprovalAction(action);
+  const { data: user } = await db.from("users").select("*").eq("user_id", userId).maybeSingle();
+  if (!user) throwErr("User not found", 404);
+
+  const role = String(user.role || "");
+  const entityType = role === "delivery" ? "driver" : role === "vendor" ? "restaurant" : "user";
+
+  await db.from("users").update({
+    approval_status: approvalStatus,
+    active,
+    suspended_at: approvalStatus === "suspended" ? new Date().toISOString() : null,
+  }).eq("user_id", userId);
+
+  if (role === "delivery") {
+    await db.from("drivers").update({
+      approval_status: approvalStatus,
+      active,
+      suspended_at: approvalStatus === "suspended" ? new Date().toISOString() : null,
+    }).eq("user_id", userId);
+  }
+
+  if (role === "vendor") {
+    await db.from("restaurants").update({
+      approval_status: approvalStatus,
+      approved: approvalStatus === "approved",
+      active: approvalStatus === "approved",
+    }).eq("owner_id", userId);
+  }
+
+  await db.from("compliance_reviews").update({
+    status: reviewStatus,
+    approval_status: approvalStatus,
+    reviewed_by: admin.user_id,
+    reviewed_at: new Date().toISOString(),
+    notes: notes || null,
+    updated_at: new Date().toISOString(),
+  }).eq("user_id", userId).in("status", ["pending", "review"]);
+
+  await writeAuditLog(db, {
+    event_type: "approval_changed",
+    actor_id: String(admin.user_id),
+    user_id: userId,
+    entity_type: entityType,
+    entity_id: userId,
+    message: `Admin ${action} for ${role} ${user.email}`,
+    metadata: { action, approval_status: approvalStatus, notes },
+  });
+
+  return { status: reviewStatus, approval_status: approvalStatus, user_id: userId, role };
+}
+
 export async function writeAuditLog(
   db: SupabaseClient,
   entry: {
@@ -285,12 +351,69 @@ export async function handleComplianceRequest(
 
   if (path === "/admin/compliance/reviews" && method === "GET") {
     requireRole("admin");
-    const { data } = await db
+    const { data: reviews } = await db
       .from("compliance_reviews")
       .select("*")
-      .in("status", ["pending", "review"])
+      .in("status", ["pending"])
       .order("created_at", { ascending: false });
-    return data || [];
+
+    const userIds = [...new Set((reviews || []).map((r) => r.user_id))];
+    const { data: users } = userIds.length
+      ? await db.from("users").select("user_id,email,name,picture,role,approval_status,agreement_complete,created_at").in("user_id", userIds)
+      : { data: [] };
+
+    const userMap = new Map((users || []).map((u) => [u.user_id, u]));
+    return (reviews || []).map((r) => ({
+      ...r,
+      user: userMap.get(r.user_id) || null,
+    }));
+  }
+
+  if (path === "/admin/approvals/pending" && method === "GET") {
+    requireRole("admin");
+    const { data: users } = await db
+      .from("users")
+      .select("*")
+      .in("role", ["delivery", "vendor"])
+      .in("approval_status", ["pending", "review", "verification", "documents_missing"])
+      .order("created_at", { ascending: false });
+
+    const enriched = [];
+    for (const u of users || []) {
+      let extra: Record<string, unknown> = {};
+      if (u.role === "delivery") {
+        const { data: driver } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
+        extra = { driver };
+      }
+      if (u.role === "vendor") {
+        const { data: restaurant } = await db
+          .from("restaurants")
+          .select("restaurant_id,name,cuisine,address,approved,approval_status")
+          .eq("owner_id", u.user_id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        extra = { restaurant };
+      }
+      const { data: review } = await db
+        .from("compliance_reviews")
+        .select("review_id,status,approval_status,created_at")
+        .eq("user_id", u.user_id)
+        .in("status", ["pending"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      enriched.push({ ...u, ...extra, review });
+    }
+    return enriched;
+  }
+
+  const userApprovalMatch = path.match(/^\/admin\/approvals\/users\/([^/]+)\/action$/);
+  if (userApprovalMatch && method === "POST") {
+    const admin = requireRole("admin");
+    const userId = userApprovalMatch[1];
+    const action = String(body.action || "");
+    return applyUserApproval(db, admin, userId, action, body.notes as string | undefined);
   }
 
   const reviewAction = path.match(/^\/admin\/compliance\/reviews\/([^/]+)\/action$/);
@@ -300,69 +423,7 @@ export async function handleComplianceRequest(
     const action = String(body.action || "");
     const { data: review } = await db.from("compliance_reviews").select("*").eq("review_id", reviewId).maybeSingle();
     if (!review) throwErr("Review not found", 404);
-
-    let approvalStatus = "review";
-    let reviewStatus = "pending";
-    if (action === "approve") {
-      approvalStatus = "approved";
-      reviewStatus = "approved";
-    } else if (action === "reject") {
-      approvalStatus = "rejected";
-      reviewStatus = "rejected";
-    } else if (action === "request_info") {
-      approvalStatus = "documents_missing";
-      reviewStatus = "pending";
-    } else if (action === "suspend") {
-      approvalStatus = "suspended";
-      reviewStatus = "suspended";
-    } else {
-      throwErr("Invalid action");
-    }
-
-    await db.from("compliance_reviews").update({
-      status: reviewStatus,
-      approval_status: approvalStatus,
-      reviewed_by: admin.user_id,
-      reviewed_at: new Date().toISOString(),
-      notes: body.notes || null,
-      updated_at: new Date().toISOString(),
-    }).eq("review_id", reviewId);
-
-    if (review.entity_type === "driver") {
-      await db.from("drivers").update({
-        approval_status: approvalStatus,
-        active: approvalStatus === "approved",
-        suspended_at: approvalStatus === "suspended" ? new Date().toISOString() : null,
-      }).eq("user_id", review.user_id);
-      await db.from("users").update({
-        approval_status: approvalStatus,
-        active: approvalStatus === "approved",
-        suspended_at: approvalStatus === "suspended" ? new Date().toISOString() : null,
-      }).eq("user_id", review.user_id);
-    }
-
-    if (review.entity_type === "restaurant") {
-      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", review.user_id).maybeSingle();
-      if (rest) {
-        await db.from("restaurants").update({
-          approval_status: approvalStatus,
-          approved: approvalStatus === "approved",
-          active: approvalStatus === "approved",
-        }).eq("restaurant_id", rest.restaurant_id);
-      }
-    }
-
-    await writeAuditLog(db, {
-      event_type: "approval_changed",
-      actor_id: String(admin.user_id),
-      user_id: review.user_id,
-      entity_type: review.entity_type,
-      entity_id: review.entity_id,
-      message: `Compliance review ${action}`,
-      metadata: { review_id: reviewId, action, approval_status: approvalStatus },
-    });
-
-    return { status: reviewStatus, approval_status: approvalStatus };
+    return applyUserApproval(db, admin, review.user_id, action, body.notes as string | undefined);
   }
 
   if (path === "/admin/compliance/drivers" && method === "GET") {
