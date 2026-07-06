@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { api, getApiErrorMessage, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
+import PayoutSetupPanel from "@/components/compliance/PayoutSetupPanel";
 import { useRealtimeRow } from "@/lib/useRealtime";
 import { useWebPush } from "@/lib/useWebPush";
 import { primeChime, playChime } from "@/lib/chime";
@@ -21,6 +23,7 @@ const STATUS_NEXT = {
 const FOOD_IMG = "https://images.pexels.com/photos/32594346/pexels-photo-32594346.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
 
 export default function VendorDashboard() {
+  const searchParams = useSearchParams();
   const [restaurant, setRestaurant] = useState(null);
   const [menu, setMenu] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -93,6 +96,11 @@ export default function VendorDashboard() {
   };
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const initialTab = searchParams?.get("tab");
+    if (initialTab) setTab(initialTab);
+  }, [searchParams]);
 
   // ---- Realtime: subscribe to orders for this restaurant ----
   const onRealtime = useCallback(() => {
@@ -222,8 +230,13 @@ export default function VendorDashboard() {
           )}
         </div>
         <p className="mt-2" style={{ color: "var(--muted)" }}>Vendor dashboard</p>
+        {restaurant?.accepting_orders === false && (
+          <div className="mt-4 rounded-xl p-4 text-sm" style={{ background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.25)" }}>
+            <strong>Orders paused.</strong> Complete payout setup to accept new orders.
+          </div>
+        )}
         <div className="flex gap-2 mt-6 border-b" style={{ borderColor: "var(--border)" }}>
-          {["orders", "menu", "profile"].map((t) => (
+          {["orders", "menu", "payouts", "profile"].map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -311,6 +324,12 @@ export default function VendorDashboard() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {tab === "payouts" && (
+          <div className="mt-6 max-w-3xl">
+            <PayoutSetupPanel entityType="restaurant" />
           </div>
         )}
 

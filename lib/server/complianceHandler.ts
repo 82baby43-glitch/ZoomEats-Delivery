@@ -9,6 +9,13 @@ import {
 import { computeComplianceStatus, normalizeRole, VALID_ROLES } from "../compliance/authz";
 import { encryptTaxPayload, maskTaxId } from "../compliance/taxCrypto";
 import { archiveSignedPdf, signedPdfUrl, storeSignatureImage } from "../compliance/signatureArchive";
+import {
+  createStripeAccountLink,
+  createStripeExpressAccount,
+  resolveStripeAccountId,
+  syncConnectAccount,
+} from "../compliance/stripeConnect";
+import { getStripeApiKey } from "./stripeEnv";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -796,6 +803,203 @@ export async function handleComplianceRequest(
 
   if (path.startsWith("/uploads") && method === "GET") {
     return { message: "Use POST /uploads/presign" };
+  }
+
+  if (path === "/connect/notifications" && method === "GET") {
+    const u = requireAuth();
+    const { data } = await db
+      .from("compliance_notifications")
+      .select("*")
+      .eq("user_id", u.user_id)
+      .in("event_type", ["payout_setup_required", "payout_reverification_required", "payout_setup_complete"])
+      .order("created_at", { ascending: false })
+      .limit(10);
+    return data || [];
+  }
+
+  if (path === "/connect/reverify" && method === "POST") {
+    const u = requireAuth();
+    const role = normalizeRole(String(u.role));
+    const entityType = role === "delivery" ? "driver" : role === "vendor" ? "restaurant" : null;
+    if (!entityType) throwErr("Payout setup is only for drivers and restaurants");
+    const stripeKey = getStripeApiKey();
+    if (!stripeKey) throwErr("Stripe not configured", 503);
+
+    const stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), entityType);
+    if (!stripeAccountId) throwErr("No Stripe Connect account found");
+
+    const appUrl = String(body.return_url || process.env.NEXT_PUBLIC_APP_URL || "https://zoom-eats-delivery.vercel.app");
+    const dashboardPath = entityType === "driver" ? "/driver/dashboard?tab=payouts" : "/restaurant/dashboard?tab=payouts";
+    const url = await createStripeAccountLink(
+      stripeKey,
+      stripeAccountId,
+      `${appUrl}${dashboardPath}&stripe=return`,
+      `${appUrl}${dashboardPath}&stripe=refresh`,
+      "account_update"
+    );
+    return { url, account_id: stripeAccountId };
+  }
+
+  if (path === "/connect/driver/onboard" && method === "POST") {
+    const u = requireRole("delivery", "driver");
+    const stripeKey = getStripeApiKey();
+    if (!stripeKey) throwErr("Stripe not configured", 503);
+
+    let stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "driver");
+    if (!stripeAccountId) {
+      stripeAccountId = await createStripeExpressAccount(stripeKey, String(u.email || ""), {
+        user_id: String(u.user_id),
+        entity_type: "driver",
+      });
+    }
+
+    const appUrl = String(body.return_url || process.env.NEXT_PUBLIC_APP_URL || "https://zoom-eats-delivery.vercel.app");
+    const url = await createStripeAccountLink(
+      stripeKey,
+      stripeAccountId,
+      `${appUrl}/driver/onboarding?step=6&stripe=return`,
+      `${appUrl}/driver/onboarding?step=6&stripe=refresh`
+    );
+    return { url, account_id: stripeAccountId };
+  }
+
+  if (path === "/connect/driver/status" && method === "GET") {
+    const u = requireRole("delivery", "driver");
+    const stripeKey = getStripeApiKey();
+    const stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "driver");
+    if (!stripeAccountId || !stripeKey) {
+      return { payout_ready: false, stripe_connect_complete: false, account_id: stripeAccountId || null };
+    }
+    return syncConnectAccount(db, {
+      stripeKey,
+      userId: String(u.user_id),
+      entityType: "driver",
+      stripeAccountId,
+    });
+  }
+
+  if (path === "/connect/restaurant/onboard" && method === "POST") {
+    const u = requireRole("vendor", "restaurant");
+    const stripeKey = getStripeApiKey();
+    if (!stripeKey) throwErr("Stripe not configured", 503);
+
+    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+
+    let stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "restaurant");
+    if (!stripeAccountId) {
+      stripeAccountId = await createStripeExpressAccount(stripeKey, String(u.email || ""), {
+        user_id: String(u.user_id),
+        entity_type: "restaurant",
+        restaurant_id: rest?.restaurant_id ? String(rest.restaurant_id) : "",
+      });
+    }
+
+    const appUrl = String(body.return_url || process.env.NEXT_PUBLIC_APP_URL || "https://zoom-eats-delivery.vercel.app");
+    const url = await createStripeAccountLink(
+      stripeKey,
+      stripeAccountId,
+      `${appUrl}/restaurant/dashboard?tab=payouts&stripe=return`,
+      `${appUrl}/restaurant/dashboard?tab=payouts&stripe=refresh`
+    );
+    return { url, account_id: stripeAccountId };
+  }
+
+  if (path === "/connect/restaurant/status" && method === "GET") {
+    const u = requireRole("vendor", "restaurant");
+    const stripeKey = getStripeApiKey();
+    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+    const stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "restaurant");
+    if (!stripeAccountId || !stripeKey) {
+      return { payout_ready: false, stripe_connect_complete: false, account_id: stripeAccountId || null };
+    }
+    return syncConnectAccount(db, {
+      stripeKey,
+      userId: String(u.user_id),
+      entityType: "restaurant",
+      entityRefId: rest?.restaurant_id ? String(rest.restaurant_id) : null,
+      stripeAccountId,
+    });
+  }
+
+  if (path === "/onboarding/restaurant/stripe-connect" && method === "POST") {
+    const u = requireRole("vendor", "restaurant");
+    const stripeKey = getStripeApiKey();
+    if (!stripeKey) throwErr("Stripe not configured", 503);
+
+    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+    let stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "restaurant");
+    if (!stripeAccountId) {
+      stripeAccountId = await createStripeExpressAccount(stripeKey, String(u.email || ""), {
+        user_id: String(u.user_id),
+        entity_type: "restaurant",
+        restaurant_id: rest?.restaurant_id ? String(rest.restaurant_id) : "",
+      });
+    }
+
+    const appUrl = String(body.return_url || process.env.NEXT_PUBLIC_APP_URL || "https://zoom-eats-delivery.vercel.app");
+    const url = await createStripeAccountLink(
+      stripeKey,
+      stripeAccountId,
+      `${appUrl}/restaurant/onboarding?step=6&stripe=return`,
+      `${appUrl}/restaurant/onboarding?step=6&stripe=refresh`
+    );
+    return { url, account_id: stripeAccountId };
+  }
+
+  if (path === "/onboarding/restaurant/stripe-connect/status" && method === "GET") {
+    const u = requireRole("vendor", "restaurant");
+    const stripeKey = getStripeApiKey();
+    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+    const stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "restaurant");
+    if (!stripeAccountId || !stripeKey) {
+      return { complete: false, account_id: stripeAccountId || null };
+    }
+    const status = await syncConnectAccount(db, {
+      stripeKey,
+      userId: String(u.user_id),
+      entityType: "restaurant",
+      entityRefId: rest?.restaurant_id ? String(rest.restaurant_id) : null,
+      stripeAccountId,
+    });
+    return {
+      complete: status.payout_ready,
+      account_id: stripeAccountId,
+      charges_enabled: status.charges_enabled,
+      payouts_enabled: status.payouts_enabled,
+      identity_verified: status.identity_verified,
+      requires_reverification: status.requires_reverification,
+    };
+  }
+
+  if (path === "/admin/connect/dashboard" && method === "GET") {
+    requireRole("admin");
+    const { data: accounts } = await db
+      .from("stripe_connect_accounts")
+      .select("*")
+      .order("updated_at", { ascending: false })
+      .limit(200);
+
+    const userIds = [...new Set((accounts || []).map((a) => a.user_id as string))];
+    const { data: users } = userIds.length
+      ? await db.from("users").select("user_id, name, email, role").in("user_id", userIds)
+      : { data: [] };
+    const userMap = Object.fromEntries((users || []).map((u) => [u.user_id, u]));
+
+    const rows = (accounts || []).map((a) => ({
+      ...a,
+      user: userMap[a.user_id as string] || null,
+      payout_ready: Boolean(a.charges_enabled && a.payouts_enabled && a.details_submitted && !a.requires_reverification),
+    }));
+
+    const stats = {
+      total: rows.length,
+      payout_ready: rows.filter((r) => r.payout_ready).length,
+      missing_payout: rows.filter((r) => !r.payout_ready).length,
+      requires_reverification: rows.filter((r) => r.requires_reverification).length,
+      identity_pending: rows.filter((r) => !r.identity_verified).length,
+    };
+
+    return { stats, accounts: rows };
   }
 
   return null;
