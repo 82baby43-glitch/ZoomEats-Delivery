@@ -13,7 +13,7 @@ export default function AdminUberDirect() {
           <div>
             <h1 className="font-display text-3xl font-bold">Uber Direct</h1>
             <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
-              Monitor connection status, test auth, and view Uber courier deliveries.
+              Monitor connection status, run live API tests, and view Uber courier deliveries.
             </p>
           </div>
           <Link href="/admin" className="btn-ghost text-sm">← Admin dashboard</Link>

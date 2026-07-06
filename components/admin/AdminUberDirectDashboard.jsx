@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, RefreshCw, Truck, CheckCircle2, AlertCircle } from "lucide-react";
+import { ExternalLink, RefreshCw, Truck, CheckCircle2, AlertCircle, FlaskConical } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatMoney, safeOrderId } from "@/lib/safeData";
 import { LoadingSkeleton, ErrorState, EmptyState } from "@/components/ui/PageStates";
@@ -23,11 +23,31 @@ function StatusPill({ ok, label }) {
   );
 }
 
+function formatLiveTestResult(result) {
+  if (!result || typeof result !== "object") return null;
+  if (!result.ok) return result.error || "Test failed";
+
+  if (result.action === "quote") {
+    return `Quote OK — $${result.fee_usd || "?"} (${result.quote_id || "no id"}) · ${result.restaurant || "restaurant"} → ${result.dropoff || "dropoff"}`;
+  }
+  if (result.action === "inspect") {
+    if (!result.uber) return "No Uber deliveries to inspect.";
+    const mode = result.uber.live_mode ? "live" : "sandbox";
+    return `Uber status: ${result.uber.status || "unknown"} (${mode}) · complete: ${String(result.uber.complete)}`;
+  }
+  if (result.action === "cancel") {
+    return `Canceled ${result.delivery_id || "delivery"} — Uber status: ${result.uber_status || "unknown"}`;
+  }
+  return result.ok ? "Test passed" : "Test failed";
+}
+
 export default function AdminUberDirectDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [liveAction, setLiveAction] = useState(null);
+  const [liveResult, setLiveResult] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -46,14 +66,37 @@ export default function AdminUberDirectDashboard() {
 
   const testConnection = async () => {
     setTesting(true);
+    setLiveResult(null);
     try {
       const r = await api.post("/admin/uber-direct/test");
       const ok = Boolean(r?.data?.ok);
       setData((prev) => (prev ? { ...prev, auth: { ok, error: r?.data?.error } } : prev));
+      setLiveResult({ ok, action: "auth", error: r?.data?.error });
     } catch (e) {
       logClientError("admin.uber-direct.test", e);
+      setLiveResult({ ok: false, action: "auth", error: String(e) });
     } finally {
       setTesting(false);
+    }
+  };
+
+  const runLiveTest = async (action, deliveryId) => {
+    setLiveAction(action);
+    setLiveResult(null);
+    try {
+      const body = { action };
+      if (deliveryId) body.delivery_id = deliveryId;
+      const r = await api.post("/admin/uber-direct/live-test", body);
+      const result = r?.data && typeof r.data === "object" ? r.data : { ok: false, error: "invalid_response" };
+      setLiveResult(result);
+      if (result.ok && (action === "cancel" || action === "inspect")) {
+        await load();
+      }
+    } catch (e) {
+      logClientError("admin.uber-direct.live-test", e);
+      setLiveResult({ ok: false, action, error: String(e) });
+    } finally {
+      setLiveAction(null);
     }
   };
 
@@ -67,6 +110,8 @@ export default function AdminUberDirectDashboard() {
 
   const stats = data.stats || {};
   const deliveries = Array.isArray(data.deliveries) ? data.deliveries : [];
+  const liveMessage = formatLiveTestResult(liveResult);
+  const liveBusy = Boolean(liveAction) || testing;
 
   return (
     <div className="space-y-8">
@@ -86,10 +131,11 @@ export default function AdminUberDirectDashboard() {
               type="button"
               className="btn-ghost !py-2 inline-flex items-center gap-2 text-sm"
               onClick={testConnection}
-              disabled={testing}
+              disabled={liveBusy}
+              data-testid="uber-direct-test-auth"
             >
               <RefreshCw size={16} className={testing ? "animate-spin" : ""} />
-              Test
+              Test auth
             </button>
           </div>
 
@@ -110,6 +156,53 @@ export default function AdminUberDirectDashboard() {
           {!data.auth?.ok && data.auth?.error && (
             <p className="mt-4 text-sm text-red-400">{String(data.auth.error)}</p>
           )}
+
+          <div className="mt-6 p-4 rounded-xl" style={{ background: "var(--surface-2)" }}>
+            <div className="flex items-center gap-2 mb-3">
+              <FlaskConical size={16} style={{ color: "var(--primary)" }} />
+              <h3 className="font-display font-bold text-sm">Live API tests</h3>
+            </div>
+            <p className="text-xs mb-4" style={{ color: "var(--muted)" }}>
+              Sandbox-safe checks against Uber Direct. Quote does not create a delivery.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-primary !py-2 text-sm"
+                onClick={() => runLiveTest("quote")}
+                disabled={liveBusy}
+                data-testid="uber-direct-test-quote"
+              >
+                {liveAction === "quote" ? "Running…" : "Test quote"}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost !py-2 text-sm"
+                onClick={() => runLiveTest("inspect")}
+                disabled={liveBusy}
+                data-testid="uber-direct-test-inspect"
+              >
+                {liveAction === "inspect" ? "Running…" : "Inspect latest"}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost !py-2 text-sm"
+                onClick={() => runLiveTest("cancel")}
+                disabled={liveBusy}
+                data-testid="uber-direct-test-cancel"
+              >
+                {liveAction === "cancel" ? "Canceling…" : "Cancel latest"}
+              </button>
+            </div>
+            {liveMessage && (
+              <p
+                className={`mt-3 text-sm ${liveResult?.ok ? "text-green-400" : "text-red-400"}`}
+                data-testid="uber-direct-live-result"
+              >
+                {liveMessage}
+              </p>
+            )}
+          </div>
 
           <div className="mt-6 flex flex-wrap gap-3">
             <a
@@ -173,6 +266,7 @@ export default function AdminUberDirectDashboard() {
                   <th className="text-right p-3">Total</th>
                   <th className="text-left p-3">Status</th>
                   <th className="text-left p-3">Tracking</th>
+                  <th className="text-left p-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -204,6 +298,20 @@ export default function AdminUberDirectDashboard() {
                         >
                           Track <ExternalLink size={12} />
                         </a>
+                      ) : (
+                        <span style={{ color: "var(--muted)" }}>—</span>
+                      )}
+                    </td>
+                    <td className="p-3">
+                      {d.active && d.uber_delivery_id ? (
+                        <button
+                          type="button"
+                          className="btn-ghost !py-1 !px-2 text-xs"
+                          disabled={liveBusy}
+                          onClick={() => runLiveTest("cancel", d.uber_delivery_id)}
+                        >
+                          {liveAction === "cancel" ? "…" : "Cancel"}
+                        </button>
                       ) : (
                         <span style={{ color: "var(--muted)" }}>—</span>
                       )}

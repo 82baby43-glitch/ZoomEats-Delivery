@@ -214,6 +214,38 @@ export async function dispatchOrderViaUberDirect(ctx: DispatchOrderContext): Pro
   return createUberDelivery(cfg, ctx, quoteId);
 }
 
+export type UberDeliverySnapshot = {
+  id?: string;
+  status?: string;
+  complete?: boolean;
+  live_mode?: boolean;
+  pickup_eta?: string;
+  dropoff_eta?: string;
+  tracking_url?: string;
+  external_id?: string;
+};
+
+export async function getUberDelivery(
+  cfg: UberDirectConfig,
+  deliveryId: string
+): Promise<UberDeliverySnapshot> {
+  return uberFetch<UberDeliverySnapshot>(
+    cfg,
+    `/customers/${cfg.customerId}/deliveries/${deliveryId}`
+  );
+}
+
+export async function cancelUberDelivery(
+  cfg: UberDirectConfig,
+  deliveryId: string
+): Promise<UberDeliverySnapshot> {
+  return uberFetch<UberDeliverySnapshot>(
+    cfg,
+    `/customers/${cfg.customerId}/deliveries/${deliveryId}/cancel`,
+    { method: "POST" }
+  );
+}
+
 export async function verifyUberDirectConnection(): Promise<{ ok: boolean; error?: string }> {
   const cfg = getUberDirectConfig();
   if (!cfg) return { ok: false, error: "not_configured" };
