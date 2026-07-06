@@ -1,10 +1,10 @@
-import { Protected } from "@/components/Protected";
+import { ComplianceGate } from "@/components/ComplianceGate";
 import AdminCompliance from "@/components/pages/AdminCompliance";
 
 export default function AdminCompliancePage() {
   return (
-    <Protected roles={["admin"]}>
+    <ComplianceGate roles={["admin"]} requireCompliance={false} loginPath="/login">
       <AdminCompliance />
-    </Protected>
+    </ComplianceGate>
   );
 }
