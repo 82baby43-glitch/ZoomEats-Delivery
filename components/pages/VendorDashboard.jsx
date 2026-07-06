@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { api, getApiErrorMessage, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import { useRealtimeRow } from "@/lib/useRealtime";
@@ -21,7 +22,9 @@ const STATUS_NEXT = {
 const FOOD_IMG = "https://images.pexels.com/photos/32594346/pexels-photo-32594346.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
 
 export default function VendorDashboard() {
+  const router = useRouter();
   const [restaurant, setRestaurant] = useState(null);
+  const [onboarding, setOnboarding] = useState(null);
   const [menu, setMenu] = useState([]);
   const [orders, setOrders] = useState([]);
   const [form, setForm] = useState({ name: "", description: "", cuisine: "", image_url: "", cover_url: "", address: "" });
@@ -38,8 +41,12 @@ export default function VendorDashboard() {
 
   const load = useCallback(async () => {
     try {
-      const r = await api.get("/vendor/restaurant");
+      const [r, ob] = await Promise.all([
+        api.get("/vendor/restaurant"),
+        api.get("/onboarding/restaurant").catch(() => ({ data: null })),
+      ]);
       const restaurantData = r?.data ?? null;
+      setOnboarding(ob?.data ?? null);
       setRestaurant(restaurantData);
       if (restaurantData) {
         setForm({
@@ -149,6 +156,27 @@ export default function VendorDashboard() {
   };
 
   if (!restaurant) {
+    const obStatus = onboarding?.status;
+    const obStep = onboarding?.current_step || 1;
+    const incomplete = !obStatus || obStatus === "incomplete";
+
+    if (incomplete) {
+      return (
+        <div>
+          <Header />
+          <div className="max-w-3xl mx-auto px-6 py-12 text-center">
+            <h1 className="font-display text-4xl font-black tracking-tighter">Complete your restaurant setup</h1>
+            <p className="mt-2" style={{ color: "var(--muted)" }}>
+              {obStep > 1 ? `You left off at step ${obStep} of 7.` : "Start onboarding to list your kitchen on ZoomEats."}
+            </p>
+            <button className="btn-primary mt-6" onClick={() => router.push("/restaurant/onboarding")}>
+              {obStep > 1 ? "Resume onboarding" : "Start onboarding"}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div>
         <Header />
@@ -222,6 +250,26 @@ export default function VendorDashboard() {
           )}
         </div>
         <p className="mt-2" style={{ color: "var(--muted)" }}>Vendor dashboard</p>
+
+        {onboarding && onboarding.status === "pending_review" && (
+          <div className="card p-4 mt-4 border border-amber-500/30" style={{ background: "rgba(245,158,11,0.08)" }}>
+            <p className="text-sm font-bold text-amber-300">Onboarding submitted — awaiting admin approval</p>
+            <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>
+              Step {onboarding.current_step || 7}/7 complete · Agreements signed · Documents uploaded
+            </p>
+          </div>
+        )}
+
+        {onboarding && onboarding.status === "incomplete" && (
+          <div className="card p-4 mt-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-bold">Onboarding in progress</p>
+              <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Step {onboarding.current_step || 1} of 7</p>
+            </div>
+            <button className="btn-primary !py-2 text-sm" onClick={() => router.push("/restaurant/onboarding")}>Resume</button>
+          </div>
+        )}
+
         <div className="flex gap-2 mt-6 border-b" style={{ borderColor: "var(--border)" }}>
           {["orders", "menu", "profile"].map((t) => (
             <button
