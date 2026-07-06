@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { notifyPayoutIssue } from "./notifications.ts";
 
 export type StripeAccountSnapshot = {
   stripe_account_id: string;
@@ -211,42 +212,9 @@ export async function ensurePayoutNotification(
   snapshot: StripeAccountSnapshot,
   payoutReady: boolean
 ) {
-  const eventType = snapshot.requires_reverification
-    ? "payout_reverification_required"
-    : payoutReady
-      ? "payout_setup_complete"
-      : "payout_setup_required";
-
-  const { data: existing } = await db
-    .from("compliance_notifications")
-    .select("notification_id")
-    .eq("user_id", userId)
-    .eq("event_type", eventType)
-    .is("read_at", null)
-    .limit(1)
-    .maybeSingle();
-
-  if (existing) return;
-
-  const title = snapshot.requires_reverification
-    ? "Payout reverification required"
-    : payoutReady
-      ? "Payout setup complete"
-      : "Complete payout setup";
-
-  const body = snapshot.requires_reverification
-    ? "Stripe needs updated identity or banking information before payouts can continue."
-    : payoutReady
-      ? "Your Stripe Connect account is ready to receive payouts."
-      : "Set up Stripe Connect to receive payouts and accept orders.";
-
-  await db.from("compliance_notifications").insert({
-    notification_id: uid("cn"),
-    user_id: userId,
-    channel: "in_app",
-    event_type: eventType,
-    title,
-    body,
+  await notifyPayoutIssue(db, userId, {
+    requiresReverification: snapshot.requires_reverification,
+    payoutReady,
   });
 }
 

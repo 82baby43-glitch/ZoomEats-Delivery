@@ -10,6 +10,7 @@ export default function AdminComplianceDashboard() {
   const [signatures, setSignatures] = useState([]);
   const [dossierUser, setDossierUser] = useState(null);
   const [filter, setFilter] = useState("all");
+  const [scanning, setScanning] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -26,8 +27,25 @@ export default function AdminComplianceDashboard() {
 
   useEffect(() => { load(); }, [load]);
 
+  const runScan = async () => {
+    setScanning(true);
+    try {
+      const res = await api.post("/admin/notifications/scan", {});
+      alert(`Notification scan complete: ${JSON.stringify(res?.data || {})}`);
+    } catch (e) {
+      alert("Scan failed");
+    } finally {
+      setScanning(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
+      <div className="flex justify-end">
+        <button type="button" className="btn-ghost text-sm" onClick={runScan} disabled={scanning}>
+          {scanning ? "Scanning…" : "Run notification scan"}
+        </button>
+      </div>
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {[

@@ -184,6 +184,13 @@ export const startConnectOnboarding = (entityType: "driver" | "restaurant", retu
 export const startConnectReverification = (returnUrl?: string) =>
   api.post("/connect/reverify", { return_url: returnUrl });
 
-export const getPayoutNotifications = () => api.get("/connect/notifications");
+export const getPayoutNotifications = () => api.get("/notifications");
+
+export const getNotifications = () => api.get("/notifications");
+export const markNotificationRead = (id: string) => api.post(`/notifications/${id}/read`, {});
+export const markAllNotificationsRead = () => api.post("/notifications/read-all", {});
+export const getNotificationPreferences = () => api.get("/notifications/preferences");
+export const updateNotificationPreferences = (body: Record<string, unknown>) => api.put("/notifications/preferences", body);
+export const runNotificationScan = () => api.post("/admin/notifications/scan", {});
 
 export const getAdminPayoutDashboard = () => api.get("/admin/connect/dashboard");

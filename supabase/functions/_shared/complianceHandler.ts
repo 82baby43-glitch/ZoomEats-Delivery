@@ -16,6 +16,12 @@ import {
   syncConnectAccount,
 } from "./stripeConnect.ts";
 import { getStripeApiKey } from "./stripeEnv.ts";
+import {
+  notifyApproval,
+  notifyBackgroundCheck,
+  notifyMissingCompliance,
+  scanComplianceNotifications,
+} from "./notifications.ts";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -89,6 +95,8 @@ async function applyUserApproval(
     message: `Admin ${action} for ${role} ${user.email}`,
     metadata: { action, approval_status: approvalStatus, notes },
   });
+
+  await notifyApproval(db, userId, role, action, notes);
 
   return { status: reviewStatus, approval_status: approvalStatus, user_id: userId, role };
 }
@@ -691,6 +699,7 @@ export async function handleComplianceRequest(
     } else if (status === "rejected") {
       await applyUserApproval(db, admin, userId, "reject", "Background check failed");
     }
+    await notifyBackgroundCheck(db, userId, status, body.notes as string | undefined);
     return { ok: true, status };
   }
 
@@ -811,10 +820,77 @@ export async function handleComplianceRequest(
       .from("compliance_notifications")
       .select("*")
       .eq("user_id", u.user_id)
-      .in("event_type", ["payout_setup_required", "payout_reverification_required", "payout_setup_complete"])
       .order("created_at", { ascending: false })
-      .limit(10);
+      .limit(20);
     return data || [];
+  }
+
+  if (path === "/notifications" && method === "GET") {
+    const u = requireAuth();
+    const unreadOnly = params.unread === "1";
+    const { data } = await db
+      .from("compliance_notifications")
+      .select("*")
+      .eq("user_id", u.user_id)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    const rows = unreadOnly ? (data || []).filter((n) => !n.read_at) : (data || []);
+    const unread_count = (data || []).filter((n) => !n.read_at).length;
+    return { notifications: rows, unread_count };
+  }
+
+  const notifReadMatch = path.match(/^\/notifications\/([^/]+)\/read$/);
+  if (notifReadMatch && method === "POST") {
+    const u = requireAuth();
+    await db
+      .from("compliance_notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("notification_id", notifReadMatch[1])
+      .eq("user_id", u.user_id);
+    return { ok: true };
+  }
+
+  if (path === "/notifications/read-all" && method === "POST") {
+    const u = requireAuth();
+    await db
+      .from("compliance_notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("user_id", u.user_id)
+      .is("read_at", null);
+    return { ok: true };
+  }
+
+  if (path === "/notifications/preferences" && method === "GET") {
+    const u = requireAuth();
+    const { data } = await db.from("notification_preferences").select("*").eq("user_id", u.user_id).maybeSingle();
+    const { data: userRow } = await db.from("users").select("phone,email").eq("user_id", u.user_id).maybeSingle();
+    return {
+      email_enabled: data?.email_enabled ?? true,
+      sms_enabled: data?.sms_enabled ?? false,
+      phone: data?.phone || userRow?.phone || null,
+      email: userRow?.email || u.email || null,
+    };
+  }
+
+  if (path === "/notifications/preferences" && method === "PUT") {
+    const u = requireAuth();
+    const payload = {
+      user_id: u.user_id,
+      email_enabled: body.email_enabled !== undefined ? Boolean(body.email_enabled) : true,
+      sms_enabled: body.sms_enabled !== undefined ? Boolean(body.sms_enabled) : false,
+      phone: body.phone ? String(body.phone) : null,
+      updated_at: new Date().toISOString(),
+    };
+    await db.from("notification_preferences").upsert(payload, { onConflict: "user_id" });
+    if (body.phone) {
+      await db.from("users").update({ phone: String(body.phone) }).eq("user_id", u.user_id);
+    }
+    return payload;
+  }
+
+  if (path === "/admin/notifications/scan" && method === "POST") {
+    requireRole("admin");
+    return scanComplianceNotifications(db);
   }
 
   if (path === "/connect/reverify" && method === "POST") {
@@ -1013,6 +1089,10 @@ async function syncAgreementComplete(db: SupabaseClient, user: Record<string, un
   const acceptedTypes = (accepted || []).map((a) => a.agreement_type as string);
   const status = computeComplianceStatus({ role, user: user as never, acceptedTypes });
   const complete = status.missing_agreements.length === 0;
+
+  if (!complete && status.missing_agreements.length > 0) {
+    await notifyMissingCompliance(db, String(user.user_id), role, status.missing_agreements);
+  }
 
   if (role === "delivery") {
     await db.from("drivers").update({ agreement_complete: complete }).eq("user_id", user.user_id);
