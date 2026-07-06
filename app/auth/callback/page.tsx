@@ -28,8 +28,24 @@ export default function AuthCallbackPage() {
       const profile = await getCurrentUser();
       const storedRedirect = sessionStorage.getItem("auth_redirect");
       sessionStorage.removeItem("auth_redirect");
-      const defaultHome = ROLE_HOME[profile?.role || "customer"] || "/onboarding";
-      router.replace(storedRedirect || defaultHome);
+
+      let target = storedRedirect || ROLE_HOME[profile?.role || "customer"] || "/onboarding";
+
+      if (profile?.role === "customer") {
+        try {
+          const { api } = await import("@/lib/api");
+          const statusRes = await api.get("/auth/compliance-status");
+          const status = statusRes?.data as { redirect_to?: string } | undefined;
+          if (status?.redirect_to === "/customer/agreements") {
+            target = "/customer/agreements";
+            if (storedRedirect) sessionStorage.setItem("auth_redirect", storedRedirect);
+          }
+        } catch {
+          /* proceed with default home */
+        }
+      }
+
+      router.replace(target);
     };
 
     const fail = (reason?: string) => {

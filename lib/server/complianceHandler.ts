@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   AGREEMENT_VERSION,
+  agreementVersion,
   agreementsForRole,
+  CUSTOMER_AGREEMENTS,
   DRIVER_AGREEMENTS,
   RESTAURANT_AGREEMENTS,
 } from "../compliance/agreements";
@@ -120,7 +122,7 @@ async function loadComplianceContext(db: SupabaseClient, user: Record<string, un
 
   const { data: acceptances } = await db
     .from("agreement_acceptances")
-    .select("agreement_type")
+    .select("agreement_type, agreement_version, accepted_at, signature, typed_name")
     .eq("user_id", userId);
 
   const acceptedTypes = (acceptances || []).map((a) => a.agreement_type as string);
@@ -149,6 +151,7 @@ async function loadComplianceContext(db: SupabaseClient, user: Record<string, un
     driver,
     restaurant,
     acceptedTypes,
+    acceptances: acceptances || [],
   });
 }
 
@@ -190,13 +193,36 @@ export async function handleComplianceRequest(
     const { data: accepted } = await db
       .from("agreement_acceptances")
       .select("*")
-      .eq("user_id", u.user_id);
-    const byType = new Map((accepted || []).map((a) => [a.agreement_type, a]));
-    return defs.map((d) => ({
-      ...d,
-      accepted: Boolean(byType.get(d.type)),
-      acceptance: byType.get(d.type) || null,
-    }));
+      .eq("user_id", u.user_id)
+      .order("accepted_at", { ascending: false });
+
+    return defs.map((d) => {
+      const version = agreementVersion(d);
+      const current = (accepted || []).find(
+        (a) => a.agreement_type === d.type && (a.agreement_version || AGREEMENT_VERSION) === version
+      );
+      const stale = (accepted || []).find(
+        (a) => a.agreement_type === d.type && (a.agreement_version || AGREEMENT_VERSION) !== version
+      );
+      return {
+        ...d,
+        version,
+        accepted: Boolean(current),
+        needs_resign: Boolean(stale && !current),
+        acceptance: current || null,
+        previous_acceptance: stale || null,
+      };
+    });
+  }
+
+  if (path === "/agreements/history" && method === "GET") {
+    const u = requireAuth();
+    const { data } = await db
+      .from("agreement_acceptances")
+      .select("acceptance_id, agreement_type, agreement_version, accepted_at, signature, typed_name, ip_address, device, browser, role_context")
+      .eq("user_id", u.user_id)
+      .order("accepted_at", { ascending: false });
+    return data || [];
   }
 
   if (path === "/agreements/definitions" && method === "GET") {
@@ -208,7 +234,7 @@ export async function handleComplianceRequest(
   if (path === "/agreements/accept" && method === "POST") {
     const u = requireAuth();
     const role = normalizeRole(String(u.role));
-    if (!["delivery", "vendor"].includes(role)) throwErr("Agreements not required for this role");
+    if (!["delivery", "vendor", "customer"].includes(role)) throwErr("Agreements not required for this role");
 
     const agreementType = String(body.agreement_type || "");
     const defs = agreementsForRole(role);
@@ -221,13 +247,14 @@ export async function handleComplianceRequest(
     if (!consent) throwErr("Consent checkbox required");
 
     const meta = parseClientMeta(body);
+    const version = agreementVersion(def);
     const acceptanceId = uid("agr");
     const row = {
       acceptance_id: acceptanceId,
       user_id: u.user_id,
       role_context: role,
       agreement_type: agreementType,
-      agreement_version: AGREEMENT_VERSION,
+      agreement_version: version,
       signature: typedName || def.title,
       typed_name: typedName || null,
       consent_checkbox: consent,
@@ -246,7 +273,7 @@ export async function handleComplianceRequest(
       entity_type: "agreement",
       entity_id: acceptanceId,
       message: `Accepted ${agreementType}`,
-      metadata: { agreement_type: agreementType, version: AGREEMENT_VERSION },
+      metadata: { agreement_type: agreementType, version },
       ip_address: meta.ip_address ?? undefined,
       user_agent: meta.user_agent ?? undefined,
     });
@@ -291,7 +318,7 @@ export async function handleComplianceRequest(
       updates.active = true;
     } else {
       updates.approval_status = "approved";
-      updates.agreement_complete = true;
+      updates.agreement_complete = role === "customer" ? false : true;
     }
 
     const { data, error } = await db
@@ -679,10 +706,9 @@ export async function handleComplianceRequest(
 async function syncAgreementComplete(db: SupabaseClient, user: Record<string, unknown>, role: string) {
   const { data: accepted } = await db
     .from("agreement_acceptances")
-    .select("agreement_type")
+    .select("agreement_type, agreement_version")
     .eq("user_id", user.user_id);
-  const acceptedTypes = (accepted || []).map((a) => a.agreement_type as string);
-  const status = computeComplianceStatus({ role, user: user as never, acceptedTypes });
+  const status = computeComplianceStatus({ role, user: user as never, acceptances: accepted || [] });
   const complete = status.missing_agreements.length === 0;
 
   if (role === "delivery") {
@@ -717,6 +743,10 @@ async function syncAgreementComplete(db: SupabaseClient, user: Record<string, un
       }).eq("user_id", user.user_id).eq("entity_type", "restaurant");
     }
   }
+
+  if (role === "customer") {
+    await db.from("users").update({ agreement_complete: complete }).eq("user_id", user.user_id);
+  }
 }
 
-export { DRIVER_AGREEMENTS, RESTAURANT_AGREEMENTS };
+export { DRIVER_AGREEMENTS, RESTAURANT_AGREEMENTS, CUSTOMER_AGREEMENTS };

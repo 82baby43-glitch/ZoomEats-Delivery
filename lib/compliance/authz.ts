@@ -1,4 +1,4 @@
-import { requiredAgreementTypes } from "./agreements";
+import { computeMissingAgreements } from "./agreements";
 
 export const ROLE_ALIASES: Record<string, string> = {
   driver: "delivery",
@@ -49,10 +49,10 @@ export function computeComplianceStatus(opts: {
   driver?: ComplianceRecord | null;
   restaurant?: ComplianceRecord | null;
   acceptedTypes?: string[];
+  acceptances?: Array<{ agreement_type: string; agreement_version?: string }>;
 }): ComplianceStatus {
   const role = normalizeRole(opts.role);
-  const accepted = new Set(opts.acceptedTypes || []);
-  const missing = requiredAgreementTypes(role).filter((t) => !accepted.has(t));
+  const missing = computeMissingAgreements(role, opts.acceptances || []);
 
   const base: ComplianceStatus = {
     authenticated: true,
@@ -70,8 +70,40 @@ export function computeComplianceStatus(opts: {
     entity_id: null,
   };
 
-  if (role === "admin" || role === "customer") {
+  if (role === "admin") {
     return base;
+  }
+
+  if (role === "customer") {
+    const suspended = Boolean(opts.user?.suspended_at);
+    const agreementComplete = missing.length === 0;
+
+    if (suspended) {
+      return {
+        ...base,
+        agreement_complete: false,
+        suspended: true,
+        can_access_dashboard: false,
+        redirect_to: "/login?error=account_suspended",
+        message: "Account suspended",
+        missing_agreements: missing,
+        entity_type: "user",
+      };
+    }
+
+    if (!agreementComplete) {
+      return {
+        ...base,
+        agreement_complete: false,
+        can_access_dashboard: false,
+        redirect_to: "/customer/agreements",
+        message: "Agreement required",
+        missing_agreements: missing,
+        entity_type: "user",
+      };
+    }
+
+    return { ...base, entity_type: "user", agreement_complete: true, missing_agreements: [] };
   }
 
   if (role === "dispatcher") {
@@ -175,6 +207,7 @@ export const PROTECTED_ROUTE_ROLES: Record<string, string[]> = {
   "/restaurant": ["vendor"],
   "/admin": ["admin"],
   "/disclosure": ["delivery"],
-  "/agreements": ["delivery", "vendor"],
+  "/agreements": ["delivery", "vendor", "customer"],
+  "/customer/agreements": ["customer"],
   "/dispatcher": ["dispatcher", "admin"],
 };
