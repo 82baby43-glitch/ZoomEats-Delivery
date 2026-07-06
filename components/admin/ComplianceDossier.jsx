@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, FileText, Check, Shield, Download, ExternalLink } from "lucide-react";
+import { X, FileText, Check, Shield, Download, ExternalLink, Eye } from "lucide-react";
 import { api } from "@/lib/api";
+import AdminAgreementViewer from "@/components/admin/AdminAgreementViewer";
 
 export default function ComplianceDossier({ userId, onClose, onAction }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [viewAcceptance, setViewAcceptance] = useState(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -17,16 +19,6 @@ export default function ComplianceDossier({ userId, onClose, onAction }) {
       .catch(console.warn)
       .finally(() => setLoading(false));
   }, [userId]);
-
-  const viewDoc = async (docId, entityType = "driver") => {
-    try {
-      const r = await api.get(`/admin/compliance/documents/${docId}/url`, { params: { entity_type: entityType } });
-      if (r?.data?.url) window.open(r.data.url, "_blank");
-      else alert("Document URL unavailable");
-    } catch (e) {
-      alert(e?.message || "Could not open document");
-    }
-  };
 
   const setBgStatus = async (status) => {
     setBusy(true);
@@ -39,6 +31,25 @@ export default function ComplianceDossier({ userId, onClose, onAction }) {
       alert(e?.message || "Failed");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const viewDoc = async (docId, entityType = "driver") => {
+    try {
+      const r = await api.get(`/admin/compliance/documents/${docId}/url`, { params: { entity_type: entityType } });
+      if (r?.data?.url) window.open(r.data.url, "_blank");
+      else alert("Document URL unavailable");
+    } catch (e) {
+      alert(e?.message || "Could not open document");
+    }
+  };
+
+  const downloadAgreementPdf = async (acceptanceId) => {
+    try {
+      const r = await api.get(`/admin/compliance/agreements/${acceptanceId}/pdf`);
+      if (r?.data?.url) window.open(r.data.url, "_blank");
+    } catch (e) {
+      alert(e?.message || "PDF unavailable");
     }
   };
 
@@ -75,9 +86,20 @@ export default function ComplianceDossier({ userId, onClose, onAction }) {
                     </div>
                     {a.acceptance && (
                       <div className="mt-2 text-xs" style={{ color: "var(--muted)" }}>
+                        <div>Method: {a.acceptance.signature_method || "typed"} · Initials: {a.acceptance.initials || "—"}</div>
                         <div>Signature: <strong>{a.acceptance.signature || a.acceptance.typed_name}</strong></div>
                         <div>Signed: {new Date(a.acceptance.accepted_at).toLocaleString()}</div>
                         <div>IP: {a.acceptance.ip_address || "—"} · {a.acceptance.device || "—"} · {a.acceptance.browser || "—"}</div>
+                        <div className="flex gap-2 mt-2">
+                          <button type="button" className="btn-ghost !py-0.5 text-xs inline-flex items-center gap-1" onClick={() => setViewAcceptance(a.acceptance.acceptance_id)}>
+                            <Eye size={12} /> View
+                          </button>
+                          {a.acceptance.signed_pdf_path && (
+                            <button type="button" className="btn-ghost !py-0.5 text-xs inline-flex items-center gap-1" onClick={() => downloadAgreementPdf(a.acceptance.acceptance_id)}>
+                              <Download size={12} /> PDF
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -140,6 +162,9 @@ export default function ComplianceDossier({ userId, onClose, onAction }) {
               </section>
             )}
           </>
+        )}
+        {viewAcceptance && (
+          <AdminAgreementViewer acceptanceId={viewAcceptance} onClose={() => setViewAcceptance(null)} />
         )}
       </div>
     </div>

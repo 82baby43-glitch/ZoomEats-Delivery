@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import NavLinks from "@/components/header/NavLinks";
 import CartButton from "@/components/header/CartButton";
 import UserMenu from "@/components/header/UserMenu";
+import NotificationBell from "@/components/compliance/NotificationBell";
 
 const LOGO_URL = "/logo.svg";
 
@@ -23,6 +24,7 @@ export default function Header() {
         </Link>
         <NavLinks user={user} />
         <div className="flex items-center gap-3">
+          <NotificationBell />
           <CartButton />
           <UserMenu user={user} logout={logout} />
         </div>

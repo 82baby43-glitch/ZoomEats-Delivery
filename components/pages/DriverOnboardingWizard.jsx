@@ -6,6 +6,7 @@ import Header from "@/components/Header";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import RoleAgreementCenter from "@/components/pages/RoleAgreementCenter";
+import PayoutSetupPanel from "@/components/compliance/PayoutSetupPanel";
 
 const STEPS = [
   { id: 1, title: "Identity", fields: ["legal_name", "date_of_birth", "phone", "address_line1", "city", "state", "zip"] },
@@ -13,6 +14,7 @@ const STEPS = [
   { id: 3, title: "Vehicle", fields: ["vehicle_make", "vehicle_model", "vehicle_year", "vehicle_color", "vehicle_plate", "license_expiration"], docTypes: ["vehicle_registration", "insurance"] },
   { id: 4, title: "Tax (W-9)", tax: true },
   { id: 5, title: "Agreements", agreements: true },
+  { id: 6, title: "Payout setup", payouts: true },
 ];
 
 export default function DriverOnboardingWizard() {
@@ -93,6 +95,27 @@ export default function DriverOnboardingWizard() {
 
   if (current.agreements) {
     return <RoleAgreementCenter roleLabel="Driver" />;
+  }
+
+  if (current.payouts) {
+    return (
+      <div>
+        <Header />
+        <div className="max-w-xl mx-auto px-6 py-12">
+          <div className="label-eyebrow">Driver onboarding · Step {step} of {STEPS.length}</div>
+          <h1 className="font-display text-3xl font-bold mt-2">{current.title}</h1>
+          <div className="mt-8">
+            <PayoutSetupPanel entityType="driver" />
+          </div>
+          <div className="flex gap-3 mt-6">
+            <button type="button" className="btn-ghost" disabled={busy} onClick={() => setStep(step - 1)}>Back</button>
+            <button type="button" className="btn-primary flex-1" disabled={busy} onClick={() => saveStep(step + 1)}>
+              {busy ? "Saving…" : "Submit for review"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

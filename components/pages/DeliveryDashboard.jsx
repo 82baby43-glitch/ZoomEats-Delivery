@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
+import PayoutSetupPanel from "@/components/compliance/PayoutSetupPanel";
 import { MapPin, Power, Truck } from "lucide-react";
 import { formatMoney, sanitizeOrders, sanitizeWallet } from "@/lib/safeData";
 import { logClientError } from "@/lib/clientErrorLog";
@@ -28,6 +30,8 @@ function useGeolocation(active) {
 }
 
 export default function DeliveryDashboard() {
+  const searchParams = useSearchParams();
+  const showPayouts = searchParams?.get("tab") === "payouts";
   const [online, setOnline] = useState(false);
   const [available, setAvailable] = useState([]);
   const [mine, setMine] = useState([]);
@@ -166,6 +170,16 @@ export default function DeliveryDashboard() {
             {online ? "Go offline" : "Go online"}
           </button>
         </div>
+
+        {showPayouts ? (
+          <div className="mt-6 max-w-3xl">
+            <PayoutSetupPanel entityType="driver" />
+          </div>
+        ) : (
+          <div className="mt-6 max-w-3xl">
+            <PayoutSetupPanel entityType="driver" compact />
+          </div>
+        )}
 
         {/* Live optimized route (routing intelligence layer) */}
         {online && routeStops.length > 0 && (
