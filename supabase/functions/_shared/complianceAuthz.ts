@@ -25,6 +25,11 @@ export type ComplianceRecord = {
   suspended_at?: string | null;
   documents_complete?: boolean;
   approved?: boolean;
+  stripe_connect_complete?: boolean;
+  payouts_enabled?: boolean;
+  identity_verified?: boolean;
+  requires_reverification?: boolean;
+  accepting_orders?: boolean;
 };
 
 export type ComplianceStatus = {
@@ -41,6 +46,12 @@ export type ComplianceStatus = {
   missing_agreements: string[];
   entity_type: "user" | "driver" | "restaurant" | null;
   entity_id: string | null;
+  stripe_connect_complete: boolean;
+  payouts_enabled: boolean;
+  identity_verified: boolean;
+  requires_reverification: boolean;
+  payout_ready: boolean;
+  accepting_orders: boolean;
 };
 
 export function computeComplianceStatus(opts: {
@@ -68,6 +79,12 @@ export function computeComplianceStatus(opts: {
     missing_agreements: [],
     entity_type: null,
     entity_id: null,
+    stripe_connect_complete: true,
+    payouts_enabled: true,
+    identity_verified: true,
+    requires_reverification: false,
+    payout_ready: true,
+    accepting_orders: true,
   };
 
   if (role === "admin" || role === "customer") {
@@ -85,6 +102,11 @@ export function computeComplianceStatus(opts: {
     const active = driver?.active ?? opts.user?.active ?? true;
     const suspended = Boolean(driver?.suspended_at || opts.user?.suspended_at) || approval === "suspended";
     const docsComplete = driver?.documents_complete ?? false;
+    const stripeComplete = driver?.stripe_connect_complete ?? false;
+    const payoutsEnabled = driver?.payouts_enabled ?? false;
+    const identityVerified = driver?.identity_verified ?? false;
+    const requiresReverification = driver?.requires_reverification ?? false;
+    const payoutReady = stripeComplete && payoutsEnabled && !requiresReverification;
 
     return resolveGate({
       ...base,
@@ -96,6 +118,13 @@ export function computeComplianceStatus(opts: {
       missing_agreements: missing,
       entity_type: "driver",
       dashboardPath: "/driver/dashboard",
+      stripe_connect_complete: stripeComplete,
+      payouts_enabled: payoutsEnabled,
+      identity_verified: identityVerified,
+      requires_reverification: requiresReverification,
+      payout_ready: payoutReady,
+      accepting_orders: driver?.accepting_orders ?? payoutReady,
+      payoutSetupPath: "/driver/dashboard?tab=payouts",
     });
   }
 
@@ -105,6 +134,11 @@ export function computeComplianceStatus(opts: {
     const agreementComplete = restaurant?.agreement_complete ?? false;
     const active = restaurant?.active ?? true;
     const suspended = Boolean(restaurant?.suspended_at) || approval === "suspended";
+    const stripeComplete = restaurant?.stripe_connect_complete ?? false;
+    const payoutsEnabled = restaurant?.payouts_enabled ?? false;
+    const identityVerified = restaurant?.identity_verified ?? false;
+    const requiresReverification = restaurant?.requires_reverification ?? false;
+    const payoutReady = stripeComplete && payoutsEnabled && !requiresReverification;
 
     return resolveGate({
       ...base,
@@ -116,6 +150,13 @@ export function computeComplianceStatus(opts: {
       missing_agreements: missing,
       entity_type: "restaurant",
       dashboardPath: "/restaurant/dashboard",
+      stripe_connect_complete: stripeComplete,
+      payouts_enabled: payoutsEnabled,
+      identity_verified: identityVerified,
+      requires_reverification: requiresReverification,
+      payout_ready: payoutReady,
+      accepting_orders: restaurant?.accepting_orders ?? payoutReady,
+      payoutSetupPath: "/restaurant/dashboard?tab=payouts",
     });
   }
 
@@ -123,7 +164,7 @@ export function computeComplianceStatus(opts: {
 }
 
 function resolveGate(
-  s: ComplianceStatus & { dashboardPath: string }
+  s: ComplianceStatus & { dashboardPath: string; payoutSetupPath: string }
 ): ComplianceStatus {
   if (s.suspended || s.approval_status === "suspended") {
     return {
@@ -163,6 +204,15 @@ function resolveGate(
       can_access_dashboard: false,
       redirect_to: "/pending-approval",
       message: "Account inactive",
+    };
+  }
+  if (s.requires_reverification || !s.payout_ready) {
+    return {
+      ...s,
+      can_access_dashboard: true,
+      redirect_to: s.payoutSetupPath,
+      message: s.requires_reverification ? "Payout reverification required" : "Complete payout setup",
+      accepting_orders: false,
     };
   }
   return { ...s, can_access_dashboard: true, redirect_to: null, message: null };

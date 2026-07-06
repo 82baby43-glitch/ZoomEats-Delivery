@@ -174,3 +174,16 @@ export function apiData<T>(response: { data?: T | null } | null | undefined, fal
 export const getWalletBalance = () => api.get("/wallet/balance");
 export const getWalletTransactions = () => api.get("/wallet/transactions");
 export const requestWalletPayout = (amount: number) => api.post("/wallet/payout", { amount });
+
+export const getConnectStatus = (entityType: "driver" | "restaurant") =>
+  api.get(entityType === "restaurant" ? "/connect/restaurant/status" : "/connect/driver/status");
+
+export const startConnectOnboarding = (entityType: "driver" | "restaurant", returnUrl?: string) =>
+  api.post(entityType === "restaurant" ? "/connect/restaurant/onboard" : "/connect/driver/onboard", { return_url: returnUrl });
+
+export const startConnectReverification = (returnUrl?: string) =>
+  api.post("/connect/reverify", { return_url: returnUrl });
+
+export const getPayoutNotifications = () => api.get("/connect/notifications");
+
+export const getAdminPayoutDashboard = () => api.get("/admin/connect/dashboard");
