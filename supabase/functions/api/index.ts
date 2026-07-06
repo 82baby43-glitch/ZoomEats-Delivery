@@ -27,6 +27,7 @@ import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
 import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geocodeAdmin.ts";
 import { normalizeRole } from "../_shared/complianceAuthz.ts";
+import { filterPublicRestaurants, isTestRestaurantName } from "../_shared/restaurants.ts";
 
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
 
@@ -174,18 +175,18 @@ Deno.serve(async (req) => {
 
     // ---- Restaurants (public) ----
     if (path === "/restaurants" && method === "GET") {
-      let q = db.from("restaurants").select("*").eq("approved", true).order("rating", { ascending: false });
+      let q = db.from("restaurants").select("*").eq("approved", true).not("name", "ilike", "TEST_%").order("rating", { ascending: false });
       const search = params.q;
       if (search) q = q.or(`name.ilike.%${search}%,description.ilike.%${search}%,cuisine.ilike.%${search}%`);
       const { data } = await q;
-      return json(data || []);
+      return json(filterPublicRestaurants(data || []));
     }
 
     const restMatch = path.match(/^\/restaurants\/([^/]+)$/);
     if (restMatch && method === "GET") {
       const rid = restMatch[1];
       const { data: restaurant } = await db.from("restaurants").select("*").eq("restaurant_id", rid).maybeSingle();
-      if (!restaurant) return err("Not found", 404);
+      if (!restaurant || isTestRestaurantName(restaurant.name)) return err("Not found", 404);
       const { data: menu } = await db.from("menu_items").select("*").eq("restaurant_id", rid).eq("available", true);
       return json({ restaurant, menu: menu || [] });
     }
