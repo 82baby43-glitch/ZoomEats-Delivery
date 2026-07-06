@@ -62,6 +62,19 @@ function computePriceHash(items: Array<{ item_id: string; name: string; price: n
   return `h${Math.abs(h).toString(16)}`;
 }
 
+function assertRestaurantAcceptingOrders(rest: Record<string, unknown> | null) {
+  if (!rest) return;
+  const payoutReady = Boolean(
+    rest.stripe_connect_complete &&
+    rest.payouts_enabled &&
+    !rest.requires_reverification &&
+    rest.accepting_orders !== false
+  );
+  if (!payoutReady) {
+    throw Object.assign(new Error("This restaurant is not accepting orders until payout setup is complete."), { status: 403 });
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -243,8 +256,9 @@ Deno.serve(async (req) => {
       const u = requireRole("vendor");
       const newStatus = body.status as string;
       if (!["accepted", "preparing", "ready"].includes(newStatus)) return err("Invalid status");
-      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).limit(1).maybeSingle();
+      const { data: rest } = await db.from("restaurants").select("*").eq("owner_id", u.user_id).limit(1).maybeSingle();
       if (!rest) return err("No restaurant", 404);
+      if (newStatus === "accepted") assertRestaurantAcceptingOrders(rest);
       await db.from("orders").update({ status: newStatus }).eq("order_id", vendorStatusMatch[1]).eq("restaurant_id", rest.restaurant_id);
       return json({ ok: true });
     }
@@ -257,6 +271,7 @@ Deno.serve(async (req) => {
       if (!items.length) return err("Empty cart");
       const { data: rest } = await db.from("restaurants").select("*").eq("restaurant_id", restaurant_id).maybeSingle();
       if (!rest) return err("Restaurant not found", 404);
+      assertRestaurantAcceptingOrders(rest);
       const ids = items.map((i) => i.item_id);
       const { data: menuRows } = await db.from("menu_items").select("*").in("item_id", ids).eq("restaurant_id", restaurant_id).eq("available", true);
       const canonical = Object.fromEntries((menuRows || []).map((m) => [m.item_id, m]));

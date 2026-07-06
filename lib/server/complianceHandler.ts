@@ -1,12 +1,27 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   AGREEMENT_VERSION,
+  agreementVersion,
   agreementsForRole,
   DRIVER_AGREEMENTS,
   RESTAURANT_AGREEMENTS,
 } from "../compliance/agreements";
 import { computeComplianceStatus, normalizeRole, VALID_ROLES } from "../compliance/authz";
 import { encryptTaxPayload, maskTaxId } from "../compliance/taxCrypto";
+import { archiveSignedPdf, signedPdfUrl, storeSignatureImage } from "../compliance/signatureArchive";
+import {
+  createStripeAccountLink,
+  createStripeExpressAccount,
+  resolveStripeAccountId,
+  syncConnectAccount,
+} from "../compliance/stripeConnect";
+import { getStripeApiKey } from "./stripeEnv";
+import {
+  notifyApproval,
+  notifyBackgroundCheck,
+  notifyMissingCompliance,
+  scanComplianceNotifications,
+} from "../compliance/notifications";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -81,6 +96,8 @@ async function applyUserApproval(
     metadata: { action, approval_status: approvalStatus, notes },
   });
 
+  await notifyApproval(db, userId, role, action, notes);
+
   return { status: reviewStatus, approval_status: approvalStatus, user_id: userId, role };
 }
 
@@ -154,11 +171,49 @@ async function loadComplianceContext(db: SupabaseClient, user: Record<string, un
 
 function parseClientMeta(body: Record<string, unknown>) {
   return {
-    ip_address: (body.ip_address as string) || null,
+    ip_address: (body.ip_address as string) || (body.client_ip as string) || null,
     device: (body.device as string) || null,
     browser: (body.browser as string) || null,
     user_agent: (body.user_agent as string) || null,
   };
+}
+
+function validateSignatureInput(
+  def: { kind: string; title: string },
+  body: Record<string, unknown>
+) {
+  if (!Boolean(body.scroll_read)) throwErr("Scroll to end of agreement required");
+  if (!Boolean(body.consent_checkbox)) throwErr("Consent checkbox required");
+
+  if (def.kind === "checkbox") {
+    const initials = String(body.initials || "OK").trim().toUpperCase();
+    return {
+      method: "checkbox",
+      signerName: initials,
+      initials,
+      typedName: null as string | null,
+      signatureData: null as string | null,
+    };
+  }
+
+  const method = String(body.signature_method || "typed");
+  const initials = String(body.initials || "").trim().toUpperCase();
+  if (initials.length < 2) throwErr("Initials required (2+ characters)");
+
+  if (method === "typed") {
+    const typedName = String(body.typed_name || "").trim();
+    if (typedName.length < 2) throwErr("Typed legal name required");
+    return { method, signerName: typedName, initials, typedName, signatureData: null };
+  }
+
+  if (method === "draw" || method === "upload") {
+    const signatureData = String(body.signature_data || "");
+    if (!signatureData.startsWith("data:image")) throwErr("Signature image required");
+    const typedName = String(body.typed_name || body.signer_name || "Signed electronically").trim();
+    return { method, signerName: typedName, initials, typedName, signatureData };
+  }
+
+  throwErr("Invalid signature method");
 }
 
 export async function handleComplianceRequest(
@@ -208,31 +263,63 @@ export async function handleComplianceRequest(
   if (path === "/agreements/accept" && method === "POST") {
     const u = requireAuth();
     const role = normalizeRole(String(u.role));
-    if (!["delivery", "vendor"].includes(role)) throwErr("Agreements not required for this role");
+    if (!["delivery", "vendor", "customer"].includes(role)) throwErr("Agreements not required for this role");
 
     const agreementType = String(body.agreement_type || "");
     const defs = agreementsForRole(role);
     const def = defs.find((d) => d.type === agreementType);
     if (!def) throwErr("Unknown agreement type");
 
-    const typedName = String(body.typed_name || "").trim();
-    const consent = Boolean(body.consent_checkbox);
-    if (def.kind === "signature" && !typedName) throwErr("Typed legal name required");
-    if (!consent) throwErr("Consent checkbox required");
-
+    const sig = validateSignatureInput(def, body);
     const meta = parseClientMeta(body);
+    const version = agreementVersion(def);
     const acceptanceId = uid("agr");
-    const row = {
+    const acceptedAt = new Date().toISOString();
+
+    let signatureImagePath: string | null = null;
+    if (sig.signatureData) {
+      signatureImagePath = await storeSignatureImage(db, String(u.user_id), acceptanceId, sig.signatureData);
+    }
+
+    const row: Record<string, unknown> = {
       acceptance_id: acceptanceId,
       user_id: u.user_id,
       role_context: role,
       agreement_type: agreementType,
-      agreement_version: AGREEMENT_VERSION,
-      signature: typedName || def.title,
-      typed_name: typedName || null,
-      consent_checkbox: consent,
+      agreement_version: version,
+      signature: sig.signerName,
+      typed_name: sig.typedName,
+      signature_method: sig.method,
+      initials: sig.initials,
+      scroll_read_at: acceptedAt,
+      consent_checkbox: true,
+      signature_image_path: signatureImagePath,
+      metadata: { signature_method: sig.method, version },
       ...meta,
     };
+
+    let signedPdfPath: string | null = null;
+    try {
+      signedPdfPath = await archiveSignedPdf(db, {
+        userId: String(u.user_id),
+        acceptanceId,
+        title: def.title,
+        body: def.body,
+        version,
+        signerName: sig.signerName,
+        initials: sig.initials,
+        signatureMethod: sig.method,
+        acceptedAt,
+        ipAddress: meta.ip_address,
+        device: meta.device,
+        browser: meta.browser,
+        signatureImagePath,
+        signatureDataUrl: sig.signatureData,
+      });
+      row.signed_pdf_path = signedPdfPath;
+    } catch (e) {
+      console.warn("PDF archive failed:", e);
+    }
 
     const { error } = await db.from("agreement_acceptances").upsert(row, {
       onConflict: "user_id,agreement_type,agreement_version",
@@ -245,13 +332,22 @@ export async function handleComplianceRequest(
       user_id: String(u.user_id),
       entity_type: "agreement",
       entity_id: acceptanceId,
-      message: `Accepted ${agreementType}`,
-      metadata: { agreement_type: agreementType, version: AGREEMENT_VERSION },
+      message: `Accepted ${agreementType} v${version} via ${sig.method}`,
+      metadata: {
+        agreement_type: agreementType,
+        version,
+        signature_method: sig.method,
+        initials: sig.initials,
+        ip_address: meta.ip_address,
+        device: meta.device,
+        browser: meta.browser,
+        signed_pdf_path: signedPdfPath,
+      },
       ip_address: meta.ip_address ?? undefined,
       user_agent: meta.user_agent ?? undefined,
     });
 
-    return { acceptance_id: acceptanceId, agreement_type: agreementType };
+    return { acceptance_id: acceptanceId, agreement_type: agreementType, signed_pdf_path: signedPdfPath };
   }
 
   if (path === "/agreements/batch-accept" && method === "POST") {
@@ -272,6 +368,50 @@ export async function handleComplianceRequest(
     }
     const status = await loadComplianceContext(db, u);
     return { results, compliance: status };
+  }
+
+  const agreementPdfMatch = path.match(/^\/agreements\/([^/]+)\/pdf$/);
+  if (agreementPdfMatch && method === "GET") {
+    const u = requireAuth();
+    const acceptanceId = agreementPdfMatch[1];
+    const { data: row } = await db.from("agreement_acceptances").select("*").eq("acceptance_id", acceptanceId).maybeSingle();
+    if (!row || row.user_id !== u.user_id) throwErr("Agreement not found", 404);
+    if (!row.signed_pdf_path) throwErr("PDF not available", 404);
+    const url = await signedPdfUrl(db, row.signed_pdf_path);
+    if (!url) throwErr("Could not generate download URL", 500);
+    return { url, acceptance_id: acceptanceId, agreement_type: row.agreement_type, version: row.agreement_version };
+  }
+
+  const adminViewerMatch = path.match(/^\/admin\/compliance\/agreements\/([^/]+)\/viewer$/);
+  if (adminViewerMatch && method === "GET") {
+    requireRole("admin");
+    const acceptanceId = adminViewerMatch[1];
+    const { data: row } = await db.from("agreement_acceptances").select("*").eq("acceptance_id", acceptanceId).maybeSingle();
+    if (!row) throwErr("Agreement not found", 404);
+    const { data: userRow } = await db.from("users").select("user_id,email,name,role").eq("user_id", row.user_id).maybeSingle();
+    let signatureImageUrl = null;
+    let pdfUrl = null;
+    if (row.signature_image_path) signatureImageUrl = await signedPdfUrl(db, row.signature_image_path);
+    if (row.signed_pdf_path) pdfUrl = await signedPdfUrl(db, row.signed_pdf_path);
+    const role = normalizeRole(String(row.role_context || userRow?.role));
+    const def = agreementsForRole(role).find((d) => d.type === row.agreement_type);
+    return {
+      acceptance: row,
+      user: userRow,
+      agreement: def || { title: row.agreement_type, body: "" },
+      signature_image_url: signatureImageUrl,
+      pdf_url: pdfUrl,
+    };
+  }
+
+  const adminPdfMatch = path.match(/^\/admin\/compliance\/agreements\/([^/]+)\/pdf$/);
+  if (adminPdfMatch && method === "GET") {
+    requireRole("admin");
+    const acceptanceId = adminPdfMatch[1];
+    const { data: row } = await db.from("agreement_acceptances").select("signed_pdf_path").eq("acceptance_id", acceptanceId).maybeSingle();
+    if (!row?.signed_pdf_path) throwErr("PDF not found", 404);
+    const url = await signedPdfUrl(db, row.signed_pdf_path);
+    return { url };
   }
 
   if (path === "/auth/role" && method === "POST") {
@@ -559,6 +699,7 @@ export async function handleComplianceRequest(
     } else if (status === "rejected") {
       await applyUserApproval(db, admin, userId, "reject", "Background check failed");
     }
+    await notifyBackgroundCheck(db, userId, status, body.notes as string | undefined);
     return { ok: true, status };
   }
 
@@ -673,6 +814,270 @@ export async function handleComplianceRequest(
     return { message: "Use POST /uploads/presign" };
   }
 
+  if (path === "/connect/notifications" && method === "GET") {
+    const u = requireAuth();
+    const { data } = await db
+      .from("compliance_notifications")
+      .select("*")
+      .eq("user_id", u.user_id)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    return data || [];
+  }
+
+  if (path === "/notifications" && method === "GET") {
+    const u = requireAuth();
+    const unreadOnly = params.unread === "1";
+    const { data } = await db
+      .from("compliance_notifications")
+      .select("*")
+      .eq("user_id", u.user_id)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    const rows = unreadOnly ? (data || []).filter((n) => !n.read_at) : (data || []);
+    const unread_count = (data || []).filter((n) => !n.read_at).length;
+    return { notifications: rows, unread_count };
+  }
+
+  const notifReadMatch = path.match(/^\/notifications\/([^/]+)\/read$/);
+  if (notifReadMatch && method === "POST") {
+    const u = requireAuth();
+    await db
+      .from("compliance_notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("notification_id", notifReadMatch[1])
+      .eq("user_id", u.user_id);
+    return { ok: true };
+  }
+
+  if (path === "/notifications/read-all" && method === "POST") {
+    const u = requireAuth();
+    await db
+      .from("compliance_notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("user_id", u.user_id)
+      .is("read_at", null);
+    return { ok: true };
+  }
+
+  if (path === "/notifications/preferences" && method === "GET") {
+    const u = requireAuth();
+    const { data } = await db.from("notification_preferences").select("*").eq("user_id", u.user_id).maybeSingle();
+    const { data: userRow } = await db.from("users").select("phone,email").eq("user_id", u.user_id).maybeSingle();
+    return {
+      email_enabled: data?.email_enabled ?? true,
+      sms_enabled: data?.sms_enabled ?? false,
+      phone: data?.phone || userRow?.phone || null,
+      email: userRow?.email || u.email || null,
+    };
+  }
+
+  if (path === "/notifications/preferences" && method === "PUT") {
+    const u = requireAuth();
+    const payload = {
+      user_id: u.user_id,
+      email_enabled: body.email_enabled !== undefined ? Boolean(body.email_enabled) : true,
+      sms_enabled: body.sms_enabled !== undefined ? Boolean(body.sms_enabled) : false,
+      phone: body.phone ? String(body.phone) : null,
+      updated_at: new Date().toISOString(),
+    };
+    await db.from("notification_preferences").upsert(payload, { onConflict: "user_id" });
+    if (body.phone) {
+      await db.from("users").update({ phone: String(body.phone) }).eq("user_id", u.user_id);
+    }
+    return payload;
+  }
+
+  if (path === "/admin/notifications/scan" && method === "POST") {
+    requireRole("admin");
+    return scanComplianceNotifications(db);
+  }
+
+  if (path === "/connect/reverify" && method === "POST") {
+    const u = requireAuth();
+    const role = normalizeRole(String(u.role));
+    const entityType = role === "delivery" ? "driver" : role === "vendor" ? "restaurant" : null;
+    if (!entityType) throwErr("Payout setup is only for drivers and restaurants");
+    const stripeKey = getStripeApiKey();
+    if (!stripeKey) throwErr("Stripe not configured", 503);
+
+    const stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), entityType);
+    if (!stripeAccountId) throwErr("No Stripe Connect account found");
+
+    const appUrl = String(body.return_url || process.env.NEXT_PUBLIC_APP_URL || "https://zoom-eats-delivery.vercel.app");
+    const dashboardPath = entityType === "driver" ? "/driver/dashboard?tab=payouts" : "/restaurant/dashboard?tab=payouts";
+    const url = await createStripeAccountLink(
+      stripeKey,
+      stripeAccountId,
+      `${appUrl}${dashboardPath}&stripe=return`,
+      `${appUrl}${dashboardPath}&stripe=refresh`,
+      "account_update"
+    );
+    return { url, account_id: stripeAccountId };
+  }
+
+  if (path === "/connect/driver/onboard" && method === "POST") {
+    const u = requireRole("delivery", "driver");
+    const stripeKey = getStripeApiKey();
+    if (!stripeKey) throwErr("Stripe not configured", 503);
+
+    let stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "driver");
+    if (!stripeAccountId) {
+      stripeAccountId = await createStripeExpressAccount(stripeKey, String(u.email || ""), {
+        user_id: String(u.user_id),
+        entity_type: "driver",
+      });
+    }
+
+    const appUrl = String(body.return_url || process.env.NEXT_PUBLIC_APP_URL || "https://zoom-eats-delivery.vercel.app");
+    const url = await createStripeAccountLink(
+      stripeKey,
+      stripeAccountId,
+      `${appUrl}/driver/onboarding?step=6&stripe=return`,
+      `${appUrl}/driver/onboarding?step=6&stripe=refresh`
+    );
+    return { url, account_id: stripeAccountId };
+  }
+
+  if (path === "/connect/driver/status" && method === "GET") {
+    const u = requireRole("delivery", "driver");
+    const stripeKey = getStripeApiKey();
+    const stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "driver");
+    if (!stripeAccountId || !stripeKey) {
+      return { payout_ready: false, stripe_connect_complete: false, account_id: stripeAccountId || null };
+    }
+    return syncConnectAccount(db, {
+      stripeKey,
+      userId: String(u.user_id),
+      entityType: "driver",
+      stripeAccountId,
+    });
+  }
+
+  if (path === "/connect/restaurant/onboard" && method === "POST") {
+    const u = requireRole("vendor", "restaurant");
+    const stripeKey = getStripeApiKey();
+    if (!stripeKey) throwErr("Stripe not configured", 503);
+
+    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+
+    let stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "restaurant");
+    if (!stripeAccountId) {
+      stripeAccountId = await createStripeExpressAccount(stripeKey, String(u.email || ""), {
+        user_id: String(u.user_id),
+        entity_type: "restaurant",
+        restaurant_id: rest?.restaurant_id ? String(rest.restaurant_id) : "",
+      });
+    }
+
+    const appUrl = String(body.return_url || process.env.NEXT_PUBLIC_APP_URL || "https://zoom-eats-delivery.vercel.app");
+    const url = await createStripeAccountLink(
+      stripeKey,
+      stripeAccountId,
+      `${appUrl}/restaurant/dashboard?tab=payouts&stripe=return`,
+      `${appUrl}/restaurant/dashboard?tab=payouts&stripe=refresh`
+    );
+    return { url, account_id: stripeAccountId };
+  }
+
+  if (path === "/connect/restaurant/status" && method === "GET") {
+    const u = requireRole("vendor", "restaurant");
+    const stripeKey = getStripeApiKey();
+    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+    const stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "restaurant");
+    if (!stripeAccountId || !stripeKey) {
+      return { payout_ready: false, stripe_connect_complete: false, account_id: stripeAccountId || null };
+    }
+    return syncConnectAccount(db, {
+      stripeKey,
+      userId: String(u.user_id),
+      entityType: "restaurant",
+      entityRefId: rest?.restaurant_id ? String(rest.restaurant_id) : null,
+      stripeAccountId,
+    });
+  }
+
+  if (path === "/onboarding/restaurant/stripe-connect" && method === "POST") {
+    const u = requireRole("vendor", "restaurant");
+    const stripeKey = getStripeApiKey();
+    if (!stripeKey) throwErr("Stripe not configured", 503);
+
+    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+    let stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "restaurant");
+    if (!stripeAccountId) {
+      stripeAccountId = await createStripeExpressAccount(stripeKey, String(u.email || ""), {
+        user_id: String(u.user_id),
+        entity_type: "restaurant",
+        restaurant_id: rest?.restaurant_id ? String(rest.restaurant_id) : "",
+      });
+    }
+
+    const appUrl = String(body.return_url || process.env.NEXT_PUBLIC_APP_URL || "https://zoom-eats-delivery.vercel.app");
+    const url = await createStripeAccountLink(
+      stripeKey,
+      stripeAccountId,
+      `${appUrl}/restaurant/onboarding?step=6&stripe=return`,
+      `${appUrl}/restaurant/onboarding?step=6&stripe=refresh`
+    );
+    return { url, account_id: stripeAccountId };
+  }
+
+  if (path === "/onboarding/restaurant/stripe-connect/status" && method === "GET") {
+    const u = requireRole("vendor", "restaurant");
+    const stripeKey = getStripeApiKey();
+    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+    const stripeAccountId = await resolveStripeAccountId(db, String(u.user_id), "restaurant");
+    if (!stripeAccountId || !stripeKey) {
+      return { complete: false, account_id: stripeAccountId || null };
+    }
+    const status = await syncConnectAccount(db, {
+      stripeKey,
+      userId: String(u.user_id),
+      entityType: "restaurant",
+      entityRefId: rest?.restaurant_id ? String(rest.restaurant_id) : null,
+      stripeAccountId,
+    });
+    return {
+      complete: status.payout_ready,
+      account_id: stripeAccountId,
+      charges_enabled: status.charges_enabled,
+      payouts_enabled: status.payouts_enabled,
+      identity_verified: status.identity_verified,
+      requires_reverification: status.requires_reverification,
+    };
+  }
+
+  if (path === "/admin/connect/dashboard" && method === "GET") {
+    requireRole("admin");
+    const { data: accounts } = await db
+      .from("stripe_connect_accounts")
+      .select("*")
+      .order("updated_at", { ascending: false })
+      .limit(200);
+
+    const userIds = [...new Set((accounts || []).map((a) => a.user_id as string))];
+    const { data: users } = userIds.length
+      ? await db.from("users").select("user_id, name, email, role").in("user_id", userIds)
+      : { data: [] };
+    const userMap = Object.fromEntries((users || []).map((u) => [u.user_id, u]));
+
+    const rows = (accounts || []).map((a) => ({
+      ...a,
+      user: userMap[a.user_id as string] || null,
+      payout_ready: Boolean(a.charges_enabled && a.payouts_enabled && a.details_submitted && !a.requires_reverification),
+    }));
+
+    const stats = {
+      total: rows.length,
+      payout_ready: rows.filter((r) => r.payout_ready).length,
+      missing_payout: rows.filter((r) => !r.payout_ready).length,
+      requires_reverification: rows.filter((r) => r.requires_reverification).length,
+      identity_pending: rows.filter((r) => !r.identity_verified).length,
+    };
+
+    return { stats, accounts: rows };
+  }
+
   return null;
 }
 
@@ -684,6 +1089,10 @@ async function syncAgreementComplete(db: SupabaseClient, user: Record<string, un
   const acceptedTypes = (accepted || []).map((a) => a.agreement_type as string);
   const status = computeComplianceStatus({ role, user: user as never, acceptedTypes });
   const complete = status.missing_agreements.length === 0;
+
+  if (!complete && status.missing_agreements.length > 0) {
+    await notifyMissingCompliance(db, String(user.user_id), role, status.missing_agreements);
+  }
 
   if (role === "delivery") {
     await db.from("drivers").update({ agreement_complete: complete }).eq("user_id", user.user_id);
