@@ -1,12 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   AGREEMENT_VERSION,
+  agreementVersion,
   agreementsForRole,
   DRIVER_AGREEMENTS,
   RESTAURANT_AGREEMENTS,
 } from "./complianceAgreements.ts";
 import { computeComplianceStatus, normalizeRole, VALID_ROLES } from "./complianceAuthz.ts";
 import { encryptTaxPayload, maskTaxId } from "./taxCrypto.ts";
+import { archiveSignedPdf, signedPdfUrl, storeSignatureImage } from "./signatureArchive.ts";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -154,11 +156,49 @@ async function loadComplianceContext(db: SupabaseClient, user: Record<string, un
 
 function parseClientMeta(body: Record<string, unknown>) {
   return {
-    ip_address: (body.ip_address as string) || null,
+    ip_address: (body.ip_address as string) || (body.client_ip as string) || null,
     device: (body.device as string) || null,
     browser: (body.browser as string) || null,
     user_agent: (body.user_agent as string) || null,
   };
+}
+
+function validateSignatureInput(
+  def: { kind: string; title: string },
+  body: Record<string, unknown>
+) {
+  if (!Boolean(body.scroll_read)) throwErr("Scroll to end of agreement required");
+  if (!Boolean(body.consent_checkbox)) throwErr("Consent checkbox required");
+
+  if (def.kind === "checkbox") {
+    const initials = String(body.initials || "OK").trim().toUpperCase();
+    return {
+      method: "checkbox",
+      signerName: initials,
+      initials,
+      typedName: null as string | null,
+      signatureData: null as string | null,
+    };
+  }
+
+  const method = String(body.signature_method || "typed");
+  const initials = String(body.initials || "").trim().toUpperCase();
+  if (initials.length < 2) throwErr("Initials required (2+ characters)");
+
+  if (method === "typed") {
+    const typedName = String(body.typed_name || "").trim();
+    if (typedName.length < 2) throwErr("Typed legal name required");
+    return { method, signerName: typedName, initials, typedName, signatureData: null };
+  }
+
+  if (method === "draw" || method === "upload") {
+    const signatureData = String(body.signature_data || "");
+    if (!signatureData.startsWith("data:image")) throwErr("Signature image required");
+    const typedName = String(body.typed_name || body.signer_name || "Signed electronically").trim();
+    return { method, signerName: typedName, initials, typedName, signatureData };
+  }
+
+  throwErr("Invalid signature method");
 }
 
 export async function handleComplianceRequest(
@@ -208,31 +248,63 @@ export async function handleComplianceRequest(
   if (path === "/agreements/accept" && method === "POST") {
     const u = requireAuth();
     const role = normalizeRole(String(u.role));
-    if (!["delivery", "vendor"].includes(role)) throwErr("Agreements not required for this role");
+    if (!["delivery", "vendor", "customer"].includes(role)) throwErr("Agreements not required for this role");
 
     const agreementType = String(body.agreement_type || "");
     const defs = agreementsForRole(role);
     const def = defs.find((d) => d.type === agreementType);
     if (!def) throwErr("Unknown agreement type");
 
-    const typedName = String(body.typed_name || "").trim();
-    const consent = Boolean(body.consent_checkbox);
-    if (def.kind === "signature" && !typedName) throwErr("Typed legal name required");
-    if (!consent) throwErr("Consent checkbox required");
-
+    const sig = validateSignatureInput(def, body);
     const meta = parseClientMeta(body);
+    const version = agreementVersion(def);
     const acceptanceId = uid("agr");
-    const row = {
+    const acceptedAt = new Date().toISOString();
+
+    let signatureImagePath: string | null = null;
+    if (sig.signatureData) {
+      signatureImagePath = await storeSignatureImage(db, String(u.user_id), acceptanceId, sig.signatureData);
+    }
+
+    const row: Record<string, unknown> = {
       acceptance_id: acceptanceId,
       user_id: u.user_id,
       role_context: role,
       agreement_type: agreementType,
-      agreement_version: AGREEMENT_VERSION,
-      signature: typedName || def.title,
-      typed_name: typedName || null,
-      consent_checkbox: consent,
+      agreement_version: version,
+      signature: sig.signerName,
+      typed_name: sig.typedName,
+      signature_method: sig.method,
+      initials: sig.initials,
+      scroll_read_at: acceptedAt,
+      consent_checkbox: true,
+      signature_image_path: signatureImagePath,
+      metadata: { signature_method: sig.method, version },
       ...meta,
     };
+
+    let signedPdfPath: string | null = null;
+    try {
+      signedPdfPath = await archiveSignedPdf(db, {
+        userId: String(u.user_id),
+        acceptanceId,
+        title: def.title,
+        body: def.body,
+        version,
+        signerName: sig.signerName,
+        initials: sig.initials,
+        signatureMethod: sig.method,
+        acceptedAt,
+        ipAddress: meta.ip_address,
+        device: meta.device,
+        browser: meta.browser,
+        signatureImagePath,
+        signatureDataUrl: sig.signatureData,
+      });
+      row.signed_pdf_path = signedPdfPath;
+    } catch (e) {
+      console.warn("PDF archive failed:", e);
+    }
 
     const { error } = await db.from("agreement_acceptances").upsert(row, {
       onConflict: "user_id,agreement_type,agreement_version",
@@ -245,13 +317,22 @@ export async function handleComplianceRequest(
       user_id: String(u.user_id),
       entity_type: "agreement",
       entity_id: acceptanceId,
-      message: `Accepted ${agreementType}`,
-      metadata: { agreement_type: agreementType, version: AGREEMENT_VERSION },
+      message: `Accepted ${agreementType} v${version} via ${sig.method}`,
+      metadata: {
+        agreement_type: agreementType,
+        version,
+        signature_method: sig.method,
+        initials: sig.initials,
+        ip_address: meta.ip_address,
+        device: meta.device,
+        browser: meta.browser,
+        signed_pdf_path: signedPdfPath,
+      },
       ip_address: meta.ip_address ?? undefined,
       user_agent: meta.user_agent ?? undefined,
     });
 
-    return { acceptance_id: acceptanceId, agreement_type: agreementType };
+    return { acceptance_id: acceptanceId, agreement_type: agreementType, signed_pdf_path: signedPdfPath };
   }
 
   if (path === "/agreements/batch-accept" && method === "POST") {
@@ -272,6 +353,50 @@ export async function handleComplianceRequest(
     }
     const status = await loadComplianceContext(db, u);
     return { results, compliance: status };
+  }
+
+  const agreementPdfMatch = path.match(/^\/agreements\/([^/]+)\/pdf$/);
+  if (agreementPdfMatch && method === "GET") {
+    const u = requireAuth();
+    const acceptanceId = agreementPdfMatch[1];
+    const { data: row } = await db.from("agreement_acceptances").select("*").eq("acceptance_id", acceptanceId).maybeSingle();
+    if (!row || row.user_id !== u.user_id) throwErr("Agreement not found", 404);
+    if (!row.signed_pdf_path) throwErr("PDF not available", 404);
+    const url = await signedPdfUrl(db, row.signed_pdf_path);
+    if (!url) throwErr("Could not generate download URL", 500);
+    return { url, acceptance_id: acceptanceId, agreement_type: row.agreement_type, version: row.agreement_version };
+  }
+
+  const adminViewerMatch = path.match(/^\/admin\/compliance\/agreements\/([^/]+)\/viewer$/);
+  if (adminViewerMatch && method === "GET") {
+    requireRole("admin");
+    const acceptanceId = adminViewerMatch[1];
+    const { data: row } = await db.from("agreement_acceptances").select("*").eq("acceptance_id", acceptanceId).maybeSingle();
+    if (!row) throwErr("Agreement not found", 404);
+    const { data: userRow } = await db.from("users").select("user_id,email,name,role").eq("user_id", row.user_id).maybeSingle();
+    let signatureImageUrl = null;
+    let pdfUrl = null;
+    if (row.signature_image_path) signatureImageUrl = await signedPdfUrl(db, row.signature_image_path);
+    if (row.signed_pdf_path) pdfUrl = await signedPdfUrl(db, row.signed_pdf_path);
+    const role = normalizeRole(String(row.role_context || userRow?.role));
+    const def = agreementsForRole(role).find((d) => d.type === row.agreement_type);
+    return {
+      acceptance: row,
+      user: userRow,
+      agreement: def || { title: row.agreement_type, body: "" },
+      signature_image_url: signatureImageUrl,
+      pdf_url: pdfUrl,
+    };
+  }
+
+  const adminPdfMatch = path.match(/^\/admin\/compliance\/agreements\/([^/]+)\/pdf$/);
+  if (adminPdfMatch && method === "GET") {
+    requireRole("admin");
+    const acceptanceId = adminPdfMatch[1];
+    const { data: row } = await db.from("agreement_acceptances").select("signed_pdf_path").eq("acceptance_id", acceptanceId).maybeSingle();
+    if (!row?.signed_pdf_path) throwErr("PDF not found", 404);
+    const url = await signedPdfUrl(db, row.signed_pdf_path);
+    return { url };
   }
 
   if (path === "/auth/role" && method === "POST") {
