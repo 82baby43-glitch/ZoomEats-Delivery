@@ -14,7 +14,7 @@ function RoleBadge({ role }) {
   );
 }
 
-export default function ApprovalsTab({ onChanged }) {
+export default function ApprovalsTab({ onChanged, onReview }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(null);
@@ -102,6 +102,14 @@ export default function ApprovalsTab({ onChanged }) {
               </div>
 
               <div className="flex flex-wrap gap-2 shrink-0">
+                <button
+                  type="button"
+                  className="btn-ghost !py-2"
+                  onClick={() => (onReview ? onReview(item.user_id) : null)}
+                  data-testid={`review-user-${item.user_id}`}
+                >
+                  Review agreements
+                </button>
                 <button
                   className="btn-primary !py-2 inline-flex items-center gap-1"
                   disabled={busy}

@@ -6,6 +6,7 @@ import {
   RESTAURANT_AGREEMENTS,
 } from "../compliance/agreements";
 import { computeComplianceStatus, normalizeRole, VALID_ROLES } from "../compliance/authz";
+import { encryptTaxPayload, maskTaxId } from "../compliance/taxCrypto";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -172,7 +173,7 @@ export async function handleComplianceRequest(
     requireRole: (...roles: string[]) => Record<string, unknown>;
   }
 ): Promise<unknown | null> {
-  const { path, method, body = {} } = opts;
+  const { path, method, body = {}, params = {} } = opts;
   const requireAuth = opts.requireAuth;
   const requireRole = opts.requireRole;
 
@@ -441,8 +442,235 @@ export async function handleComplianceRequest(
     return data || [];
   }
 
-  if (path.startsWith("/uploads")) {
-    return { url: "", key: "uploads/placeholder", message: "Upload storage pending configuration" };
+  if (path === "/admin/compliance/dashboard" && method === "GET") {
+    requireRole("admin");
+    const [{ data: pendingUsers }, { data: acceptances }, { data: driverDocs }, { data: bgChecks }] = await Promise.all([
+      db.from("users").select("user_id,role,approval_status,agreement_complete").in("role", ["delivery", "vendor"]).in("approval_status", ["pending", "review", "verification", "documents_missing"]),
+      db.from("agreement_acceptances").select("acceptance_id"),
+      db.from("driver_documents").select("document_id,status,expires_at,document_type"),
+      db.from("background_checks").select("check_id,status"),
+    ]);
+    const expiredDocs = (driverDocs || []).filter((d) => d.expires_at && new Date(d.expires_at) < new Date());
+    const pendingBg = (bgChecks || []).filter((b) => b.status === "pending");
+    const missingAgreements = (pendingUsers || []).filter((u) => !u.agreement_complete);
+    const totalPartners = (pendingUsers || []).length;
+    const compliant = totalPartners === 0 ? 100 : Math.round(((totalPartners - missingAgreements.length) / Math.max(totalPartners, 1)) * 100);
+    return {
+      stats: {
+        pending_approvals: totalPartners,
+        missing_agreements: missingAgreements.length,
+        expired_documents: expiredDocs.length,
+        pending_background_checks: pendingBg.length,
+        total_signatures: acceptances?.length || 0,
+        compliance_percentage: compliant,
+      },
+      pending_users: pendingUsers || [],
+    };
+  }
+
+  const dossierMatch = path.match(/^\/admin\/compliance\/users\/([^/]+)\/dossier$/);
+  if (dossierMatch && method === "GET") {
+    requireRole("admin");
+    const userId = dossierMatch[1];
+    const { data: user } = await db.from("users").select("*").eq("user_id", userId).maybeSingle();
+    if (!user) throwErr("User not found", 404);
+
+    const role = normalizeRole(String(user.role));
+    const [{ data: agreements }, { data: driverDocs }, { data: restDocs }, { data: onboarding }, { data: restOnboarding }, { data: tax }, { data: bg }] = await Promise.all([
+      db.from("agreement_acceptances").select("*").eq("user_id", userId).order("accepted_at", { ascending: false }),
+      db.from("driver_documents").select("*").eq("user_id", userId).order("uploaded_at", { ascending: false }),
+      role === "vendor"
+        ? db.from("restaurant_documents").select("*").order("uploaded_at", { ascending: false })
+        : Promise.resolve({ data: [] }),
+      role === "delivery" ? db.from("driver_onboarding").select("*").eq("user_id", userId).maybeSingle() : Promise.resolve({ data: null }),
+      role === "vendor" ? db.from("restaurant_onboarding").select("*").eq("user_id", userId).maybeSingle() : Promise.resolve({ data: null }),
+      db.from("tax_information").select("tax_id,legal_name,business_name,tax_classification,last_four,w9_signed_at,created_at,updated_at").eq("user_id", userId).maybeSingle(),
+      db.from("background_checks").select("*").eq("user_id", userId).order("initiated_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+
+    const catalog = agreementsForRole(role);
+    const agreementDetails = catalog.map((def) => {
+      const signed = (agreements || []).find((a) => a.agreement_type === def.type);
+      return { ...def, signed: Boolean(signed), acceptance: signed || null };
+    });
+
+    let restaurantDocs = restDocs || [];
+    if (role === "vendor") {
+      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", userId).maybeSingle();
+      if (rest?.restaurant_id) {
+        const { data: rd } = await db.from("restaurant_documents").select("*").eq("restaurant_id", rest.restaurant_id);
+        restaurantDocs = rd || [];
+      }
+    }
+
+    const { data: driver } = role === "delivery"
+      ? await db.from("drivers").select("*").eq("user_id", userId).maybeSingle()
+      : { data: null };
+
+  return {
+      user,
+      driver,
+      agreements: agreementDetails,
+      signatures: agreements || [],
+      documents: {
+        driver: driverDocs || [],
+        restaurant: restaurantDocs,
+      },
+      onboarding: onboarding || restOnboarding || null,
+      tax: tax ? { ...tax, masked_id: tax.last_four ? `***-**-${tax.last_four}` : null } : null,
+      background_check: bg || null,
+    };
+  }
+
+  if (path === "/admin/compliance/agreements" && method === "GET") {
+    requireRole("admin");
+    const roleFilter = params.role;
+    const q = db.from("agreement_acceptances").select("*").order("accepted_at", { ascending: false }).limit(500);
+    const { data: rows } = await q;
+    const userIds = [...new Set((rows || []).map((r) => r.user_id))];
+    const { data: users } = userIds.length
+      ? await db.from("users").select("user_id,email,name,role").in("user_id", userIds)
+      : { data: [] };
+    const userMap = new Map((users || []).map((u) => [u.user_id, u]));
+    let result = (rows || []).map((r) => ({ ...r, user: userMap.get(r.user_id) }));
+    if (roleFilter) result = result.filter((r) => r.user?.role === roleFilter);
+    return result;
+  }
+
+  const bgActionMatch = path.match(/^\/admin\/compliance\/users\/([^/]+)\/background-check$/);
+  if (bgActionMatch && method === "POST") {
+    const admin = requireRole("admin");
+    const userId = bgActionMatch[1];
+    const status = String(body.status || "pending");
+    const { data: existing } = await db.from("background_checks").select("check_id").eq("user_id", userId).order("initiated_at", { ascending: false }).limit(1).maybeSingle();
+    const checkId = existing?.check_id || uid("bgc");
+    await db.from("background_checks").upsert({
+      check_id: checkId,
+      user_id: userId,
+      status,
+      mvr_status: String(body.mvr_status || status),
+      result_summary: body.notes || null,
+      completed_at: ["approved", "rejected"].includes(status) ? new Date().toISOString() : null,
+      reviewed_by: admin.user_id,
+      notes: body.notes || null,
+    });
+    if (status === "approved") {
+      await applyUserApproval(db, admin, userId, "approve", "Background check passed");
+    } else if (status === "rejected") {
+      await applyUserApproval(db, admin, userId, "reject", "Background check failed");
+    }
+    return { ok: true, status };
+  }
+
+  // ---- Document upload ----
+  if (path === "/uploads/presign" && method === "POST") {
+    const u = requireAuth();
+    const documentType = String(body.document_type || "other");
+    const fileName = String(body.file_name || "document");
+    const contentType = String(body.content_type || "application/pdf");
+    const entityType = String(body.entity_type || "driver");
+    const storagePath = `${u.user_id}/${entityType}/${documentType}/${Date.now()}_${fileName}`;
+
+    const { data: signed, error } = await db.storage
+      .from("compliance-documents")
+      .createSignedUploadUrl(storagePath);
+
+    if (error) throwErr(error.message, 500);
+
+    const documentId = uid("doc");
+    const table = entityType === "restaurant" ? "restaurant_documents" : "driver_documents";
+    const row: Record<string, unknown> = {
+      document_id: documentId,
+      document_type: documentType,
+      file_key: storagePath,
+      storage_path: storagePath,
+      file_name: fileName,
+      content_type: contentType,
+      status: "uploading",
+    };
+    if (entityType === "restaurant") {
+      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+      if (!rest) throwErr("Create your restaurant profile first");
+      row.restaurant_id = rest.restaurant_id;
+    } else {
+      row.user_id = u.user_id;
+    }
+    await db.from(table).insert(row);
+
+    return { document_id: documentId, upload_url: signed?.signedUrl, storage_path: storagePath, token: signed?.token };
+  }
+
+  if (path === "/uploads/complete" && method === "POST") {
+    const u = requireAuth();
+    const documentId = String(body.document_id || "");
+    const entityType = String(body.entity_type || "driver");
+    const table = entityType === "restaurant" ? "restaurant_documents" : "driver_documents";
+    const expiresAt = body.expires_at || null;
+    await db.from(table).update({ status: "pending_review", expires_at: expiresAt }).eq("document_id", documentId);
+    if (entityType === "driver") {
+      await db.from("drivers").update({ documents_complete: false }).eq("user_id", u.user_id);
+    }
+    return { ok: true, document_id: documentId };
+  }
+
+  const docUrlMatch = path.match(/^\/admin\/compliance\/documents\/([^/]+)\/url$/);
+  if (docUrlMatch && method === "GET") {
+    requireRole("admin");
+    const documentId = docUrlMatch[1];
+    const entityType = params.entity_type || "driver";
+    const table = entityType === "restaurant" ? "restaurant_documents" : "driver_documents";
+    const { data: doc } = await db.from(table).select("*").eq("document_id", documentId).maybeSingle();
+    if (!doc?.storage_path) throwErr("Document not found", 404);
+    const { data: signed } = await db.storage.from("compliance-documents").createSignedUrl(doc.storage_path, 3600);
+    return { url: signed?.signedUrl, document: doc };
+  }
+
+  if (path === "/onboarding/driver" && method === "GET") {
+    const u = requireRole("delivery", "driver");
+    const { data } = await db.from("driver_onboarding").select("*").eq("user_id", u.user_id).maybeSingle();
+    return data || { user_id: u.user_id, current_step: 1, status: "incomplete" };
+  }
+
+  if (path === "/onboarding/driver" && method === "POST") {
+    const u = requireRole("delivery", "driver");
+    const step = Number(body.step || 1);
+    const allowed = ["legal_name", "date_of_birth", "address_line1", "address_line2", "city", "state", "zip", "phone",
+      "license_number", "license_expiration", "vehicle_make", "vehicle_model", "vehicle_year", "vehicle_color", "vehicle_plate", "status"];
+    const payload: Record<string, unknown> = { user_id: u.user_id, current_step: step, updated_at: new Date().toISOString() };
+    for (const k of allowed) {
+      if (body[k] !== undefined) payload[k] = body[k];
+    }
+    const { data } = await db.from("driver_onboarding").upsert(payload, { onConflict: "user_id" }).select().single();
+    return data;
+  }
+
+  if (path === "/onboarding/driver/tax" && method === "POST") {
+    const u = requireRole("delivery", "driver");
+    const taxId = uid("tax");
+    const ssnOrEin = String(body.tax_id || "");
+    const encrypted = encryptTaxPayload(JSON.stringify({ tax_id: ssnOrEin }));
+    await db.from("tax_information").upsert({
+      tax_id: taxId,
+      user_id: u.user_id,
+      entity_type: "driver",
+      legal_name: String(body.legal_name || ""),
+      business_name: body.business_name || null,
+      tax_classification: String(body.tax_classification || "individual"),
+      address_line1: body.address_line1 || null,
+      city: body.city || null,
+      state: body.state || null,
+      zip: body.zip || null,
+      encrypted_payload: encrypted,
+      last_four: ssnOrEin.replace(/\D/g, "").slice(-4),
+      w9_signed_at: new Date().toISOString(),
+      w9_signature: body.signature || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+    return { ok: true, masked_id: maskTaxId(ssnOrEin) };
+  }
+
+  if (path.startsWith("/uploads") && method === "GET") {
+    return { message: "Use POST /uploads/presign" };
   }
 
   return null;
