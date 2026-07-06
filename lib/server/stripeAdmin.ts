@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   getStripeConfigSummary,
   verifyStripeConnection,
-} from "./stripeAdminClient.ts";
+} from "./stripeAdminClient";
 
 type AdminCtx = {
   path: string;
@@ -16,7 +16,7 @@ function maskSessionId(value?: string | null): string | null {
   return `${value.slice(0, 10)}…${value.slice(-4)}`;
 }
 
-async function safeQuery<T>(fn: () => Promise<{ data: T | null }>): Promise<T | null> {
+async function safeQuery<T>(fn: () => PromiseLike<{ data: T | null }>): Promise<T | null> {
   try {
     const { data } = await fn();
     return data;
@@ -43,27 +43,32 @@ async function buildStripeOverview(db: SupabaseClient) {
     recentEvents,
     recentErrors,
   ] = await Promise.all([
-    safeQuery(() =>
+    safeQuery(async () =>
       db
         .from("orders")
         .select("order_id,customer_name,restaurant_name,total,payment_status,status,stripe_session_id,created_at")
         .order("created_at", { ascending: false })
         .limit(50)
     ),
-    safeQuery(() =>
+    safeQuery(async () =>
       db.from("payment_transactions").select("*").order("created_at", { ascending: false }).limit(50)
     ),
-    safeQuery(() => db.from("orders").select("total").eq("payment_status", "paid")),
-    safeQuery(() =>
+    safeQuery(async () => db.from("orders").select("total").eq("payment_status", "paid")),
+    safeQuery(async () =>
       db.from("orders").select("total").eq("payment_status", "paid").gte("created_at", todayStart)
     ),
-    db
-      .from("orders")
-      .select("order_id", { count: "exact", head: true })
-      .in("payment_status", ["pending", "initiated", "requires_payment", "processing"])
-      .then((r) => r.count ?? 0)
-      .catch(() => 0),
-    safeQuery(() =>
+    (async () => {
+      try {
+        const { count } = await db
+          .from("orders")
+          .select("order_id", { count: "exact", head: true })
+          .in("payment_status", ["pending", "initiated", "requires_payment", "processing"]);
+        return count ?? 0;
+      } catch {
+        return 0;
+      }
+    })(),
+    safeQuery(async () =>
       db
         .from("payment_transactions")
         .select("*")
@@ -71,14 +76,14 @@ async function buildStripeOverview(db: SupabaseClient) {
         .order("created_at", { ascending: false })
         .limit(20)
     ),
-    safeQuery(() =>
+    safeQuery(async () =>
       db
         .from("stripe_event_log")
         .select("event_id,event_type,type,session_id,payment_intent_id,processed_at")
         .order("processed_at", { ascending: false })
         .limit(20)
     ),
-    safeQuery(() =>
+    safeQuery(async () =>
       db
         .from("payment_error_logs")
         .select("id,event_id,order_id,session_id,error_message,source,created_at")
