@@ -174,3 +174,24 @@ export function apiData<T>(response: { data?: T | null } | null | undefined, fal
 export const getWalletBalance = () => api.get("/wallet/balance");
 export const getWalletTransactions = () => api.get("/wallet/transactions");
 export const requestWalletPayout = (amount: number) => api.post("/wallet/payout", { amount });
+
+export const dreamlandChat = (text: string, body: Record<string, unknown> = {}) =>
+  api.post("/dreamland/chat", { text, ...body });
+
+export const dreamlandRecommend = (params: Record<string, string> = {}) =>
+  api.get("/dreamland/recommend", { params });
+
+export const dreamlandMood = (mood: string) =>
+  api.post("/dreamland/mood", { mood });
+
+export const dreamlandSurprise = () =>
+  api.post("/dreamland/surprise", {});
+
+export const dreamlandHome = () =>
+  api.get("/dreamland/home");
+
+export const dreamlandHistory = () =>
+  api.get("/dreamland/history");
+
+export const dreamlandFeedback = (body: Record<string, unknown>) =>
+  api.post("/dreamland/feedback", body);

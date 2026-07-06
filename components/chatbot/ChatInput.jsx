@@ -15,7 +15,7 @@ export default function ChatInput({ onSend, busy }) {
     <div className="p-3 border-t flex gap-2" style={{ borderColor: "var(--border)" }}>
       <input
         className="input-field"
-        placeholder="What should I eat tonight?"
+        placeholder="How are you feeling? What sounds good?"
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}

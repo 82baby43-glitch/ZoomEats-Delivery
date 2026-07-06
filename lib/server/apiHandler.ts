@@ -15,6 +15,7 @@ import {
   tryInsertOrderIntoRoute,
 } from "../dispatch/routing/uber-routing-ai";
 import { handleComplianceRequest } from "./complianceHandler";
+import { handleDreamlandRequest } from "./dreamlandHandler";
 import { normalizeRole } from "../compliance/authz";
 
 function throwErr(message: string, status = 400): never {
@@ -114,6 +115,16 @@ export async function handleApiRequest(
   try {
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return complianceResult;
+
+    const dreamlandResult = await handleDreamlandRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      anthropicKey,
+      requireAuth,
+    });
+    if (dreamlandResult !== null) return dreamlandResult;
 
     // ---- Auth ----
     if (path === "/auth/me" && method === "GET") {
@@ -644,52 +655,6 @@ export async function handleApiRequest(
           soft_error: true,
         };
       }
-    }
-
-    // ---- Chat ----
-    if (path === "/chat" && method === "POST") {
-      const u = requireAuth();
-      const text = body.text as string;
-      const session_id = (body.session_id as string) || `chat_${u.user_id}`;
-      const { data: rests } = await db.from("restaurants").select("name,cuisine").eq("approved", true).limit(15);
-      const { data: items } = await db.from("menu_items").select("name,price").eq("available", true).limit(30);
-      const context = `Available restaurants: ${(rests || []).map((r) => `${r.name} (${r.cuisine || ""})`).join(", ")}\nPopular items: ${(items || []).slice(0, 15).map((i) => `${i.name} ($${i.price})`).join(", ")}`;
-
-      let reply = "I'd love to help you find something delicious! Try browsing our featured restaurants on the home page.";
-      if (anthropicKey) {
-        try {
-          const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: {
-              "x-api-key": anthropicKey,
-              "anthropic-version": "2023-06-01",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "claude-sonnet-4-20250514",
-              max_tokens: 300,
-              system: `You are Zoey, the friendly food concierge for ZoomEats. Help users pick restaurants. Keep replies short (2-4 sentences). Use only this context:\n${context}`,
-              messages: [{ role: "user", content: text }],
-            }),
-          });
-          const aiData = await aiRes.json();
-          reply = aiData.content?.[0]?.text || reply;
-        } catch (e) {
-          console.error("LLM error:", e);
-        }
-      }
-
-      await db.from("chat_messages").insert([
-        { session_id, user_id: u.user_id, role: "user", text },
-        { session_id, user_id: u.user_id, role: "assistant", text: reply },
-      ]);
-      return { reply, session_id };
-    }
-    if (path === "/chat/history" && method === "GET") {
-      const u = requireAuth();
-      const session_id = `chat_${u.user_id}`;
-      const { data } = await db.from("chat_messages").select("*").eq("session_id", session_id).order("created_at", { ascending: true }).limit(200);
-      return data || [];
     }
 
     // ---- Wallet ----

@@ -12,7 +12,7 @@ export default function DigestCard({ digest, loading, onGenerate }) {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Sparkles size={18} style={{ color: "var(--primary)" }} />
-          <h3 className="font-display text-xl font-bold">Today&apos;s digest by Zoey</h3>
+          <h3 className="font-display text-xl font-bold">Today&apos;s digest by Dreamland</h3>
         </div>
         <button
           type="button"

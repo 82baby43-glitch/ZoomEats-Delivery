@@ -1,11 +1,15 @@
+"use client";
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "@/lib/api";
+import { DREAMLAND_SEED_MESSAGE } from "@/lib/dreamland/prompts";
 
-const SEED = [{ role: "assistant", text: "Hey! I'm Zoey 👋 What are you in the mood for tonight?" }];
+const SEED = [{ role: "assistant", text: DREAMLAND_SEED_MESSAGE }];
 
-export function useChat(open) {
+export function useDreamlandChat(open) {
   const [msgs, setMsgs] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [lastRecs, setLastRecs] = useState([]);
   const loadedFor = useRef(null);
 
   useEffect(() => {
@@ -13,11 +17,21 @@ export function useChat(open) {
     loadedFor.current = "loaded";
     (async () => {
       try {
-        const r = await api.get("/chat/history");
+        const r = await api.get("/dreamland/history");
         const history = Array.isArray(r?.data) ? r.data : [];
-        setMsgs(history.length ? history.map((m) => ({ role: m?.role ?? "assistant", text: m?.text ?? "" })) : SEED);
+        if (history.length) {
+          setMsgs(history.map((m) => ({
+            role: m?.role ?? "assistant",
+            text: m?.text ?? "",
+            recommendations: m?.recommendations,
+          })));
+          const withRecs = [...history].reverse().find((m) => m?.recommendations?.length);
+          if (withRecs) setLastRecs(withRecs.recommendations);
+        } else {
+          setMsgs(SEED);
+        }
       } catch (e) {
-        console.warn("[chat] history load failed:", e);
+        console.warn("[dreamland] history load failed:", e);
         setMsgs(SEED);
       }
     })();
@@ -28,15 +42,32 @@ export function useChat(open) {
     setMsgs((m) => [...m, { role: "user", text }]);
     setBusy(true);
     try {
-      const r = await api.post("/chat", { text });
-      setMsgs((m) => [...m, { role: "assistant", text: r?.data?.reply ?? "I had trouble responding. Try again?" }]);
+      const r = await api.post("/dreamland/chat", { text });
+      const recs = Array.isArray(r?.data?.recommendations) ? r.data.recommendations : [];
+      setLastRecs(recs);
+      setMsgs((m) => [
+        ...m,
+        {
+          role: "assistant",
+          text: r?.data?.reply ?? "I had trouble responding. Try again?",
+          recommendations: recs,
+        },
+      ]);
     } catch (e) {
-      console.warn("[chat] send failed:", e);
+      console.warn("[dreamland] send failed:", e);
       setMsgs((m) => [...m, { role: "assistant", text: "I had trouble responding. Try again?" }]);
     } finally {
       setBusy(false);
     }
   }, [busy]);
 
-  return { msgs, busy, send };
+  const injectMessage = useCallback((text) => {
+    if (!text) return;
+    setMsgs((m) => [...m, { role: "assistant", text }]);
+  }, []);
+
+  return { msgs, busy, send, lastRecs, injectMessage };
 }
+
+// Backward-compatible alias
+export const useChat = useDreamlandChat;
