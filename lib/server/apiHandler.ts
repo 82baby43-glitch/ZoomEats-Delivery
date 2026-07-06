@@ -16,6 +16,7 @@ import {
 } from "../dispatch/routing/uber-routing-ai";
 import { handleComplianceRequest } from "./complianceHandler";
 import { handleDreamlandRequest } from "./dreamlandHandler";
+import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { normalizeRole } from "../compliance/authz";
 
 function throwErr(message: string, status = 400): never {
@@ -115,6 +116,9 @@ export async function handleApiRequest(
   try {
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return complianceResult;
+
+    const uberDirectResult = await handleUberDirectAdminRequest(db, complianceCtx);
+    if (uberDirectResult !== null) return uberDirectResult;
 
     const dreamlandResult = await handleDreamlandRequest(db, {
       path,

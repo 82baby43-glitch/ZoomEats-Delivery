@@ -23,6 +23,7 @@ import {
 } from "../_shared/googlePlacesImport.ts";
 import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
+import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { normalizeRole } from "../_shared/complianceAuthz.ts";
 
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
@@ -143,6 +144,9 @@ Deno.serve(async (req) => {
   try {
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return json(complianceResult);
+
+    const uberDirectResult = await handleUberDirectAdminRequest(db, complianceCtx);
+    if (uberDirectResult !== null) return json(uberDirectResult);
 
     const dreamlandResult = await handleDreamlandRequest(db, {
       path,

@@ -214,6 +214,17 @@ export async function dispatchOrderViaUberDirect(ctx: DispatchOrderContext): Pro
   return createUberDelivery(cfg, ctx, quoteId);
 }
 
+export async function verifyUberDirectConnection(): Promise<{ ok: boolean; error?: string }> {
+  const cfg = getUberDirectConfig();
+  if (!cfg) return { ok: false, error: "not_configured" };
+  try {
+    await fetchAccessToken(cfg);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
 export function buildManifestFromOrderItems(
   items: Array<{ name?: string; quantity?: number; price?: number }> | null | undefined,
   totalDollars: number
