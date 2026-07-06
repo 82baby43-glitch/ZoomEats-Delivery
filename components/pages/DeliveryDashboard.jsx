@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import PayoutSetupPanel from "@/components/compliance/PayoutSetupPanel";
+import TaxDashboard from "@/components/compliance/TaxDashboard";
 import { MapPin, Power, Truck } from "lucide-react";
 import { formatMoney, sanitizeOrders, sanitizeWallet } from "@/lib/safeData";
 import { logClientError } from "@/lib/clientErrorLog";
@@ -32,6 +33,7 @@ function useGeolocation(active) {
 export default function DeliveryDashboard() {
   const searchParams = useSearchParams();
   const showPayouts = searchParams?.get("tab") === "payouts";
+  const showTax = searchParams?.get("tab") === "tax";
   const [online, setOnline] = useState(false);
   const [available, setAvailable] = useState([]);
   const [mine, setMine] = useState([]);
@@ -171,13 +173,18 @@ export default function DeliveryDashboard() {
           </button>
         </div>
 
-        {showPayouts ? (
+        {showTax ? (
+          <div className="mt-6 max-w-3xl">
+            <TaxDashboard />
+          </div>
+        ) : showPayouts ? (
           <div className="mt-6 max-w-3xl">
             <PayoutSetupPanel entityType="driver" />
           </div>
         ) : (
-          <div className="mt-6 max-w-3xl">
+          <div className="mt-6 max-w-3xl flex flex-wrap gap-3">
             <PayoutSetupPanel entityType="driver" compact />
+            <a href="/driver/dashboard?tab=tax" className="btn-ghost text-sm self-start">Tax &amp; 1099 →</a>
           </div>
         )}
 

@@ -29,6 +29,15 @@ import {
   filterComplianceRows,
 } from "./complianceDashboard.ts";
 import { generateComplianceReportPdf } from "./generateComplianceReportPdf.ts";
+import {
+  buildAdminTaxDashboard,
+  buildContractorTaxRows,
+  buildUserTaxDashboard,
+  generate1099NecCsv,
+  generateIrsReadyCsv,
+  saveYearEndReport,
+  syncWalletPaymentsToContractor,
+} from "./taxReporting.ts";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -864,8 +873,11 @@ export async function handleComplianceRequest(
       zip: body.zip || null,
       encrypted_payload: encrypted,
       last_four: ssnOrEin.replace(/\D/g, "").slice(-4),
+      tin_type: ["c_corp", "s_corp", "partnership", "llc"].includes(String(body.tax_classification || "")) ? "ein" : "ssn",
       w9_signed_at: new Date().toISOString(),
       w9_signature: body.signature || null,
+      w9_document_path: body.w9_document_path || null,
+      status: "on_file",
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
     return { ok: true, masked_id: maskTaxId(ssnOrEin) };
@@ -1137,6 +1149,91 @@ export async function handleComplianceRequest(
     };
 
     return { stats, accounts: rows };
+  }
+
+  if (path === "/tax/dashboard" && method === "GET") {
+    const u = requireAuth();
+    const year = Number(params.year || new Date().getFullYear());
+    return buildUserTaxDashboard(db, String(u.user_id), year);
+  }
+
+  if (path === "/tax/w9/presign" && method === "POST") {
+    const u = requireAuth();
+    const fileName = String(body.file_name || "w9.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
+    const storagePath = `${u.user_id}/w9-${Date.now()}-${fileName}`;
+    const { data: signed, error } = await db.storage.from("tax-documents").createSignedUploadUrl(storagePath);
+    if (error) throwErr(error.message, 500);
+    return { upload_url: signed?.signedUrl, storage_path: storagePath, token: signed?.token };
+  }
+
+  if (path === "/tax/w9/submit" && method === "POST") {
+    const u = requireAuth();
+    const storagePath = String(body.path || body.storage_path || "").trim();
+    if (!storagePath || !storagePath.startsWith(`${u.user_id}/`)) throwErr("Invalid W-9 document path");
+    const role = normalizeRole(String(u.role));
+    const entityType = role === "vendor" ? "restaurant" : "driver";
+    const patch = {
+      w9_document_path: storagePath,
+      status: "w9_on_file",
+      updated_at: new Date().toISOString(),
+    };
+    const { data: existing } = await db.from("tax_information").select("tax_id").eq("user_id", u.user_id).maybeSingle();
+    if (existing?.tax_id) {
+      await db.from("tax_information").update(patch).eq("user_id", u.user_id);
+    } else {
+      await db.from("tax_information").insert({
+        tax_id: uid("tax"),
+        user_id: u.user_id,
+        entity_type: entityType,
+        legal_name: String(body.legal_name || u.name || "Pending"),
+        encrypted_payload: encryptTaxPayload(JSON.stringify({ tax_id: "" })),
+        ...patch,
+      });
+    }
+    return { ok: true, path: storagePath };
+  }
+
+  if (path === "/admin/tax/dashboard" && method === "GET") {
+    requireRole("admin");
+    const year = Number(params.year || new Date().getFullYear());
+    return buildAdminTaxDashboard(db, year);
+  }
+
+  if (path === "/admin/tax/year-end" && method === "GET") {
+    requireRole("admin");
+    const admin = requireAuth();
+    const year = Number(params.year || new Date().getFullYear());
+    await syncWalletPaymentsToContractor(db, year);
+    const contractors = await buildContractorTaxRows(db, year, { includeFullTin: false });
+    const reportId = await saveYearEndReport(db, year, String(admin.user_id), contractors);
+    return { report_id: reportId, tax_year: year, contractors };
+  }
+
+  if (path === "/admin/tax/export/1099-nec" && method === "GET") {
+    requireRole("admin");
+    const year = Number(params.year || new Date().getFullYear());
+    await syncWalletPaymentsToContractor(db, year);
+    const rows = await buildContractorTaxRows(db, year, { includeFullTin: true });
+    const eligible = rows.filter((r) => r.requires_1099);
+    const csv = generate1099NecCsv(year, rows);
+    return { csv, filename: `1099-nec-${year}.csv`, row_count: eligible.length };
+  }
+
+  if (path === "/admin/tax/export/irs-csv" && method === "GET") {
+    requireRole("admin");
+    const year = Number(params.year || new Date().getFullYear());
+    await syncWalletPaymentsToContractor(db, year);
+    const rows = await buildContractorTaxRows(db, year, { includeFullTin: true });
+    const eligible = rows.filter((r) => r.requires_1099);
+    const csv = generateIrsReadyCsv(year, rows);
+    return { csv, filename: `irs-1099-nec-${year}.csv`, row_count: eligible.length };
+  }
+
+  if (path === "/admin/tax/sync-payments" && method === "POST") {
+    requireRole("admin");
+    const year = Number(body.year || new Date().getFullYear());
+    const result = await syncWalletPaymentsToContractor(db, year);
+    return { ok: true, year, ...result };
   }
 
   return null;

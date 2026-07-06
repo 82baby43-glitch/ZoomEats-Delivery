@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { api, getApiErrorMessage, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import PayoutSetupPanel from "@/components/compliance/PayoutSetupPanel";
+import TaxDashboard from "@/components/compliance/TaxDashboard";
 import RestaurantMediaStudio from "@/components/restaurant/RestaurantMediaStudio";
 import { useRealtimeRow } from "@/lib/useRealtime";
 import { useWebPush } from "@/lib/useWebPush";
@@ -237,7 +238,7 @@ export default function VendorDashboard() {
           </div>
         )}
         <div className="flex gap-2 mt-6 border-b" style={{ borderColor: "var(--border)" }}>
-          {["orders", "menu", "media", "payouts", "profile"].map((t) => (
+          {["orders", "menu", "media", "payouts", "tax", "profile"].map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -337,6 +338,12 @@ export default function VendorDashboard() {
         {tab === "payouts" && (
           <div className="mt-6 max-w-3xl">
             <PayoutSetupPanel entityType="restaurant" />
+          </div>
+        )}
+
+        {tab === "tax" && (
+          <div className="mt-6 max-w-3xl">
+            <TaxDashboard />
           </div>
         )}
 

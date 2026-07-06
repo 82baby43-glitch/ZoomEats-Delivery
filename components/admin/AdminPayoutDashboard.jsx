@@ -48,6 +48,7 @@ export default function AdminPayoutDashboard() {
           </div>
           <div className="flex gap-3">
             <Link href="/admin/compliance" className="btn-ghost text-sm">Compliance Center</Link>
+            <Link href="/admin/tax" className="btn-ghost text-sm">Tax reporting</Link>
             <Link href="/admin" className="btn-ghost text-sm">Admin home</Link>
             <button type="button" className="btn-primary text-sm" onClick={load} disabled={loading}>
               {loading ? "Refreshing…" : "Refresh"}

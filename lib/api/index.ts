@@ -220,3 +220,27 @@ export const approveMediaEnhancement = (id: string, body: Record<string, unknown
 
 export const rejectMediaEnhancement = (id: string) =>
   api.post(`/vendor/media/enhancements/${id}/reject`, {});
+
+export const getTaxDashboard = (year: number) =>
+  api.get("/tax/dashboard", { params: { year: String(year) } });
+
+export const presignW9Upload = (body: Record<string, unknown>) =>
+  api.post("/tax/w9/presign", body);
+
+export const submitW9Document = (path: string) =>
+  api.post("/tax/w9/submit", { path });
+
+export const getAdminTaxDashboard = (year: number) =>
+  api.get("/admin/tax/dashboard", { params: { year: String(year) } });
+
+export const syncTaxPayments = (year: number) =>
+  api.post("/admin/tax/sync-payments", { year });
+
+export const export1099NecCsv = (year: number) =>
+  api.get("/admin/tax/export/1099-nec", { params: { year: String(year) } });
+
+export const exportIrsTaxCsv = (year: number) =>
+  api.get("/admin/tax/export/irs-csv", { params: { year: String(year) } });
+
+export const generateYearEndTaxReport = (year: number) =>
+  api.get("/admin/tax/year-end", { params: { year: String(year) } });

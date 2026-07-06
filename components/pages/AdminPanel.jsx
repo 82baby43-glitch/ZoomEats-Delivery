@@ -149,6 +149,9 @@ export default function AdminPanel() {
           <Link href="/admin/payouts" className="btn-ghost inline-flex items-center gap-2 text-sm">
             Payout dashboard
           </Link>
+          <Link href="/admin/tax" className="btn-ghost inline-flex items-center gap-2 text-sm">
+            Tax reporting
+          </Link>
           <Link
             href="/admin/import-restaurants"
             className="btn-ghost inline-flex items-center gap-2 text-sm"
