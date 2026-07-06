@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Sparkles } from "lucide-react";
+import { X, MessageCircle } from "lucide-react";
 import ChatMessage from "@/components/chatbot/ChatMessage";
 import ChatTyping from "@/components/chatbot/ChatTyping";
 import ChatInput from "@/components/chatbot/ChatInput";
@@ -22,17 +22,22 @@ export default function Chatbot() {
     <>
       <motion.button
         onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-6 right-6 w-14 h-14 rounded-full flex items-center justify-center shadow-lg z-50"
+        className="fixed bottom-6 right-6 w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg z-50 border-0 cursor-pointer"
         style={{
-          background: "linear-gradient(135deg, #c4b5fd 0%, #f9a8d4 55%, #fcd34d 100%)",
-          color: "#1a1025",
+          background: "var(--primary)",
+          color: "#0A0A0A",
+          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(182, 241, 39, 0.2)",
         }}
-        whileHover={{ scale: 1.06 }}
+        whileHover={{
+          scale: 1.05,
+          background: "var(--primary-hover)",
+          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 4px rgba(182, 241, 39, 0.18)",
+        }}
         whileTap={{ scale: 0.96 }}
         data-testid="chatbot-toggle"
-        aria-label="Open Dreamland"
+        aria-label="Open Dreamland chat"
       >
-        {open ? <X size={22} /> : <Sparkles size={22} />}
+        {open ? <X size={24} strokeWidth={2.5} /> : <MessageCircle size={24} strokeWidth={2.5} />}
       </motion.button>
 
       <AnimatePresence>
@@ -45,16 +50,16 @@ export default function Chatbot() {
             className="fixed bottom-24 right-6 w-[380px] max-w-[calc(100vw-3rem)] h-[520px] border rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden"
             style={{
               background: "var(--surface)",
-              borderColor: "rgba(167,139,250,0.25)",
-              boxShadow: "0 20px 60px rgba(0,0,0,0.25), 0 0 40px rgba(167,139,250,0.08)",
+              borderColor: "var(--border)",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
             }}
             data-testid="chatbot-panel"
           >
             <div
               className="px-4 py-3 border-b flex items-center gap-3"
               style={{
-                borderColor: "rgba(167,139,250,0.2)",
-                background: "linear-gradient(90deg, rgba(167,139,250,0.2) 0%, rgba(249,168,212,0.12) 100%)",
+                borderColor: "var(--border)",
+                background: "var(--surface-2)",
               }}
             >
               <DreamlandAvatar size={36} pulse />

@@ -1,24 +1,24 @@
 "use client";
 
+import { MessageCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function DreamlandAvatar({ size = 40, pulse = false }) {
   return (
     <motion.div
-      className="rounded-full flex items-center justify-center font-display font-black shrink-0"
+      className="rounded-xl flex items-center justify-center shrink-0"
       style={{
         width: size,
         height: size,
-        background: "linear-gradient(135deg, #c4b5fd 0%, #f9a8d4 50%, #fcd34d 100%)",
-        color: "#1a1025",
-        fontSize: size * 0.38,
-        boxShadow: pulse ? "0 0 24px rgba(196, 181, 253, 0.45)" : "0 4px 14px rgba(0,0,0,0.12)",
+        background: "var(--primary)",
+        color: "#0A0A0A",
+        boxShadow: pulse ? "0 0 0 4px rgba(182, 241, 39, 0.18)" : "none",
       }}
-      animate={pulse ? { scale: [1, 1.06, 1] } : {}}
+      animate={pulse ? { scale: [1, 1.04, 1] } : {}}
       transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
       aria-hidden
     >
-      ✨
+      <MessageCircle size={Math.round(size * 0.5)} strokeWidth={2.5} />
     </motion.div>
   );
 }

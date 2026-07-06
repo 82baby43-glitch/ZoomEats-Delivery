@@ -14,10 +14,7 @@ export default function ChatMessage({ message }) {
           style={
             isUser
               ? { background: "var(--primary)", color: "#0A0A0A" }
-              : {
-                  background: "linear-gradient(135deg, var(--surface-2) 0%, rgba(167,139,250,0.08) 100%)",
-                  color: "var(--text)",
-                }
+              : { background: "var(--surface-2)", color: "var(--text)" }
           }
         >
           {message.text}
