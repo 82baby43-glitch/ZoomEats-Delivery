@@ -13,54 +13,95 @@ const ROLE_HOME: Record<string, string> = {
   customer: "/",
 };
 
+const CALLBACK_TIMEOUT_MS = 15000;
+
 export default function AuthCallbackPage() {
   const router = useRouter();
 
   useEffect(() => {
-    let cancelled = false;
+    let finished = false;
+
+    const complete = async () => {
+      if (finished) return;
+      finished = true;
+      await ensureUserProfile();
+      const profile = await getCurrentUser();
+      const storedRedirect = sessionStorage.getItem("auth_redirect");
+      sessionStorage.removeItem("auth_redirect");
+      const defaultHome = ROLE_HOME[profile?.role || "customer"] || "/onboarding";
+      router.replace(storedRedirect || defaultHome);
+    };
+
+    const fail = (reason?: string) => {
+      if (finished) return;
+      finished = true;
+      const q = reason ? `?error=auth_failed&reason=${encodeURIComponent(reason)}` : "?error=auth_failed";
+      router.replace(`/login${q}`);
+    };
+
+    // detectSessionInUrl handles PKCE — wait for SIGNED_IN / INITIAL_SESSION, don't double-exchange.
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (finished) return;
+      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session) {
+        try {
+          await complete();
+        } catch (e) {
+          fail(e instanceof Error ? e.message : "profile_sync_failed");
+        }
+      }
+    });
 
     (async () => {
       try {
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        const { data: existing, error: sessionError } = await supabase.auth.getSession();
         if (sessionError) throw sessionError;
-        const session = sessionData?.session;
-
-        if (!session) {
-          const hashParams = new URLSearchParams(window.location.hash.slice(1));
-          const searchParams = new URLSearchParams(window.location.search);
-          const code = searchParams.get("code");
-
-          if (code) {
-            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-            if (exchangeError) throw exchangeError;
-          } else if (hashParams.get("access_token")) {
-            await new Promise((r) => setTimeout(r, 500));
-          }
-        }
-
-        const { data: confirmedData, error: confirmedError } = await supabase.auth.getSession();
-        if (confirmedError) throw confirmedError;
-        const confirmed = confirmedData?.session;
-        if (!confirmed) {
-          router.replace("/login?error=auth_failed");
+        if (existing?.session) {
+          await complete();
           return;
         }
 
-        await ensureUserProfile();
-        const profile = await getCurrentUser();
-        const storedRedirect = sessionStorage.getItem("auth_redirect");
-        sessionStorage.removeItem("auth_redirect");
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get("code");
+        const authError = params.get("error_description") || params.get("error");
 
-        const defaultHome = ROLE_HOME[profile?.role || "customer"] || "/onboarding";
-        const target = storedRedirect || defaultHome;
+        if (authError) {
+          fail(String(authError));
+          return;
+        }
 
-        if (!cancelled) router.replace(target);
-      } catch {
-        if (!cancelled) router.replace("/login?error=auth_failed");
+        // Fallback: if auto-detect hasn't fired yet, exchange once after a short delay.
+        if (code) {
+          await new Promise((r) => setTimeout(r, 600));
+          const { data: afterWait } = await supabase.auth.getSession();
+          if (afterWait?.session) {
+            await complete();
+            return;
+          }
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) {
+            const { data: retry } = await supabase.auth.getSession();
+            if (retry?.session) {
+              await complete();
+              return;
+            }
+            throw exchangeError;
+          }
+          await complete();
+        }
+      } catch (e) {
+        fail(e instanceof Error ? e.message : "callback_failed");
       }
     })();
 
-    return () => { cancelled = true; };
+    const timer = setTimeout(() => {
+      if (!finished) fail("timeout");
+    }, CALLBACK_TIMEOUT_MS);
+
+    return () => {
+      finished = true;
+      clearTimeout(timer);
+      authListener?.subscription?.unsubscribe();
+    };
   }, [router]);
 
   return (

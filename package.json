@@ -12,7 +12,8 @@
     "auth:google": "node scripts/configure-google-auth.mjs",
     "functions:deploy": "supabase functions deploy api && supabase functions deploy stripe-webhook --no-verify-jwt && supabase functions deploy dispatch-order --no-verify-jwt && supabase functions deploy routing-engine --no-verify-jwt && supabase functions deploy reconcile-payments --no-verify-jwt",
     "stripe:supabase": "node scripts/setup-stripe-supabase.mjs",
-    "compliance:test": "node scripts/compliance-test.mjs"
+    "compliance:test": "node scripts/compliance-test.mjs",
+    "auth:redirects": "node scripts/sync-auth-redirects.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",

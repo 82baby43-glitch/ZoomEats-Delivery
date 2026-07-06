@@ -15,6 +15,8 @@ export default function LoginPage({ title, subtitle, defaultRedirect = "/", sign
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") || defaultRedirect;
+  const errorCode = searchParams.get("error");
+  const errorReason = searchParams.get("reason");
   const [mode, setMode] = useState(signupMode ? "signup" : "login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,7 +24,16 @@ export default function LoginPage({ title, subtitle, defaultRedirect = "/", sign
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => {
+    if (errorCode === "auth_failed") {
+      return errorReason
+        ? `Sign in failed: ${decodeURIComponent(errorReason)}`
+        : "Sign in failed. If using Google on a preview URL, ensure Supabase redirect URLs include this domain's /auth/callback.";
+    }
+    if (errorCode === "session_expired") return "Your session has expired. Please sign in again.";
+    if (errorCode === "account_suspended") return "Your account has been suspended.";
+    return "";
+  });
 
   const finish = () => router.replace(redirect);
 
