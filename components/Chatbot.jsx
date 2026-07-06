@@ -68,7 +68,7 @@ export default function Chatbot({ initialMessage }) {
               <DreamlandAvatar size={36} pulse />
               <div>
                 <div className="font-display font-black">Dreamland</div>
-                <div className="text-xs opacity-70">What should you eat right now?</div>
+                <div className="text-xs opacity-70">Your emotionally intelligent food guide</div>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3" data-testid="chatbot-messages">

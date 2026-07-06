@@ -32,7 +32,7 @@ export default function DigestCard({ digest, loading, onGenerate }) {
       )}
       {loading && (
         <div className="flex items-center gap-2 text-sm" style={{ color: "var(--muted)" }}>
-          <Loader2 size={14} className="animate-spin" /> Asking Claude…
+          <Loader2 size={14} className="animate-spin" /> Dreamland is thinking…
         </div>
       )}
       {digest && (

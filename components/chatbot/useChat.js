@@ -6,6 +6,14 @@ import { DREAMLAND_SEED_MESSAGE } from "@/lib/dreamland/prompts";
 
 const SEED = [{ role: "assistant", text: DREAMLAND_SEED_MESSAGE }];
 
+function normalizeHistoryMessage(text) {
+  if (!text) return text;
+  return text
+    .replace(/Zoey/gi, "Dreamland")
+    .replace(/food concierge/gi, "food guide")
+    .replace(/Hey! I'm Dreamland 👋 What are you in the mood for tonight\?/i, DREAMLAND_SEED_MESSAGE);
+}
+
 export function useDreamlandChat(open) {
   const [msgs, setMsgs] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -22,7 +30,7 @@ export function useDreamlandChat(open) {
         if (history.length) {
           setMsgs(history.map((m) => ({
             role: m?.role ?? "assistant",
-            text: m?.text ?? "",
+            text: normalizeHistoryMessage(m?.text ?? ""),
             recommendations: m?.recommendations,
           })));
           const withRecs = [...history].reverse().find((m) => m?.recommendations?.length);
