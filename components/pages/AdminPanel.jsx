@@ -144,7 +144,10 @@ export default function AdminPanel() {
         <PulseHeader since={since} onRefresh={retryAll} />
         <div className="mt-4 flex flex-wrap gap-3">
           <Link href="/admin/compliance" className="btn-primary inline-flex items-center gap-2 text-sm">
-            Compliance Center
+            Compliance Dashboard
+          </Link>
+          <Link href="/admin/payouts" className="btn-ghost inline-flex items-center gap-2 text-sm">
+            Payout dashboard
           </Link>
           <Link
             href="/admin/import-restaurants"

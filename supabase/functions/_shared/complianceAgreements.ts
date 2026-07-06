@@ -9,8 +9,9 @@ export type AgreementDef = {
   title: string;
   kind: AgreementKind;
   required: boolean;
-  role: "delivery" | "vendor";
+  role: "delivery" | "vendor" | "customer";
   body: string;
+  version?: string;
 };
 
 export const DRIVER_AGREEMENTS: AgreementDef[] = [
@@ -46,6 +47,10 @@ export function agreementsForRole(role: string): AgreementDef[] {
   if (role === "delivery" || role === "driver") return DRIVER_AGREEMENTS;
   if (role === "vendor" || role === "restaurant") return RESTAURANT_AGREEMENTS;
   return [];
+}
+
+export function agreementVersion(def: AgreementDef): string {
+  return def.version || AGREEMENT_VERSION;
 }
 
 export function requiredAgreementTypes(role: string): string[] {
