@@ -1,5 +1,10 @@
 import Cart from "@/components/pages/Cart";
+import { ComplianceGate } from "@/components/ComplianceGate";
 
 export default function CartPage() {
-  return <Cart />;
+  return (
+    <ComplianceGate roles={["customer"]} requireCompliance loginPath="/login">
+      <Cart />
+    </ComplianceGate>
+  );
 }

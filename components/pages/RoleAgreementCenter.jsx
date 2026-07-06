@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { AlertTriangle, Check, Clock } from "lucide-react";
 
 function clientMeta() {
   if (typeof window === "undefined") return {};
@@ -92,10 +93,16 @@ export default function RoleAgreementCenter({ roleLabel }) {
             <div key={a.type} className="card p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="font-bold">{a.title}</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-bold">{a.title}</h3>
+                    {a.version && <span className="text-xs px-2 py-0.5 rounded" style={{ background: "var(--surface-2)" }}>v{a.version}</span>}
+                    {a.needs_resign && <span className="text-xs text-amber-400 flex items-center gap-1"><AlertTriangle size={12} /> Re-sign</span>}
+                  </div>
                   <p className="text-sm mt-2" style={{ color: "var(--muted)" }}>{a.body}</p>
-                  {a.accepted && (
-                    <p className="text-xs mt-2 text-green-400">Accepted</p>
+                  {a.accepted && a.acceptance && (
+                    <p className="text-xs mt-2 text-green-400 flex items-center gap-1">
+                      <Check size={12} /> Accepted · <Clock size={12} /> {new Date(a.acceptance.accepted_at).toLocaleString()}
+                    </p>
                   )}
                 </div>
                 {a.required && <span className="text-xs font-bold text-amber-400">Required</span>}

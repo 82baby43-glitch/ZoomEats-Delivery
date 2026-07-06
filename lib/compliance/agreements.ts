@@ -1,4 +1,4 @@
-/** Agreement definitions for driver and restaurant compliance. */
+/** Agreement definitions for driver, restaurant, and customer compliance. */
 
 export const AGREEMENT_VERSION = "1.0";
 
@@ -9,8 +9,14 @@ export type AgreementDef = {
   title: string;
   kind: AgreementKind;
   required: boolean;
-  role: "delivery" | "vendor";
+  role: "delivery" | "vendor" | "customer";
   body: string;
+  version?: string;
+};
+
+export type AgreementAcceptance = {
+  agreement_type: string;
+  agreement_version?: string;
 };
 
 export const DRIVER_AGREEMENTS: AgreementDef[] = [
@@ -42,12 +48,48 @@ export const RESTAURANT_AGREEMENTS: AgreementDef[] = [
   { type: "electronic_signature", title: "Electronic Signature", kind: "signature", required: true, role: "vendor", body: "You consent to electronic signatures for merchant agreements." },
 ];
 
+export const CUSTOMER_AGREEMENTS: AgreementDef[] = [
+  { type: "terms_of_service", title: "Terms of Service", kind: "signature", required: true, role: "customer", version: "1.0", body: "You agree to ZoomEats Terms of Service governing your use of the platform, account security, ordering, and prohibited conduct." },
+  { type: "privacy_policy", title: "Privacy Policy", kind: "signature", required: true, role: "customer", version: "1.0", body: "You acknowledge how ZoomEats collects, uses, and protects your personal information, order history, and location data." },
+  { type: "electronic_communications", title: "Electronic Communications Consent", kind: "signature", required: true, role: "customer", version: "1.0", body: "You consent to receive order updates, receipts, and service communications electronically." },
+  { type: "refund_policy", title: "Refund Policy", kind: "signature", required: true, role: "customer", version: "1.0", body: "You agree to ZoomEats refund policy for missing items, quality issues, and order disputes." },
+  { type: "cancellation_policy", title: "Cancellation Policy", kind: "signature", required: true, role: "customer", version: "1.0", body: "You agree to cancellation windows, fees, and restaurant preparation policies." },
+  { type: "community_guidelines", title: "Community Guidelines", kind: "signature", required: true, role: "customer", version: "1.0", body: "You agree to treat drivers, restaurants, and support staff respectfully and follow community standards." },
+];
+
+export function agreementVersion(def: AgreementDef): string {
+  return def.version || AGREEMENT_VERSION;
+}
+
 export function agreementsForRole(role: string): AgreementDef[] {
   if (role === "delivery" || role === "driver") return DRIVER_AGREEMENTS;
   if (role === "vendor" || role === "restaurant") return RESTAURANT_AGREEMENTS;
+  if (role === "customer") return CUSTOMER_AGREEMENTS;
   return [];
 }
 
 export function requiredAgreementTypes(role: string): string[] {
   return agreementsForRole(role).filter((a) => a.required).map((a) => a.type);
+}
+
+/** Missing agreements for current required versions (supports re-sign after version bump). */
+export function computeMissingAgreements(
+  role: string,
+  acceptances: AgreementAcceptance[] = []
+): string[] {
+  const required = agreementsForRole(role).filter((a) => a.required);
+  const accepted = new Set(
+    acceptances.map((a) => `${a.agreement_type}:${a.agreement_version || AGREEMENT_VERSION}`)
+  );
+  return required
+    .filter((def) => !accepted.has(`${def.type}:${agreementVersion(def)}`))
+    .map((def) => def.type);
+}
+
+export function isAgreementCurrentVersion(
+  def: AgreementDef,
+  acceptance?: AgreementAcceptance | null
+): boolean {
+  if (!acceptance) return false;
+  return (acceptance.agreement_version || AGREEMENT_VERSION) === agreementVersion(def);
 }

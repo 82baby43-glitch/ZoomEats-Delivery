@@ -1,10 +1,10 @@
-import { Protected } from "@/components/Protected";
+import { ComplianceGate } from "@/components/ComplianceGate";
 import OrderDetail from "@/components/pages/OrderDetail";
 
 export default function OrderDetailPage() {
   return (
-    <Protected>
+    <ComplianceGate roles={["customer"]} requireCompliance loginPath="/login">
       <OrderDetail />
-    </Protected>
+    </ComplianceGate>
   );
 }
