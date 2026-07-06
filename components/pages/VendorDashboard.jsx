@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import Image from "next/image";
 import { api, getApiErrorMessage, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import { useRealtimeRow } from "@/lib/useRealtime";
@@ -300,7 +301,13 @@ export default function VendorDashboard() {
             <div className="md:col-span-2 space-y-3">
               {menu.map((m) => (
                 <div key={m.item_id} className="card p-4 flex items-center gap-4">
-                  <img src={m.image_url || FOOD_IMG} alt="" className="w-16 h-16 rounded-xl object-cover" />
+                  <Image
+                    src={m.image_url || FOOD_IMG}
+                    alt={m.name || "Menu item"}
+                    width={64}
+                    height={64}
+                    className="w-16 h-16 rounded-xl object-cover"
+                  />
                   <div className="flex-1">
                     <div className="font-bold">{m.name}</div>
                     <div className="text-sm" style={{ color: "var(--muted)" }}>{m.category || "—"} · ${formatMoney(m.price)}</div>
