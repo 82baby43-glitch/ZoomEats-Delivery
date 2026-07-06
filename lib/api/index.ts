@@ -206,3 +206,17 @@ export const exportCompliancePdf = (params: Record<string, string> = {}) =>
 
 export const getComplianceAudit = (params: Record<string, string> = {}) =>
   api.get("/admin/compliance/audit", { params });
+
+export const presignRestaurantMedia = (body: Record<string, unknown>) =>
+  api.post("/vendor/media/presign", body);
+
+export const saveMediaEnhancement = (body: Record<string, unknown>) =>
+  api.post("/vendor/media/enhancements", body);
+
+export const getMediaEnhancements = () => api.get("/vendor/media/enhancements");
+
+export const approveMediaEnhancement = (id: string, body: Record<string, unknown> = {}) =>
+  api.post(`/vendor/media/enhancements/${id}/approve`, body);
+
+export const rejectMediaEnhancement = (id: string) =>
+  api.post(`/vendor/media/enhancements/${id}/reject`, {});
