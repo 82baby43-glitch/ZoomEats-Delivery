@@ -15,6 +15,14 @@ import {
   recalculateOptimalRoute,
   tryInsertOrderIntoRoute,
 } from "../_shared/routing/uber-routing-ai.ts";
+import {
+  getImportProgress,
+  newImportId,
+  runGooglePlacesImport,
+  sanitizeImportString,
+} from "../_shared/googlePlacesImport.ts";
+
+declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -828,6 +836,61 @@ Deno.serve(async (req) => {
         stats: { orders: todaysOrders?.length || 0, paid_orders: paid.length, gmv: Math.round(gmv * 100) / 100, pending_approvals: pending || 0 },
       });
     }
+
+    const importStatusMatch = path.match(/^\/admin\/import-restaurants\/status\/([^/]+)$/);
+    if (importStatusMatch && method === "GET") {
+      requireRole("admin");
+      const progress = await getImportProgress(db, importStatusMatch[1]);
+      if (!progress) return err("Import not found", 404);
+      return json(progress);
+    }
+
+    if (path === "/admin/import-restaurants" && method === "POST") {
+      const u = requireRole("admin");
+      const city = sanitizeImportString(body.city, 120);
+      const state = sanitizeImportString(body.state, 80);
+      const radiusRaw = Number(body.radius ?? body.radius_meters ?? 15000);
+      const limitRaw = Number(body.limit ?? 100);
+
+      if (!city || !state) return err("City and state are required");
+      if (!Number.isFinite(radiusRaw) || radiusRaw < 500 || radiusRaw > 50000) {
+        return err("Radius must be between 500 and 50000 meters");
+      }
+      if (!Number.isFinite(limitRaw) || limitRaw < 1 || limitRaw > 300) {
+        return err("Limit must be between 1 and 300");
+      }
+
+      const importId = newImportId();
+      const { error: logError } = await db.from("restaurant_import_logs").insert({
+        import_id: importId,
+        user_id: u.user_id as string,
+        city,
+        state,
+        radius_meters: Math.round(radiusRaw),
+        limit_requested: Math.round(limitRaw),
+        status: "pending",
+        progress_pct: 0,
+      });
+      if (logError) return err(logError.message, 500);
+
+      const importParams = {
+        city,
+        state,
+        radiusMeters: Math.round(radiusRaw),
+        limit: Math.round(limitRaw),
+        importId,
+        userId: u.user_id as string,
+      };
+
+      try {
+        EdgeRuntime.waitUntil(runGooglePlacesImport(db, importParams));
+      } catch {
+        await runGooglePlacesImport(db, importParams);
+      }
+
+      return json({ import_id: importId, status: "started" });
+    }
+
     if (path.startsWith("/admin/compliance") || path.startsWith("/agreements")) {
       return json({ ok: true, items: [], reviews: [] });
     }

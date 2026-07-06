@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
+import { Download } from "lucide-react";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import PulseHeader, { MetricsTiles } from "@/components/admin/PulseHeader";
@@ -120,6 +122,15 @@ export default function AdminPanel() {
       <Header />
       <div className="max-w-7xl mx-auto px-6 md:px-12 py-12">
         <PulseHeader since={since} onRefresh={retryAll} />
+        <div className="mt-4">
+          <Link
+            href="/admin/import-restaurants"
+            className="btn-ghost inline-flex items-center gap-2 text-sm"
+            data-testid="admin-import-link"
+          >
+            <Download size={16} /> Google Places Bulk Import
+          </Link>
+        </div>
         <MetricsTiles metrics={metrics} loading={loading} />
 
         {loadError && !metrics && (
