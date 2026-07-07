@@ -10,7 +10,11 @@ export function getSupabaseAdmin(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
-    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+    throw new Error(
+      "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. " +
+        "Add both to your host env (e.g. Vercel), or rely on the Supabase Edge api function " +
+        "(deploy with: supabase functions deploy api)."
+    );
   }
   if (!admin) {
     admin = createClient(url, key, {

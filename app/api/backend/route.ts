@@ -6,6 +6,35 @@ import { handleApiRequest } from "@/lib/server/apiHandler";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+async function proxyToSupabaseEdge(req: NextRequest, payload: unknown) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    return NextResponse.json(
+      {
+        error:
+          "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY. Set Supabase env vars on your host, or add SUPABASE_SERVICE_ROLE_KEY for direct DB access.",
+        status: 500,
+      },
+      { status: 500 }
+    );
+  }
+
+  const authHeader = req.headers.get("authorization") || "";
+  const res = await fetch(`${url}/functions/v1/api`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: anonKey,
+      Authorization: authHeader || `Bearer ${anonKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => null);
+  const status = (data as { status?: number })?.status ?? res.status;
+  return NextResponse.json(data, { status: res.ok ? res.status : status });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const payload = await req.json();
@@ -16,6 +45,13 @@ export async function POST(req: NextRequest) {
 
     const authHeader = req.headers.get("authorization") || "";
     const userToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+
+    const hasServiceRole = Boolean(
+      process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+    if (!hasServiceRole) {
+      return proxyToSupabaseEdge(req, payload);
+    }
 
     const db = getSupabaseAdmin();
     const data = await handleApiRequest(db, {

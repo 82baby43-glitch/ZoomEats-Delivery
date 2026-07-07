@@ -52,16 +52,9 @@ function parseApiResponse(res: Response, data: unknown) {
 }
 
 /**
- * Prefer Supabase Edge `api` — Stripe secrets live there.
+ * Prefer Supabase Edge `api` — Stripe secrets and service role live there.
  * Fall back to Next.js `/api/backend` when Supabase is not configured (local dev).
- * OSM restaurant imports always use Next.js so they work before the edge function is redeployed.
  */
-function isOsmRestaurantImport(path: string, method: string, body?: unknown): boolean {
-  if (path !== "/admin/import-restaurants" || method !== "POST") return false;
-  const raw = String((body as { provider?: string })?.provider ?? "osm").toLowerCase();
-  return raw === "osm" || raw === "openstreetmap" || raw === "open_street_map";
-}
-
 async function fetchLocalBackend(payload: string, token: string | null) {
   const res = await fetch("/api/backend", {
     method: "POST",
@@ -84,7 +77,7 @@ async function invokeBackendApi(
   const token = await getAccessToken();
   const payload = JSON.stringify({ path, method, body, params });
 
-  if (isSupabaseConfigured && !isOsmRestaurantImport(path, method, body)) {
+  if (isSupabaseConfigured) {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/api`, {
       method: "POST",
       headers: {
