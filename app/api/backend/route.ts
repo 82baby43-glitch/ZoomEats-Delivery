@@ -1,8 +1,10 @@
+import { after } from "next/server";
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { handleApiRequest } from "@/lib/server/apiHandler";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,6 +25,14 @@ export async function POST(req: NextRequest) {
       params,
       userToken: userToken || undefined,
     });
+
+    if (data && typeof data === "object" && "_background" in data) {
+      const { _background, ...rest } = data as { _background?: Promise<void> } & Record<string, unknown>;
+      if (_background) {
+        after(() => _background);
+      }
+      return NextResponse.json(rest);
+    }
 
     return NextResponse.json(data);
   } catch (e: unknown) {

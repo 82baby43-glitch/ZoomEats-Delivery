@@ -19,6 +19,7 @@ import {
   getImportProgress,
   hasGooglePlacesApiKey,
   newImportId,
+  parseImportProvider,
   runGooglePlacesImport,
   sanitizeImportString,
 } from "../_shared/googlePlacesImport.ts";
@@ -862,8 +863,7 @@ Deno.serve(async (req) => {
       const state = sanitizeImportString(body.state, 80);
       const radiusRaw = Number(body.radius ?? body.radius_meters ?? 15000);
       const limitRaw = Number(body.limit ?? 100);
-      const providerRaw = sanitizeImportString(body.provider, 20).toLowerCase() || "google";
-      const provider = providerRaw === "osm" ? "osm" : "google";
+      const provider = parseImportProvider(body.provider);
 
       if (!city || !state) return err("City and state are required");
       if (!Number.isFinite(radiusRaw) || radiusRaw < 500 || radiusRaw > 50000) {
@@ -880,17 +880,22 @@ Deno.serve(async (req) => {
       }
 
       const importId = newImportId();
-      const { error: logError } = await db.from("restaurant_import_logs").insert({
+      const logBase = {
         import_id: importId,
         user_id: u.user_id as string,
         city,
         state,
         radius_meters: Math.round(radiusRaw),
         limit_requested: Math.round(limitRaw),
-        provider,
         status: "pending",
         progress_pct: 0,
-      });
+      };
+      let { error: logError } = await db
+        .from("restaurant_import_logs")
+        .insert({ ...logBase, provider });
+      if (logError?.message?.includes("provider")) {
+        ({ error: logError } = await db.from("restaurant_import_logs").insert(logBase));
+      }
       if (logError) return err(logError.message, 500);
 
       const importParams = {
