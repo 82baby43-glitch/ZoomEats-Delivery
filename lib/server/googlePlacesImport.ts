@@ -1,7 +1,7 @@
 /**
  * Google Places bulk restaurant import — server-side only (never expose API key).
  */
-import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const RESTAURANT_PLACEHOLDER_IMAGE =
   "https://images.unsplash.com/photo-1624272823876-470c7f48c8c0?crop=entropy&cs=srgb&fm=jpg&q=85&w=800";
@@ -66,9 +66,9 @@ type PlaceRow = Record<string, unknown>;
 
 function getApiKey(): string {
   return (
-    Deno.env.get("GOOGLE_PLACES_API_KEY") ||
-    Deno.env.get("GOOGLE_MAPS_API_KEY") ||
-    Deno.env.get("GOOGLE_API_KEY") ||
+    process.env.GOOGLE_PLACES_API_KEY ||
+    process.env.GOOGLE_MAPS_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
     ""
   );
 }

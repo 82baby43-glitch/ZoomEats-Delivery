@@ -22,6 +22,14 @@ import { handleGeocodeAdminRequest } from "./geocodeAdmin";
 import { geocodeOrderAddress } from "./geocodeAdmin";
 import { normalizeRole } from "../compliance/authz";
 import { filterPublicRestaurants, isTestRestaurantName } from "../restaurants";
+import {
+  getImportProgress,
+  hasGooglePlacesApiKey,
+  newImportId,
+  runGooglePlacesImport,
+  sanitizeImportString,
+} from "./googlePlacesImport";
+import { runOpenStreetMapImport } from "./openStreetMapImport";
 
 function throwErr(message: string, status = 400): never {
   const e = new Error(message) as Error & { status?: number };
@@ -783,6 +791,68 @@ export async function handleApiRequest(
         stats: { orders: todaysOrders?.length || 0, paid_orders: paid.length, gmv: Math.round(gmv * 100) / 100, pending_approvals: pending || 0 },
       };
     }
+
+    const importStatusMatch = path.match(/^\/admin\/import-restaurants\/status\/([^/]+)$/);
+    if (importStatusMatch && method === "GET") {
+      requireRole("admin");
+      const progress = await getImportProgress(db, importStatusMatch[1]);
+      if (!progress) throwErr("Import not found", 404);
+      return progress;
+    }
+
+    if (path === "/admin/import-restaurants" && method === "POST") {
+      const u = requireRole("admin");
+      const city = sanitizeImportString(body.city, 120);
+      const state = sanitizeImportString(body.state, 80);
+      const radiusRaw = Number(body.radius ?? body.radius_meters ?? 15000);
+      const limitRaw = Number(body.limit ?? 100);
+      const providerRaw = sanitizeImportString(body.provider, 20).toLowerCase() || "google";
+      const provider = providerRaw === "osm" ? "osm" : "google";
+
+      if (!city || !state) throwErr("City and state are required");
+      if (!Number.isFinite(radiusRaw) || radiusRaw < 500 || radiusRaw > 50000) {
+        throwErr("Radius must be between 500 and 50000 meters");
+      }
+      if (!Number.isFinite(limitRaw) || limitRaw < 1 || limitRaw > 300) {
+        throwErr("Limit must be between 1 and 300");
+      }
+      if (provider === "google" && !hasGooglePlacesApiKey()) {
+        throwErr(
+          "Google Places API key not configured. Set GOOGLE_PLACES_API_KEY in Supabase secrets, or use OpenStreetMap (free).",
+          400
+        );
+      }
+
+      const importId = newImportId();
+      const { error: logError } = await db.from("restaurant_import_logs").insert({
+        import_id: importId,
+        user_id: u.user_id as string,
+        city,
+        state,
+        radius_meters: Math.round(radiusRaw),
+        limit_requested: Math.round(limitRaw),
+        provider,
+        status: "pending",
+        progress_pct: 0,
+      });
+      if (logError) throwErr(logError.message, 500);
+
+      const importParams = {
+        city,
+        state,
+        radiusMeters: Math.round(radiusRaw),
+        limit: Math.round(limitRaw),
+        importId,
+        userId: u.user_id as string,
+      };
+
+      void (provider === "osm"
+        ? runOpenStreetMapImport(db, importParams)
+        : runGooglePlacesImport(db, importParams));
+
+      return { import_id: importId, status: "started", provider };
+    }
+
     if (path === "/" && method === "GET") {
       return { app: "ZoomEats", db: "supabase", status: "ok" };
     }
