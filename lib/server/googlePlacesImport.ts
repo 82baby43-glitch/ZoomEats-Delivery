@@ -77,6 +77,17 @@ export function hasGooglePlacesApiKey(): boolean {
   return !!getApiKey();
 }
 
+export function parseImportProvider(raw: unknown): "osm" | "google" {
+  const normalized = sanitizeImportString(raw, 30).toLowerCase();
+  if (normalized === "osm" || normalized === "openstreetmap" || normalized === "open_street_map") {
+    return "osm";
+  }
+  if (normalized === "google" || normalized === "google_places") {
+    return "google";
+  }
+  return "google";
+}
+
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }

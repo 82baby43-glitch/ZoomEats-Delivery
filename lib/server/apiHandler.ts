@@ -26,6 +26,7 @@ import {
   getImportProgress,
   hasGooglePlacesApiKey,
   newImportId,
+  parseImportProvider,
   runGooglePlacesImport,
   sanitizeImportString,
 } from "./googlePlacesImport";
@@ -806,8 +807,7 @@ export async function handleApiRequest(
       const state = sanitizeImportString(body.state, 80);
       const radiusRaw = Number(body.radius ?? body.radius_meters ?? 15000);
       const limitRaw = Number(body.limit ?? 100);
-      const providerRaw = sanitizeImportString(body.provider, 20).toLowerCase() || "google";
-      const provider = providerRaw === "osm" ? "osm" : "google";
+      const provider = parseImportProvider(body.provider);
 
       if (!city || !state) throwErr("City and state are required");
       if (!Number.isFinite(radiusRaw) || radiusRaw < 500 || radiusRaw > 50000) {
@@ -824,17 +824,22 @@ export async function handleApiRequest(
       }
 
       const importId = newImportId();
-      const { error: logError } = await db.from("restaurant_import_logs").insert({
+      const logBase = {
         import_id: importId,
         user_id: u.user_id as string,
         city,
         state,
         radius_meters: Math.round(radiusRaw),
         limit_requested: Math.round(limitRaw),
-        provider,
         status: "pending",
         progress_pct: 0,
-      });
+      };
+      let { error: logError } = await db
+        .from("restaurant_import_logs")
+        .insert({ ...logBase, provider });
+      if (logError?.message?.includes("provider")) {
+        ({ error: logError } = await db.from("restaurant_import_logs").insert(logBase));
+      }
       if (logError) throwErr(logError.message, 500);
 
       const importParams = {
@@ -846,11 +851,17 @@ export async function handleApiRequest(
         userId: u.user_id as string,
       };
 
-      void (provider === "osm"
-        ? runOpenStreetMapImport(db, importParams)
-        : runGooglePlacesImport(db, importParams));
+      const importPromise =
+        provider === "osm"
+          ? runOpenStreetMapImport(db, importParams)
+          : runGooglePlacesImport(db, importParams);
 
-      return { import_id: importId, status: "started", provider };
+      return {
+        import_id: importId,
+        status: "started",
+        provider,
+        _background: importPromise,
+      };
     }
 
     if (path === "/" && method === "GET") {
