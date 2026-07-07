@@ -147,6 +147,7 @@ export type SafeRestaurant = {
   address: string;
   image_url: string;
   approved: boolean;
+  import_source?: string;
 };
 
 export function sanitizeRestaurant(raw: unknown): SafeRestaurant {
@@ -157,6 +158,7 @@ export function sanitizeRestaurant(raw: unknown): SafeRestaurant {
     address: "",
     image_url: "",
     approved: false,
+    import_source: "",
   });
   return {
     restaurant_id: safeString(r.restaurant_id),
@@ -165,6 +167,7 @@ export function sanitizeRestaurant(raw: unknown): SafeRestaurant {
     address: safeString(r.address),
     image_url: safeString(r.image_url),
     approved: Boolean(r.approved),
+    import_source: safeString(r.import_source) || undefined,
   };
 }
 

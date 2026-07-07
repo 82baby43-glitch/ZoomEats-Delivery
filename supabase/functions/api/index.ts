@@ -31,6 +31,7 @@ import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
 import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geocodeAdmin.ts";
 import { normalizeRole } from "../_shared/complianceAuthz.ts";
 import { filterPublicRestaurants, isTestRestaurantName } from "../_shared/restaurants.ts";
+import { finalizePublicRestaurantList } from "../_shared/restaurantListing.ts";
 
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
 
@@ -178,11 +179,21 @@ Deno.serve(async (req) => {
 
     // ---- Restaurants (public) ----
     if (path === "/restaurants" && method === "GET") {
-      let q = db.from("restaurants").select("*").eq("approved", true).not("name", "ilike", "TEST_%").order("rating", { ascending: false });
-      const search = params.q;
+      let q = db
+        .from("restaurants")
+        .select("*")
+        .eq("approved", true)
+        .eq("active", true)
+        .not("name", "ilike", "TEST_%")
+        .order("rating", { ascending: false });
+      const search = sanitizeImportString(params.q, 120);
+      const cuisine = sanitizeImportString(params.cuisine, 80);
+      const category = sanitizeImportString(params.category, 80);
       if (search) q = q.or(`name.ilike.%${search}%,description.ilike.%${search}%,cuisine.ilike.%${search}%`);
+      if (cuisine) q = q.ilike("cuisine", `%${cuisine}%`);
+      if (category) q = q.ilike("primary_category", `%${category}%`);
       const { data } = await q;
-      return json(filterPublicRestaurants(data || []));
+      return json(finalizePublicRestaurantList(data || [], params));
     }
 
     const restMatch = path.match(/^\/restaurants\/([^/]+)$/);

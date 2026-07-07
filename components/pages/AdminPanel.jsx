@@ -159,7 +159,7 @@ export default function AdminPanel() {
             className="btn-ghost inline-flex items-center gap-2 text-sm"
             data-testid="admin-import-link"
           >
-            <Download size={16} /> Google Places Bulk Import
+            <Download size={16} /> Restaurant Bulk Import
           </Link>
         </div>
         <MetricsTiles metrics={metrics} loading={loading} />

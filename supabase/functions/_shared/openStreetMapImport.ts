@@ -7,6 +7,8 @@ import {
   sanitizeImportString,
   type ImportParams,
 } from "./googlePlacesImport.ts";
+import { parseOsmOpeningHours } from "./osmOpeningHours.ts";
+import { resolveOsmPhotoUrl } from "./osmPhoto.ts";
 
 type OsmTags = Record<string, string>;
 
@@ -177,9 +179,13 @@ function mapElementToRow(
   const cuisineTag = sanitizeImportString(tags.cuisine, 120);
   const primaryCategory = cuisineTag || amenity || "restaurant";
   const cuisine = cuisineTag || amenity || "Restaurant";
+  const photoUrl = resolveOsmPhotoUrl(tags) || RESTAURANT_PLACEHOLDER_IMAGE;
+  const hoursRaw = tags.opening_hours || tags["opening_hours:covid19"] || "";
+  const openingHours = hoursRaw ? parseOsmOpeningHours(hoursRaw) : null;
 
   return {
     osm_place_id: osmPlaceId(el),
+    import_source: "osm",
     name,
     address: sanitizeImportString(buildOsmAddress(tags, city, state), 400),
     latitude: coords.lat,
@@ -188,8 +194,9 @@ function mapElementToRow(
     website: sanitizeImportString(tags.website || tags["contact:website"], 500),
     primary_category: sanitizeImportString(primaryCategory, 80),
     cuisine: sanitizeImportString(cuisine, 80),
-    image_url: RESTAURANT_PLACEHOLDER_IMAGE,
-    cover_url: RESTAURANT_PLACEHOLDER_IMAGE,
+    opening_hours: openingHours,
+    image_url: photoUrl,
+    cover_url: photoUrl,
     description: `Imported from OpenStreetMap — ${primaryCategory} in ${city}, ${state}.`,
     state: sanitizeImportString(state, 80),
     delivery_enabled: false,
@@ -264,6 +271,10 @@ export async function runOpenStreetMapImport(db: SupabaseClient, params: ImportP
               website: row.website,
               primary_category: row.primary_category,
               cuisine: row.cuisine,
+              opening_hours: row.opening_hours,
+              image_url: row.image_url,
+              cover_url: row.cover_url,
+              import_source: "osm",
               updated_at: now,
             })
             .eq("restaurant_id", existing.restaurant_id);

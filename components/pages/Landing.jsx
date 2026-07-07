@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { safeGet } from "@/lib/api";
@@ -23,6 +23,8 @@ const HERO_IMG =
 export default function Landing() {
   const [restaurants, setRestaurants] = useState([]);
   const [q, setQ] = useState("");
+  const [cuisine, setCuisine] = useState("");
+  const [openNow, setOpenNow] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const { user } = useAuth();
@@ -31,7 +33,11 @@ export default function Landing() {
     (async () => {
       setLoading(true);
       try {
-        const data = await safeGet("/restaurants", [], { params: q ? { q } : {} });
+        const params = {};
+        if (q.trim()) params.q = q.trim();
+        if (cuisine) params.cuisine = cuisine;
+        if (openNow) params.open_now = "1";
+        const data = await safeGet("/restaurants", [], { params });
         setRestaurants(sanitizeRestaurants(data));
         setError(false);
       } catch (e) {
@@ -42,7 +48,20 @@ export default function Landing() {
         setLoading(false);
       }
     })();
-  }, [q]);
+  }, [q, cuisine, openNow]);
+
+  const cuisineChips = useMemo(() => {
+    const counts = new Map();
+    for (const r of restaurants) {
+      const c = (r.cuisine || "").trim();
+      if (!c) continue;
+      counts.set(c, (counts.get(c) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([name]) => name);
+  }, [restaurants]);
 
   return (
     <div>
@@ -62,8 +81,7 @@ export default function Landing() {
               <span style={{ color: "var(--primary)" }}>delivered fast.</span>
             </h1>
             <p className="mt-6 text-lg leading-relaxed max-w-xl" style={{ color: "var(--muted)" }}>
-              ZoomEats hand-picks the local kitchens you actually want to eat from. Order in
-              minutes — track every step from kitchen to door.
+              Discover local restaurants — order in minutes and track every step from kitchen to door.
             </p>
             <div className="mt-8 flex items-center gap-3 max-w-xl">
               <div className="flex-1 relative">
@@ -112,13 +130,35 @@ export default function Landing() {
       </section>
 
       <section className="max-w-7xl mx-auto px-6 md:px-12 pb-24">
-        <div className="flex items-end justify-between mb-8">
+        <div className="flex items-end justify-between mb-8 gap-4 flex-wrap">
           <div>
             <div className="label-eyebrow">Tonight&apos;s table</div>
             <h2 className="font-display text-3xl md:text-4xl font-bold tracking-tight mt-1">
               Restaurants we love
             </h2>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 mb-6">
+          <button
+            type="button"
+            className={`badge ${openNow ? "ring-2 ring-[var(--primary)]" : ""}`}
+            onClick={() => setOpenNow((v) => !v)}
+            data-testid="filter-open-now"
+          >
+            Open now
+          </button>
+          {cuisineChips.map((chip) => (
+            <button
+              key={chip}
+              type="button"
+              className={`badge ${cuisine === chip ? "ring-2 ring-[var(--primary)]" : ""}`}
+              onClick={() => setCuisine((current) => (current === chip ? "" : chip))}
+              data-testid={`filter-cuisine-${chip.toLowerCase().replace(/\s+/g, "-")}`}
+            >
+              {chip}
+            </button>
+          ))}
         </div>
 
         {loading && <LoadingSkeleton label="Loading restaurants…" rows={3} />}
@@ -164,7 +204,7 @@ export default function Landing() {
             ))}
             {restaurants.length === 0 && (
               <div className="col-span-full text-center py-12" style={{ color: "var(--muted)" }}>
-                No restaurants match. Try another search.
+                No restaurants match. Try another search or filter.
               </div>
             )}
           </div>
