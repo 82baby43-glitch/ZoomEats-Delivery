@@ -57,7 +57,12 @@ export function RestaurantsList({ restaurants, onApprove }) {
             <div className="w-16 h-16 rounded-xl" style={{ background: "var(--surface-2)" }} />
           )}
           <div className="flex-1">
-            <div className="font-bold">{r.name}</div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="font-bold">{r.name}</div>
+              {r.import_source && (
+                <span className="badge uppercase text-[10px]">{r.import_source}</span>
+              )}
+            </div>
             <div className="text-sm" style={{ color: "var(--muted)" }}>{r.cuisine || "—"} · {r.address || "—"}</div>
           </div>
           {r.approved ? (

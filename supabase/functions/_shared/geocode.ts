@@ -7,6 +7,14 @@ export type GeocodeResult = {
   source: "google" | "nominatim";
 };
 
+export type GeocodeProviderMode = "auto" | "google" | "nominatim";
+
+function getGeocodeProvider(): GeocodeProviderMode {
+  const raw = (Deno.env.get("GEOCODE_PROVIDER") || "auto").toLowerCase();
+  if (raw === "google" || raw === "nominatim") return raw;
+  return "auto";
+}
+
 function getGoogleApiKey(): string {
   return (
     Deno.env.get("GOOGLE_PLACES_API_KEY") ||
@@ -14,6 +22,10 @@ function getGoogleApiKey(): string {
     Deno.env.get("GOOGLE_API_KEY") ||
     ""
   );
+}
+
+function getNominatimBaseUrl(): string {
+  return (Deno.env.get("NOMINATIM_API_URL") || "https://nominatim.openstreetmap.org").replace(/\/$/, "");
 }
 
 function defaultRegion(): string {
@@ -51,7 +63,7 @@ async function geocodeWithGoogle(query: string, apiKey: string): Promise<Geocode
 }
 
 async function geocodeWithNominatim(query: string): Promise<GeocodeResult | null> {
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`;
+  const url = `${getNominatimBaseUrl()}/search?format=json&limit=1&q=${encodeURIComponent(query)}`;
   const res = await fetch(url, {
     headers: {
       "User-Agent": "ZoomEats/1.0 (launch-geocode)",
@@ -76,8 +88,24 @@ export async function geocodeAddress(
   const queries = buildQueries(address, opts.name);
   if (!queries.length) return null;
 
+  const provider = getGeocodeProvider();
   const googleKey = getGoogleApiKey();
+
   for (const query of queries) {
+    if (provider === "google") {
+      if (!googleKey) return null;
+      const hit = await geocodeWithGoogle(query, googleKey);
+      if (hit) return hit;
+      continue;
+    }
+
+    if (provider === "nominatim") {
+      const hit = await geocodeWithNominatim(query);
+      if (hit) return hit;
+      await new Promise((r) => setTimeout(r, 1000));
+      continue;
+    }
+
     if (googleKey) {
       const hit = await geocodeWithGoogle(query, googleKey);
       if (hit) return hit;

@@ -315,6 +315,7 @@ function mapPlaceToRow(
 
   return {
     google_place_id: googlePlaceId,
+    import_source: "google",
     name,
     address: sanitizeImportString(place.formattedAddress, 400),
     latitude: Number((place.location as { latitude?: number })?.latitude ?? 0),
