@@ -17,10 +17,12 @@ import {
 } from "../_shared/routing/uber-routing-ai.ts";
 import {
   getImportProgress,
+  hasGooglePlacesApiKey,
   newImportId,
   runGooglePlacesImport,
   sanitizeImportString,
 } from "../_shared/googlePlacesImport.ts";
+import { runOpenStreetMapImport } from "../_shared/openStreetMapImport.ts";
 import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
 import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
@@ -860,6 +862,8 @@ Deno.serve(async (req) => {
       const state = sanitizeImportString(body.state, 80);
       const radiusRaw = Number(body.radius ?? body.radius_meters ?? 15000);
       const limitRaw = Number(body.limit ?? 100);
+      const providerRaw = sanitizeImportString(body.provider, 20).toLowerCase() || "google";
+      const provider = providerRaw === "osm" ? "osm" : "google";
 
       if (!city || !state) return err("City and state are required");
       if (!Number.isFinite(radiusRaw) || radiusRaw < 500 || radiusRaw > 50000) {
@@ -867,6 +871,12 @@ Deno.serve(async (req) => {
       }
       if (!Number.isFinite(limitRaw) || limitRaw < 1 || limitRaw > 300) {
         return err("Limit must be between 1 and 300");
+      }
+      if (provider === "google" && !hasGooglePlacesApiKey()) {
+        return err(
+          "Google Places API key not configured. Set GOOGLE_PLACES_API_KEY in Supabase secrets, or use OpenStreetMap (free).",
+          400
+        );
       }
 
       const importId = newImportId();
@@ -877,6 +887,7 @@ Deno.serve(async (req) => {
         state,
         radius_meters: Math.round(radiusRaw),
         limit_requested: Math.round(limitRaw),
+        provider,
         status: "pending",
         progress_pct: 0,
       });
@@ -891,13 +902,18 @@ Deno.serve(async (req) => {
         userId: u.user_id as string,
       };
 
+      const runImport =
+        provider === "osm"
+          ? () => runOpenStreetMapImport(db, importParams)
+          : () => runGooglePlacesImport(db, importParams);
+
       try {
-        EdgeRuntime.waitUntil(runGooglePlacesImport(db, importParams));
+        EdgeRuntime.waitUntil(runImport());
       } catch {
-        await runGooglePlacesImport(db, importParams);
+        await runImport();
       }
 
-      return json({ import_id: importId, status: "started" });
+      return json({ import_id: importId, status: "started", provider });
     }
 
     if (path === "/" && method === "GET") {

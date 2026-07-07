@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Download, Loader2 } from "lucide-react";
+import { ArrowLeft, Download, Loader2, MapPin } from "lucide-react";
 import Header from "@/components/Header";
 import { Protected } from "@/components/Protected";
 import { api } from "@/lib/api";
@@ -19,6 +19,7 @@ const EMPTY_PROGRESS = {
 };
 
 export default function AdminImportRestaurants() {
+  const [provider, setProvider] = useState("osm");
   const [city, setCity] = useState("Columbia");
   const [state, setState] = useState("Missouri");
   const [radius, setRadius] = useState(15000);
@@ -80,6 +81,7 @@ export default function AdminImportRestaurants() {
 
     try {
       const r = await api.post("/admin/import-restaurants", {
+        provider,
         city: city.trim(),
         state: state.trim(),
         radius,
@@ -99,6 +101,7 @@ export default function AdminImportRestaurants() {
   };
 
   const pct = Math.min(100, Math.max(0, progress.progress_pct ?? 0));
+  const providerLabel = provider === "osm" ? "OpenStreetMap" : "Google Places";
 
   return (
     <Protected roles={["admin"]}>
@@ -108,12 +111,64 @@ export default function AdminImportRestaurants() {
           <ArrowLeft size={16} /> Back to Admin
         </Link>
 
-        <h1 className="font-display text-4xl font-black tracking-tighter">Google Places Bulk Import</h1>
+        <h1 className="font-display text-4xl font-black tracking-tighter">Restaurant Bulk Import</h1>
         <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>
-          Import restaurants for any US city. New imports are inactive until you approve them in Admin.
+          Import restaurants from Google Places or OpenStreetMap (free). New imports are inactive until you approve
+          them in Admin.
         </p>
 
         <div className="card p-6 mt-8 space-y-4">
+          <fieldset className="space-y-2">
+            <legend className="label-eyebrow">Import provider</legend>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <label
+                className={`card p-4 cursor-pointer flex items-start gap-3 ${provider === "google" ? "ring-2 ring-[var(--primary)]" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="import-provider"
+                  value="google"
+                  checked={provider === "google"}
+                  onChange={() => setProvider("google")}
+                  className="mt-1"
+                  data-testid="import-provider-google"
+                />
+                <span>
+                  <span className="font-bold block">Google Places</span>
+                  <span className="text-xs" style={{ color: "var(--muted)" }}>
+                    Requires API key &amp; Google Cloud billing
+                  </span>
+                </span>
+              </label>
+              <label
+                className={`card p-4 cursor-pointer flex items-start gap-3 ${provider === "osm" ? "ring-2 ring-[var(--primary)]" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="import-provider"
+                  value="osm"
+                  checked={provider === "osm"}
+                  onChange={() => setProvider("osm")}
+                  className="mt-1"
+                  data-testid="import-provider-osm"
+                />
+                <span>
+                  <span className="font-bold block">OpenStreetMap</span>
+                  <span className="text-xs" style={{ color: "var(--muted)" }}>
+                    Free — no billing required
+                  </span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+
+          {provider === "osm" && (
+            <p className="text-xs" style={{ color: "var(--muted)" }}>
+              OpenStreetMap is free and does not require Google billing. Data may be less complete than Google (fewer
+              photos/ratings).
+            </p>
+          )}
+
           <div className="grid md:grid-cols-2 gap-4">
             <label className="block">
               <span className="label-eyebrow">City</span>
@@ -168,8 +223,14 @@ export default function AdminImportRestaurants() {
             disabled={importing || !city.trim() || !state.trim()}
             data-testid="import-start"
           >
-            {importing ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-            Import from Google Places
+            {importing ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : provider === "osm" ? (
+              <MapPin size={18} />
+            ) : (
+              <Download size={18} />
+            )}
+            Import from {providerLabel}
           </button>
         </div>
 
