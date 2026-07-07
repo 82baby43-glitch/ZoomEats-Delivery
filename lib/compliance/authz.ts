@@ -25,6 +25,13 @@ export type ComplianceRecord = {
   suspended_at?: string | null;
   documents_complete?: boolean;
   approved?: boolean;
+  stripe_connect_complete?: boolean;
+};
+
+export type OnboardingRecord = {
+  current_step?: number;
+  status?: string;
+  stripe_connect_complete?: boolean;
 };
 
 export type ComplianceStatus = {
@@ -35,6 +42,9 @@ export type ComplianceStatus = {
   active: boolean;
   suspended: boolean;
   documents_complete: boolean;
+  stripe_connect_complete: boolean;
+  onboarding_complete: boolean;
+  onboarding_step: number;
   can_access_dashboard: boolean;
   redirect_to: string | null;
   message: string | null;
@@ -43,11 +53,14 @@ export type ComplianceStatus = {
   entity_id: string | null;
 };
 
+const ONBOARDING_DONE_STATUSES = new Set(["pending_review", "approved", "needs_changes", "rejected", "submitted"]);
+
 export function computeComplianceStatus(opts: {
   role: string;
   user?: ComplianceRecord | null;
   driver?: ComplianceRecord | null;
   restaurant?: ComplianceRecord | null;
+  restaurantOnboarding?: OnboardingRecord | null;
   acceptedTypes?: string[];
 }): ComplianceStatus {
   const role = normalizeRole(opts.role);
@@ -62,6 +75,9 @@ export function computeComplianceStatus(opts: {
     active: true,
     suspended: false,
     documents_complete: true,
+    stripe_connect_complete: true,
+    onboarding_complete: true,
+    onboarding_step: 1,
     can_access_dashboard: true,
     redirect_to: null,
     message: null,
@@ -96,15 +112,26 @@ export function computeComplianceStatus(opts: {
       missing_agreements: missing,
       entity_type: "driver",
       dashboardPath: "/driver/dashboard",
+      onboardingPath: "/driver/onboarding",
+      onboarding_complete: true,
+      onboarding_step: 1,
     });
   }
 
   if (role === "vendor") {
     const restaurant = opts.restaurant;
-    const approval = restaurant?.approval_status || (restaurant?.approved ? "approved" : "pending") || "pending";
-    const agreementComplete = restaurant?.agreement_complete ?? false;
+    const onboarding = opts.restaurantOnboarding;
+    const approval = restaurant?.approval_status || (restaurant?.approved ? "approved" : "pending") || opts.user?.approval_status || "pending";
+    const agreementComplete = restaurant?.agreement_complete ?? opts.user?.agreement_complete ?? false;
     const active = restaurant?.active ?? true;
     const suspended = Boolean(restaurant?.suspended_at) || approval === "suspended";
+    const docsComplete = restaurant?.documents_complete ?? false;
+    const stripeComplete = restaurant?.stripe_connect_complete ?? onboarding?.stripe_connect_complete ?? false;
+    const onboardingStatus = onboarding?.status || "incomplete";
+    const onboardingComplete =
+      ONBOARDING_DONE_STATUSES.has(onboardingStatus) ||
+      Boolean(restaurant?.approved && approval === "approved" && !onboarding);
+    const onboardingStep = onboarding?.current_step ?? 1;
 
     return resolveGate({
       ...base,
@@ -112,10 +139,14 @@ export function computeComplianceStatus(opts: {
       agreement_complete: agreementComplete && missing.length === 0,
       active,
       suspended,
-      documents_complete: true,
+      documents_complete: docsComplete,
+      stripe_connect_complete: stripeComplete,
+      onboarding_complete: onboardingComplete,
+      onboarding_step: onboardingStep,
       missing_agreements: missing,
       entity_type: "restaurant",
       dashboardPath: "/restaurant/dashboard",
+      onboardingPath: "/restaurant/onboarding",
     });
   }
 
@@ -123,7 +154,7 @@ export function computeComplianceStatus(opts: {
 }
 
 function resolveGate(
-  s: ComplianceStatus & { dashboardPath: string }
+  s: ComplianceStatus & { dashboardPath: string; onboardingPath?: string }
 ): ComplianceStatus {
   if (s.suspended || s.approval_status === "suspended") {
     return {
@@ -133,14 +164,34 @@ function resolveGate(
       message: "Account suspended",
     };
   }
+
+  if (!s.onboarding_complete && s.onboardingPath) {
+    return {
+      ...s,
+      can_access_dashboard: false,
+      redirect_to: s.onboardingPath,
+      message: "Complete restaurant onboarding",
+    };
+  }
+
   if (!s.agreement_complete || s.missing_agreements.length > 0) {
     return {
       ...s,
       can_access_dashboard: false,
-      redirect_to: "/agreements",
+      redirect_to: s.onboardingPath || "/agreements",
       message: "Agreement required",
     };
   }
+
+  if (!s.stripe_connect_complete && s.role === "vendor") {
+    return {
+      ...s,
+      can_access_dashboard: false,
+      redirect_to: s.onboardingPath || "/restaurant/onboarding",
+      message: "Payout setup required",
+    };
+  }
+
   if (["pending", "documents_missing", "verification", "review"].includes(s.approval_status)) {
     return {
       ...s,
@@ -149,6 +200,7 @@ function resolveGate(
       message: "Approval pending",
     };
   }
+
   if (s.approval_status === "rejected") {
     return {
       ...s,
@@ -157,6 +209,7 @@ function resolveGate(
       message: "Account not approved",
     };
   }
+
   if (!s.active) {
     return {
       ...s,
@@ -165,6 +218,7 @@ function resolveGate(
       message: "Account inactive",
     };
   }
+
   return { ...s, can_access_dashboard: true, redirect_to: null, message: null };
 }
 

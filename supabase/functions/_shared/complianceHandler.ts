@@ -7,6 +7,7 @@ import {
 } from "./complianceAgreements.ts";
 import { computeComplianceStatus, normalizeRole, VALID_ROLES } from "./complianceAuthz.ts";
 import { encryptTaxPayload, maskTaxId } from "./taxCrypto.ts";
+import { getStripeApiKey } from "./stripeEnv.ts";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -127,20 +128,19 @@ async function loadComplianceContext(db: SupabaseClient, user: Record<string, un
 
   let driver = null;
   let restaurant = null;
+  let restaurantOnboarding = null;
 
   if (role === "delivery") {
     const { data } = await db.from("drivers").select("*").eq("user_id", userId).maybeSingle();
     driver = data;
   }
   if (role === "vendor") {
-    const { data } = await db
-      .from("restaurants")
-      .select("*")
-      .eq("owner_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    restaurant = data;
+    const [{ data: rest }, { data: onboarding }] = await Promise.all([
+      db.from("restaurants").select("*").eq("owner_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      db.from("restaurant_onboarding").select("*").eq("user_id", userId).maybeSingle(),
+    ]);
+    restaurant = rest;
+    restaurantOnboarding = onboarding;
   }
 
   return computeComplianceStatus({
@@ -148,6 +148,7 @@ async function loadComplianceContext(db: SupabaseClient, user: Record<string, un
     user: user as never,
     driver,
     restaurant,
+    restaurantOnboarding,
     acceptedTypes,
   });
 }
@@ -606,9 +607,13 @@ export async function handleComplianceRequest(
     const entityType = String(body.entity_type || "driver");
     const table = entityType === "restaurant" ? "restaurant_documents" : "driver_documents";
     const expiresAt = body.expires_at || null;
+    const { data: doc } = await db.from(table).select("*").eq("document_id", documentId).maybeSingle();
     await db.from(table).update({ status: "pending_review", expires_at: expiresAt }).eq("document_id", documentId);
     if (entityType === "driver") {
       await db.from("drivers").update({ documents_complete: false }).eq("user_id", u.user_id);
+    }
+    if (entityType === "restaurant" && doc?.restaurant_id) {
+      await syncRestaurantDocumentsComplete(db, String(doc.restaurant_id));
     }
     return { ok: true, document_id: documentId };
   }
@@ -669,11 +674,277 @@ export async function handleComplianceRequest(
     return { ok: true, masked_id: maskTaxId(ssnOrEin) };
   }
 
+  // ---- Restaurant onboarding ----
+  if (path === "/onboarding/restaurant" && method === "GET") {
+    const u = requireRole("vendor", "restaurant");
+    const { data } = await db.from("restaurant_onboarding").select("*").eq("user_id", u.user_id).maybeSingle();
+    const { data: rest } = await db.from("restaurants").select("*").eq("owner_id", u.user_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    return {
+      ...(data || { user_id: u.user_id, current_step: 1, status: "incomplete" }),
+      restaurant: rest,
+      user_email: u.email,
+    };
+  }
+
+  if (path === "/onboarding/restaurant" && method === "POST") {
+    const u = requireRole("vendor", "restaurant");
+    const step = Number(body.step || 1);
+    const allowed = [
+      "business_name", "owner_name", "owner_email", "business_address", "phone", "hours",
+      "cuisine", "description", "logo_url", "photos", "sales_tax_id", "ein", "menu_draft", "status",
+    ];
+    const payload: Record<string, unknown> = {
+      user_id: u.user_id,
+      current_step: step,
+      updated_at: new Date().toISOString(),
+    };
+    for (const k of allowed) {
+      if (body[k] !== undefined) payload[k] = body[k];
+    }
+
+    const restaurantId = await upsertRestaurantFromOnboarding(db, u, body);
+    if (restaurantId) payload.restaurant_id = restaurantId;
+
+    if (step >= 7 && body.finalize) {
+      payload.status = "pending_review";
+      payload.completed_at = new Date().toISOString();
+      const { data: existingReview } = await db.from("compliance_reviews").select("review_id").eq("user_id", u.user_id).in("status", ["pending"]).maybeSingle();
+      if (existingReview?.review_id) {
+        await db.from("compliance_reviews").update({
+          approval_status: "verification",
+          status: "pending",
+          updated_at: new Date().toISOString(),
+        }).eq("review_id", existingReview.review_id);
+      } else {
+        await db.from("compliance_reviews").insert({
+          review_id: uid("rev"),
+          user_id: u.user_id,
+          entity_type: "restaurant",
+          entity_id: restaurantId || String(u.user_id),
+          status: "pending",
+          approval_status: "verification",
+        });
+      }
+      await db.from("users").update({ approval_status: "verification" }).eq("user_id", u.user_id);
+      if (restaurantId) {
+        await db.from("restaurants").update({ approval_status: "verification" }).eq("restaurant_id", restaurantId);
+      }
+    }
+
+    const { data } = await db.from("restaurant_onboarding").upsert(payload, { onConflict: "user_id" }).select().single();
+    if (restaurantId) await syncRestaurantDocumentsComplete(db, restaurantId);
+    return data;
+  }
+
+  if (path === "/onboarding/restaurant/tax" && method === "POST") {
+    const u = requireRole("vendor", "restaurant");
+    const taxId = uid("tax");
+    const ssnOrEin = String(body.tax_id || body.ein || "");
+    const encrypted = encryptTaxPayload(JSON.stringify({ tax_id: ssnOrEin, ein: body.ein, sales_tax_id: body.sales_tax_id }));
+    await db.from("tax_information").upsert({
+      tax_id: taxId,
+      user_id: u.user_id,
+      entity_type: "vendor",
+      legal_name: String(body.legal_name || body.business_name || ""),
+      business_name: body.business_name || null,
+      tax_classification: String(body.tax_classification || "business"),
+      address_line1: body.address_line1 || body.business_address || null,
+      city: body.city || null,
+      state: body.state || null,
+      zip: body.zip || null,
+      encrypted_payload: encrypted,
+      last_four: ssnOrEin.replace(/\D/g, "").slice(-4),
+      w9_signed_at: new Date().toISOString(),
+      w9_signature: body.signature || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+
+    await db.from("restaurant_onboarding").upsert({
+      user_id: u.user_id,
+      sales_tax_id: body.sales_tax_id || null,
+      ein: body.ein || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+
+    return { ok: true, masked_id: maskTaxId(ssnOrEin) };
+  }
+
+  if (path === "/onboarding/restaurant/stripe-connect" && method === "POST") {
+    const u = requireRole("vendor", "restaurant");
+    const stripeKey = getStripeApiKey();
+    if (!stripeKey) throwErr("Stripe not configured", 503);
+
+    const { data: onboarding } = await db.from("restaurant_onboarding").select("*").eq("user_id", u.user_id).maybeSingle();
+    let accountId = onboarding?.stripe_connect_id as string | undefined;
+
+    if (!accountId) {
+      const params = new URLSearchParams({
+        type: "express",
+        country: "US",
+        email: String(u.email || ""),
+        "capabilities[card_payments][requested]": "true",
+        "capabilities[transfers][requested]": "true",
+      });
+      const acctRes = await fetch("https://api.stripe.com/v1/accounts", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${stripeKey}`, "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      });
+      const acct = await acctRes.json();
+      if (!acctRes.ok) throwErr(acct.error?.message || "Stripe account creation failed", 502);
+      accountId = acct.id;
+      await db.from("restaurant_onboarding").upsert({
+        user_id: u.user_id,
+        stripe_connect_id: accountId,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+      if (rest?.restaurant_id) {
+        await db.from("restaurants").update({ stripe_connect_id: accountId }).eq("restaurant_id", rest.restaurant_id);
+      }
+    }
+
+    const appUrl = String(body.return_url || process.env.NEXT_PUBLIC_APP_URL || "https://zoom-eats-delivery.vercel.app");
+    const linkParams = new URLSearchParams({
+      account: accountId!,
+      refresh_url: `${appUrl}/restaurant/onboarding?step=6`,
+      return_url: `${appUrl}/restaurant/onboarding?step=6&stripe=return`,
+      type: "account_onboarding",
+    });
+    const linkRes = await fetch("https://api.stripe.com/v1/account_links", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${stripeKey}`, "Content-Type": "application/x-www-form-urlencoded" },
+      body: linkParams.toString(),
+    });
+    const link = await linkRes.json();
+    if (!linkRes.ok) throwErr(link.error?.message || "Stripe link failed", 502);
+    return { url: link.url, account_id: accountId };
+  }
+
+  if (path === "/onboarding/restaurant/stripe-connect/status" && method === "GET") {
+    const u = requireRole("vendor", "restaurant");
+    const stripeKey = getStripeApiKey();
+    const { data: onboarding } = await db.from("restaurant_onboarding").select("*").eq("user_id", u.user_id).maybeSingle();
+    const accountId = onboarding?.stripe_connect_id;
+    if (!accountId || !stripeKey) {
+      return { complete: false, account_id: accountId || null };
+    }
+    const acctRes = await fetch(`https://api.stripe.com/v1/accounts/${accountId}`, {
+      headers: { Authorization: `Bearer ${stripeKey}` },
+    });
+    const acct = await acctRes.json();
+    const complete = Boolean(acct.charges_enabled && acct.payouts_enabled);
+    if (complete) {
+      await db.from("restaurant_onboarding").update({
+        stripe_connect_complete: true,
+        updated_at: new Date().toISOString(),
+      }).eq("user_id", u.user_id);
+      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+      if (rest?.restaurant_id) {
+        await db.from("restaurants").update({ stripe_connect_complete: true }).eq("restaurant_id", rest.restaurant_id);
+      }
+    }
+    return { complete, account_id: accountId, charges_enabled: acct.charges_enabled, payouts_enabled: acct.payouts_enabled };
+  }
+
+  if (path === "/onboarding/restaurant/menu-enhance" && method === "POST") {
+    const u = requireRole("vendor", "restaurant");
+    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+    if (!rest) throwErr("Create your restaurant profile first");
+
+    const enhancementId = uid("enh");
+    const originalPath = String(body.original_path || "");
+    const enhancedPath = String(body.enhanced_path || "");
+    const approved = Boolean(body.approved);
+
+    await db.from("menu_photo_enhancements").insert({
+      enhancement_id: enhancementId,
+      restaurant_id: rest.restaurant_id,
+      user_id: u.user_id,
+      original_path: originalPath,
+      enhanced_path: enhancedPath || null,
+      status: enhancedPath ? "enhanced" : "pending",
+      approved,
+    });
+
+    if (approved && body.menu_item) {
+      const item = body.menu_item as Record<string, unknown>;
+      await db.from("menu_items").insert({
+        item_id: uid("item"),
+        restaurant_id: rest.restaurant_id,
+        name: item.name || "Menu item",
+        description: item.description || "",
+        price: item.price || 0,
+        image_url: item.image_url || enhancedPath,
+        category: item.category || "Mains",
+        available: true,
+      });
+    }
+
+    const menuDraft = Array.isArray(body.menu_draft) ? body.menu_draft : [];
+    if (menuDraft.length) {
+      await db.from("restaurant_onboarding").upsert({
+        user_id: u.user_id,
+        menu_draft: menuDraft,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+    }
+
+    return { enhancement_id: enhancementId, approved };
+  }
+
   if (path.startsWith("/uploads") && method === "GET") {
     return { message: "Use POST /uploads/presign" };
   }
 
   return null;
+}
+
+async function upsertRestaurantFromOnboarding(
+  db: SupabaseClient,
+  user: Record<string, unknown>,
+  body: Record<string, unknown>
+): Promise<string | null> {
+  const userId = String(user.user_id);
+  const { data: existing } = await db.from("restaurants").select("restaurant_id").eq("owner_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+
+  const restData: Record<string, unknown> = {
+    name: body.business_name || body.name || "My Restaurant",
+    description: body.description || "",
+    cuisine: body.cuisine || "",
+    address: body.business_address || body.address || "",
+    image_url: body.logo_url || "",
+    cover_url: body.logo_url || "",
+    approval_status: "pending",
+    approved: false,
+    active: false,
+  };
+
+  if (existing?.restaurant_id) {
+    await db.from("restaurants").update(restData).eq("restaurant_id", existing.restaurant_id);
+    return existing.restaurant_id;
+  }
+
+  const restaurantId = uid("rest");
+  await db.from("restaurants").insert({
+    restaurant_id: restaurantId,
+    owner_id: userId,
+    rating: 4.5,
+    delivery_time_min: 30,
+    ...restData,
+  });
+  return restaurantId;
+}
+
+async function syncRestaurantDocumentsComplete(db: SupabaseClient, restaurantId: string) {
+  const required = ["business_license", "health_permit"];
+  const { data: docs } = await db.from("restaurant_documents").select("document_type, status").eq("restaurant_id", restaurantId);
+  const uploaded = new Set(
+    (docs || []).filter((d) => ["pending_review", "approved"].includes(String(d.status))).map((d) => d.document_type as string)
+  );
+  const complete = required.every((t) => uploaded.has(t));
+  await db.from("restaurants").update({ documents_complete: complete }).eq("restaurant_id", restaurantId);
+  return complete;
 }
 
 async function syncAgreementComplete(db: SupabaseClient, user: Record<string, unknown>, role: string) {

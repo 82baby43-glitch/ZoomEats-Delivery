@@ -16,7 +16,7 @@ function clientMeta() {
   };
 }
 
-export default function RoleAgreementCenter({ roleLabel }) {
+export default function RoleAgreementCenter({ roleLabel, onComplete = null, stayOnComplete = false }) {
   const { user, refresh } = useAuth();
   const router = useRouter();
   const [agreements, setAgreements] = useState([]);
@@ -63,6 +63,10 @@ export default function RoleAgreementCenter({ roleLabel }) {
       }));
       await api.post("/agreements/batch-accept", { agreements: batch, ...meta });
       await refresh();
+      if (stayOnComplete && onComplete) {
+        onComplete();
+        return;
+      }
       const statusRes = await api.get("/auth/compliance-status");
       const status = statusRes?.data;
       if (status?.can_access_dashboard) {
