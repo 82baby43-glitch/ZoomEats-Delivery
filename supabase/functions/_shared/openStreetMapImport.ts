@@ -20,10 +20,18 @@ type OsmElement = {
 };
 
 const NOMINATIM_UA = "ZoomEats/1.0 (restaurant-import)";
-const DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+const OVERPASS_UA = NOMINATIM_UA;
+const DEFAULT_OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+];
 
-function getOverpassUrl(): string {
-  return Deno.env.get("OVERPASS_API_URL") || DEFAULT_OVERPASS_URL;
+function getOverpassEndpoints(): string[] {
+  const custom = Deno.env.get("OVERPASS_API_URL");
+  if (custom) {
+    return [custom, ...DEFAULT_OVERPASS_ENDPOINTS.filter((url) => url !== custom)];
+  }
+  return DEFAULT_OVERPASS_ENDPOINTS;
 }
 
 function sleep(ms: number) {
@@ -87,19 +95,30 @@ out center tags;`;
 }
 
 async function queryOverpass(lat: number, lng: number, radiusMeters: number): Promise<OsmElement[]> {
-  const overpassUrl = getOverpassUrl();
   const query = buildOverpassQuery(lat, lng, radiusMeters);
-  const res = await fetchWithRetry(
-    overpassUrl,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `data=${encodeURIComponent(query)}`,
-    },
-    "overpass"
-  );
-  const data = await res.json();
-  return (data.elements ?? []) as OsmElement[];
+  const body = `data=${encodeURIComponent(query)}`;
+  const headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "User-Agent": OVERPASS_UA,
+    Accept: "application/json, */*",
+  };
+
+  let lastError: Error | null = null;
+  for (const endpoint of getOverpassEndpoints()) {
+    try {
+      const res = await fetchWithRetry(
+        endpoint,
+        { method: "POST", headers, body },
+        "overpass"
+      );
+      const data = await res.json();
+      return (data.elements ?? []) as OsmElement[];
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error(String(e));
+    }
+  }
+
+  throw lastError ?? new Error("overpass: all endpoints failed");
 }
 
 function elementCoords(el: OsmElement): { lat: number; lng: number } | null {
