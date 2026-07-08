@@ -134,9 +134,30 @@ export default function ComplianceDossier({ userId, onClose, onAction }) {
             {data.onboarding && (
               <section className="mt-6">
                 <h3 className="font-bold">Onboarding Progress</h3>
-                <pre className="mt-2 text-xs p-3 rounded-lg overflow-x-auto" style={{ background: "var(--surface-2)" }}>
-                  {JSON.stringify(data.onboarding, null, 2)}
-                </pre>
+                <div className="mt-2 text-sm p-3 rounded-lg space-y-1" style={{ background: "var(--surface-2)" }}>
+                  <p>Step: {data.onboarding.current_step || "—"} / 4</p>
+                  <p>Status: {data.onboarding.status || data.onboarding.approval_status || "—"}</p>
+                  {data.onboarding.stripe_connect_complete !== undefined && (
+                    <p>Stripe Connect: {data.onboarding.stripe_connect_complete ? "✓ Complete" : "Pending"}</p>
+                  )}
+                  {Array.isArray(data.onboarding.completed_steps) && (
+                    <p>Completed: {data.onboarding.completed_steps.join(", ") || "None"}</p>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {(data.signatures || []).filter((s) => s.metadata?.document_kind === "signed_pdf").length > 0 && (
+              <section className="mt-6">
+                <h3 className="font-bold">Signed PDF Archive</h3>
+                <div className="mt-2 space-y-2">
+                  {data.documents?.driver?.filter((d) => d.status === "signed").map((d) => (
+                    <DocRow key={d.document_id} doc={d} onView={() => viewDoc(d.document_id, "driver")} />
+                  ))}
+                  {data.documents?.restaurant?.filter((d) => d.status === "signed").map((d) => (
+                    <DocRow key={d.document_id} doc={d} onView={() => viewDoc(d.document_id, "restaurant")} />
+                  ))}
+                </div>
               </section>
             )}
           </>

@@ -1,4 +1,4 @@
-import { requiredAgreementTypes } from "./complianceAgreements.ts";
+import { requiredAgreementTypes } from "./agreements";
 
 export const ROLE_ALIASES: Record<string, string> = {
   driver: "delivery",
@@ -27,6 +27,15 @@ export type ComplianceRecord = {
   approved?: boolean;
 };
 
+export type OnboardingProgressRecord = {
+  completed_steps?: unknown[];
+  current_step?: number;
+  stripe_connect_complete?: boolean;
+  documents_complete?: boolean;
+  agreements_complete?: boolean;
+  approval_status?: string;
+};
+
 export type ComplianceStatus = {
   authenticated: boolean;
   role: string;
@@ -35,6 +44,9 @@ export type ComplianceStatus = {
   active: boolean;
   suspended: boolean;
   documents_complete: boolean;
+  stripe_connect_complete: boolean;
+  onboarding_complete: boolean;
+  onboarding_step: number;
   can_access_dashboard: boolean;
   redirect_to: string | null;
   message: string | null;
@@ -49,10 +61,22 @@ export function computeComplianceStatus(opts: {
   driver?: ComplianceRecord | null;
   restaurant?: ComplianceRecord | null;
   acceptedTypes?: string[];
+  onboarding?: OnboardingProgressRecord | null;
+  driverOnboarding?: { stripe_connect_complete?: boolean; bank_verified?: boolean } | null;
+  restaurantOnboarding?: { stripe_connect_complete?: boolean; bank_verified?: boolean } | null;
 }): ComplianceStatus {
   const role = normalizeRole(opts.role);
   const accepted = new Set(opts.acceptedTypes || []);
   const missing = requiredAgreementTypes(role).filter((t) => !accepted.has(t));
+  const onboarding = opts.onboarding;
+  const stripeComplete = onboarding?.stripe_connect_complete
+    ?? opts.driverOnboarding?.stripe_connect_complete
+    ?? opts.restaurantOnboarding?.stripe_connect_complete
+    ?? false;
+  const docsComplete = onboarding?.documents_complete ?? false;
+  const onboardingStep = onboarding?.current_step ?? 1;
+  const completedSteps = Array.isArray(onboarding?.completed_steps) ? onboarding.completed_steps.length : 0;
+  const onboardingComplete = completedSteps >= 4 && docsComplete && stripeComplete && missing.length === 0;
 
   const base: ComplianceStatus = {
     authenticated: true,
@@ -62,6 +86,9 @@ export function computeComplianceStatus(opts: {
     active: true,
     suspended: false,
     documents_complete: true,
+    stripe_connect_complete: true,
+    onboarding_complete: true,
+    onboarding_step: 4,
     can_access_dashboard: true,
     redirect_to: null,
     message: null,
@@ -81,41 +108,49 @@ export function computeComplianceStatus(opts: {
   if (role === "delivery") {
     const driver = opts.driver;
     const approval = driver?.approval_status || opts.user?.approval_status || "pending";
-    const agreementComplete = driver?.agreement_complete ?? opts.user?.agreement_complete ?? false;
+    const agreementComplete = (driver?.agreement_complete ?? opts.user?.agreement_complete ?? false) && missing.length === 0;
     const active = driver?.active ?? opts.user?.active ?? true;
     const suspended = Boolean(driver?.suspended_at || opts.user?.suspended_at) || approval === "suspended";
-    const docsComplete = driver?.documents_complete ?? false;
+    const driverDocsComplete = driver?.documents_complete ?? docsComplete;
 
     return resolveGate({
       ...base,
       approval_status: approval,
-      agreement_complete: agreementComplete && missing.length === 0,
+      agreement_complete: agreementComplete,
       active,
       suspended,
-      documents_complete: docsComplete,
+      documents_complete: driverDocsComplete,
+      stripe_connect_complete: stripeComplete,
+      onboarding_complete: onboardingComplete,
+      onboarding_step: onboardingStep,
       missing_agreements: missing,
       entity_type: "driver",
       dashboardPath: "/driver/dashboard",
+      onboardingPath: "/driver/onboarding",
     });
   }
 
   if (role === "vendor") {
     const restaurant = opts.restaurant;
     const approval = restaurant?.approval_status || (restaurant?.approved ? "approved" : "pending") || "pending";
-    const agreementComplete = restaurant?.agreement_complete ?? false;
+    const agreementComplete = (restaurant?.agreement_complete ?? false) && missing.length === 0;
     const active = restaurant?.active ?? true;
     const suspended = Boolean(restaurant?.suspended_at) || approval === "suspended";
 
     return resolveGate({
       ...base,
       approval_status: approval,
-      agreement_complete: agreementComplete && missing.length === 0,
+      agreement_complete: agreementComplete,
       active,
       suspended,
-      documents_complete: true,
+      documents_complete: docsComplete,
+      stripe_connect_complete: stripeComplete,
+      onboarding_complete: onboardingComplete,
+      onboarding_step: onboardingStep,
       missing_agreements: missing,
       entity_type: "restaurant",
       dashboardPath: "/restaurant/dashboard",
+      onboardingPath: "/restaurant/onboarding",
     });
   }
 
@@ -123,7 +158,7 @@ export function computeComplianceStatus(opts: {
 }
 
 function resolveGate(
-  s: ComplianceStatus & { dashboardPath: string }
+  s: ComplianceStatus & { dashboardPath: string; onboardingPath: string }
 ): ComplianceStatus {
   if (s.suspended || s.approval_status === "suspended") {
     return {
@@ -133,14 +168,25 @@ function resolveGate(
       message: "Account suspended",
     };
   }
+
+  if (!s.onboarding_complete || s.onboarding_step < 4 || !s.documents_complete || !s.stripe_connect_complete) {
+    return {
+      ...s,
+      can_access_dashboard: false,
+      redirect_to: s.onboardingPath,
+      message: "Complete onboarding to continue",
+    };
+  }
+
   if (!s.agreement_complete || s.missing_agreements.length > 0) {
     return {
       ...s,
       can_access_dashboard: false,
-      redirect_to: "/agreements",
-      message: "Agreement required",
+      redirect_to: `${s.onboardingPath}?step=4`,
+      message: "Legal agreements required",
     };
   }
+
   if (["pending", "documents_missing", "verification", "review"].includes(s.approval_status)) {
     return {
       ...s,
@@ -149,6 +195,7 @@ function resolveGate(
       message: "Approval pending",
     };
   }
+
   if (s.approval_status === "rejected") {
     return {
       ...s,
@@ -157,6 +204,7 @@ function resolveGate(
       message: "Account not approved",
     };
   }
+
   if (!s.active) {
     return {
       ...s,
@@ -165,6 +213,7 @@ function resolveGate(
       message: "Account inactive",
     };
   }
+
   return { ...s, can_access_dashboard: true, redirect_to: null, message: null };
 }
 
@@ -176,5 +225,7 @@ export const PROTECTED_ROUTE_ROLES: Record<string, string[]> = {
   "/admin": ["admin"],
   "/disclosure": ["delivery"],
   "/agreements": ["delivery", "vendor"],
+  "/driver/onboarding": ["delivery"],
+  "/restaurant/onboarding": ["vendor"],
   "/dispatcher": ["dispatcher", "admin"],
 };
