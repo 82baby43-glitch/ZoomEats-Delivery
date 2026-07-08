@@ -1,4 +1,4 @@
-import { requiredAgreementTypes } from "./agreements";
+import { requiredAgreementTypes } from "./complianceAgreements.ts";
 
 export const ROLE_ALIASES: Record<string, string> = {
   driver: "delivery",
