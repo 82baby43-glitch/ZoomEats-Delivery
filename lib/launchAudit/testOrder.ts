@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AuditCheck } from "./types";
 import { evaluateRestaurantReadiness } from "../restaurant/readiness";
+import { findSimulationRestaurant } from "../restaurant/stripeConnect";
+import { resolveSimulationCustomerId } from "./simulationCustomer";
 import { getSupabasePublicUrl } from "../supabaseEnv";
 
 function mk(
@@ -28,24 +30,12 @@ export async function runFullDeliverySimulation(db: SupabaseClient): Promise<Ful
   const checks: AuditCheck[] = [];
   const prefix = "sim";
 
-  const { data: candidates } = await db
-    .from("restaurants")
-    .select("restaurant_id,name,latitude,longitude,approved,accepting_orders")
-    .eq("approved", true)
-    .not("latitude", "is", null)
-    .not("longitude", "is", null)
-    .limit(20);
-
-  const sampleRest = (candidates || []).find((r) => {
-    const lat = Number(r.latitude);
-    const lng = Number(r.longitude);
-    return lat && lng;
-  });
+  const sampleRest = await findSimulationRestaurant(db);
 
   if (!sampleRest) {
     const { data: anyApproved } = await db.from("restaurants").select("*").eq("approved", true).limit(1).maybeSingle();
     if (anyApproved) {
-      checks.push(mk(`${prefix}_coords`, "Restaurant coordinates", "fail", "critical", "No approved restaurant with valid coordinates"));
+      checks.push(mk(`${prefix}_coords`, "Restaurant coordinates + menu", "fail", "critical", "No approved restaurant with valid coordinates and available menu items"));
       return finish(simulationId, checks, false);
     }
     checks.push(mk(`${prefix}_restaurant`, "Approved restaurant", "fail", "critical", "No approved restaurant"));
@@ -53,12 +43,19 @@ export async function runFullDeliverySimulation(db: SupabaseClient): Promise<Ful
   }
 
   const readiness = await evaluateRestaurantReadiness(db, sampleRest.restaurant_id);
-  if (!readiness?.can_go_live) {
-    checks.push(mk(`${prefix}_readiness`, "Restaurant launch readiness", "fail", "critical", readiness?.blockers.join("; ") || "Not launch-ready"));
+  const operationalReady = readiness?.has_coordinates && (readiness?.menu_item_count ?? 0) > 0;
+  if (!operationalReady) {
+    checks.push(mk(`${prefix}_readiness`, "Restaurant operational readiness", "fail", "critical", readiness?.blockers.join("; ") || "Missing coordinates or menu"));
     return finish(simulationId, checks, false);
   }
-  checks.push(mk(`${prefix}_readiness`, "Restaurant launch readiness", "pass", "low", `${sampleRest.name} ready`));
-  checks.push(mk(`${prefix}_stripe`, "Stripe payout readiness", readiness.stripe_payout_ready ? "pass" : "warn", "medium", readiness.stripe_payout_ready ? "Payout account ready" : "Stripe payout not verified"));
+  checks.push(mk(`${prefix}_readiness`, "Restaurant operational readiness", "pass", "low", `${sampleRest.name} has coordinates and menu`));
+  checks.push(mk(
+    `${prefix}_stripe`,
+    "Stripe payout readiness",
+    readiness?.stripe_payout_ready ? "pass" : "warn",
+    "medium",
+    readiness?.stripe_payout_ready ? "Payout account ready" : (readiness?.blockers.filter((b) => b.includes("Stripe")).join("; ") || "Stripe payout pending — does not block simulation")
+  ));
 
   const { data: menuItem } = await db
     .from("menu_items")
@@ -80,10 +77,11 @@ export async function runFullDeliverySimulation(db: SupabaseClient): Promise<Ful
   const deliveryFee = 2.99;
   const total = Math.round((subtotal + deliveryFee) * 100) / 100;
   const now = new Date().toISOString();
+  const customerId = await resolveSimulationCustomerId(db);
 
   const orderRow = {
     order_id: testOrderId,
-    customer_id: "launch_test_customer",
+    customer_id: customerId,
     customer_name: "Launch Simulation Customer",
     restaurant_id: sampleRest.restaurant_id,
     restaurant_name: sampleRest.name,
