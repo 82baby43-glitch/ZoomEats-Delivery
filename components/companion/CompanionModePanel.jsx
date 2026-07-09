@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Music, Headphones, Shield, Volume2 } from "lucide-react";
+import { Music, Headphones, Shield, Volume2, RefreshCw } from "lucide-react";
 import { useCompanionContext } from "./CompanionModeProvider";
 
 const PROVIDERS = [
@@ -11,8 +11,18 @@ const PROVIDERS = [
 ];
 
 export default function CompanionModePanel({ role = "driver" }) {
-  const { settings, loading, providers, connectProvider, confirmConnection, disconnect, updateSettings } = useCompanionContext();
-  const [connecting, setConnecting] = useState<string | null>(null);
+  const {
+    settings,
+    loading,
+    error,
+    providers,
+    reload,
+    connectProvider,
+    confirmConnection,
+    disconnect,
+    updateSettings,
+  } = useCompanionContext();
+  const [connecting, setConnecting] = useState(null);
 
   const prefs = settings?.audio_preferences || { musicVolume: 70, duckingEnabled: true, safetyMode: false };
 
@@ -31,12 +41,25 @@ export default function CompanionModePanel({ role = "driver" }) {
     }
   };
 
-  if (loading) {
+  if (loading && !settings) {
     return <div className="card p-6 text-center text-sm" style={{ color: "var(--muted)" }}>Loading Companion Mode…</div>;
   }
 
   return (
     <div className="space-y-6" data-testid="companion-mode-panel">
+      {error && (
+        <div
+          className="card p-4 flex flex-wrap items-center justify-between gap-3"
+          style={{ borderColor: "rgba(251,191,36,0.4)", background: "rgba(251,191,36,0.08)" }}
+        >
+          <p className="text-sm text-amber-200">{error}</p>
+          <button type="button" className="btn-secondary text-sm" onClick={reload}>
+            <RefreshCw size={14} className="inline mr-1" />
+            Retry
+          </button>
+        </div>
+      )}
+
       <div className="card p-5">
         <div className="flex items-center gap-2 mb-4">
           <Headphones size={18} style={{ color: "var(--accent)" }} />
@@ -68,6 +91,7 @@ export default function CompanionModePanel({ role = "driver" }) {
         {providers && (
           <p className="text-xs" style={{ color: "var(--muted)" }}>
             OAuth via official APIs only — credentials stay on your device, never stored on ZoomEats servers.
+            {providers.oauth_available?.spotify === false && " Spotify OAuth not configured on server."}
           </p>
         )}
       </div>

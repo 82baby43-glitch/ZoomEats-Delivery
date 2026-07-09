@@ -1,26 +1,49 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Music, Pause, Play, SkipForward, Volume2, ChevronDown, ChevronUp } from "lucide-react";
 import { useCompanionContext } from "./CompanionModeProvider";
 import { setBaseVolume } from "@/lib/companionMode/audioDucking";
+import {
+  startCompanionPlayback,
+  stopCompanionPlayback,
+  setCompanionPlaybackVolume,
+} from "@/lib/companionMode/playback";
 
 export default function FloatingMusicPlayer({ className = "" }) {
   const { settings, audio, updateSettings } = useCompanionContext();
   const [collapsed, setCollapsed] = useState(false);
   const [playing, setPlaying] = useState(true);
 
+  const prefs = settings?.audio_preferences;
+  const effectiveVolume = audio.volume;
+
+  useEffect(() => {
+    if (!settings || !playing) {
+      stopCompanionPlayback();
+      return;
+    }
+    let cancelled = false;
+    startCompanionPlayback(effectiveVolume).then((ok) => {
+      if (!ok && !cancelled) setPlaying(false);
+    });
+    return () => {
+      cancelled = true;
+      stopCompanionPlayback();
+    };
+  }, [settings, playing, effectiveVolume]);
+
   if (!settings) return null;
 
-  const prefs = settings.audio_preferences;
   const trackTitle = audio.ducked && audio.announcement ? "ZoomEats Alert" : "Companion Playlist";
   const trackArtist = settings.music_provider
     ? settings.music_provider.replace("_", " ")
-    : "Not connected";
+    : "ZoomEats Ambient";
 
   const onVolume = async (v) => {
     await updateSettings({ musicVolume: v });
     setBaseVolume(v, { ...prefs, musicVolume: v });
+    setCompanionPlaybackVolume(v);
   };
 
   return (
