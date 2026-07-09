@@ -117,7 +117,7 @@ export function calculateOrderPricingFromRules(
   const guaranteeRule = ruleByType(rules, "guaranteed_pay");
 
   // ---- Customer fees ----
-  let deliveryFee = applyBounds(num(deliveryRule?.value, 2.99), deliveryRule);
+  const deliveryFee = applyBounds(num(deliveryRule?.value, 2.99), deliveryRule);
   let serviceFee = 0;
   if (serviceRule?.percentage != null && serviceRule.percentage > 0) {
     serviceFee = roundMoney(subtotal * (serviceRule.percentage / 100));

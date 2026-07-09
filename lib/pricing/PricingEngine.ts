@@ -117,7 +117,7 @@ export function calculateOrderPricingFromRules(
   const guaranteeRule = ruleByType(rules, "guaranteed_pay");
 
   // ---- Customer fees ----
-  let deliveryFee = applyBounds(num(deliveryRule?.value, 2.99), deliveryRule);
+  const deliveryFee = applyBounds(num(deliveryRule?.value, 2.99), deliveryRule);
   let serviceFee = 0;
   if (serviceRule?.percentage != null && serviceRule.percentage > 0) {
     serviceFee = roundMoney(subtotal * (serviceRule.percentage / 100));
@@ -233,7 +233,6 @@ export function calculateOrderPricingFromRules(
   const subscriptionRevenue = num(conditions.subscriptionRevenue);
   // Driver cost excludes tip (tip is pass-through from customer)
   const driverCost = roundMoney(finalDriverPay - tipAmount);
-  const restaurantCost = Math.max(restaurantPayout, 0);
   const refundCost = refundAdj;
   const promotionCost = Math.max(discountAmount, 0) + Math.max(-promoAdj, 0);
 
