@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import type { AudioPreferences, CompanionSettings, MusicProvider } from "@/lib/companionMode/types";
 import { DEFAULT_AUDIO_PREFERENCES } from "@/lib/companionMode/types";
 import { setBaseVolume } from "@/lib/companionMode/audioDucking";
+import { getCompanionOAuthRedirectUri } from "@/lib/companionMode/redirectUri";
 
 const LOCAL_FALLBACK_SETTINGS: CompanionSettings = {
   id: "local_fallback",
@@ -92,7 +93,7 @@ export function useCompanionMode() {
     try {
       const r = await api.post("/companion/music/connect", {
         provider,
-        redirect_uri: redirectUri || `${window.location.origin}/companion/oauth/callback`,
+        redirect_uri: redirectUri || getCompanionOAuthRedirectUri(),
       });
       const payload = r?.data as {
         settings?: CompanionSettings;

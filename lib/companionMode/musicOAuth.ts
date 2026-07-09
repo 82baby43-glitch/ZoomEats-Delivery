@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabaseClient";
 import type { MusicProvider } from "./types";
+import { getCompanionOAuthRedirectUri } from "./redirectUri";
 
 const YOUTUBE_SCOPE = "https://www.googleapis.com/auth/youtube.readonly";
 
@@ -9,14 +10,11 @@ export const GOOGLE_OAUTH_TESTING_HELP = [
   "Your Google Cloud OAuth app is in Testing mode.",
   "Add your Gmail address under Test users in Google Cloud Console → APIs & Services → OAuth consent screen.",
   "Also add this redirect URI under Credentials → your OAuth client → Authorized redirect URIs:",
-  "https://zoom-eats-delivery.vercel.app/companion/oauth/callback",
+  getCompanionOAuthRedirectUri(),
   "Until Google verifies the app, use ZoomEats Ambient for music without sign-in.",
 ].join(" ");
 
-export function getCompanionOAuthRedirectUri() {
-  if (typeof window === "undefined") return "";
-  return `${window.location.origin}/companion/oauth/callback`;
-}
+export { getCompanionOAuthRedirectUri };
 
 export function buildClientMusicOAuthUrl(provider: MusicProvider, state: string): string | null {
   const redirectUri = getCompanionOAuthRedirectUri();
@@ -57,6 +55,9 @@ export function parseMusicOAuthError(params: URLSearchParams): string | null {
   if (!err) return null;
   if (err === "access_denied") {
     return `Google blocked sign-in (app is in Testing mode). Add your Gmail as a Test user in Google Cloud Console, or use ZoomEats Ambient below.`;
+  }
+  if (err === "redirect_uri_mismatch") {
+    return `Google redirect URI mismatch. In Google Cloud Console → Credentials, add this exact URI: ${getCompanionOAuthRedirectUri()}`;
   }
   const desc = params.get("error_description");
   return desc ? decodeURIComponent(desc.replace(/\+/g, " ")) : `Music sign-in failed (${err})`;

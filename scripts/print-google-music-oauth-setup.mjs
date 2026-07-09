@@ -4,8 +4,8 @@
  * Usage: node scripts/print-google-music-oauth-setup.mjs [email-to-whitelist]
  */
 const PROJECT_REF = "njrrhckegbfqhwkqkzvw";
-const PRODUCTION = "https://zoom-eats-delivery.vercel.app";
-const REDIRECT_URI = `${PRODUCTION}/companion/oauth/callback`;
+const CANONICAL_APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://zoom-eats-delivery.vercel.app";
+const REDIRECT_URI = `${CANONICAL_APP_URL.replace(/\/$/, "")}/companion/oauth/callback`;
 
 const testEmail = process.argv[2] || "your-email@gmail.com";
 
@@ -40,5 +40,6 @@ Companion Mode → YouTube Music (Google)
 Use "ZoomEats Ambient" on Companion Mode (no Google sign-in required).
 
 Supabase project: ${PROJECT_REF}
-Production URL: ${PRODUCTION}
+Production URL: ${CANONICAL_APP_URL}
+Required redirect URI (copy exactly): ${REDIRECT_URI}
 `);
