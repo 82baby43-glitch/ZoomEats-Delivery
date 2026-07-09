@@ -217,6 +217,7 @@ export async function handleComplianceRequest(
 
     const typedName = String(body.typed_name || "").trim();
     const consent = Boolean(body.consent_checkbox);
+    const signatureImage = body.signature_image ? String(body.signature_image) : null;
     if (def.kind === "signature" && !typedName) throwErr("Typed legal name required");
     if (!consent) throwErr("Consent checkbox required");
 
@@ -230,7 +231,9 @@ export async function handleComplianceRequest(
       agreement_version: AGREEMENT_VERSION,
       signature: typedName || def.title,
       typed_name: typedName || null,
+      signature_image: signatureImage,
       consent_checkbox: consent,
+      metadata: signatureImage ? { signature_image: signatureImage } : {},
       ...meta,
     };
 
@@ -635,7 +638,8 @@ export async function handleComplianceRequest(
     const u = requireRole("delivery", "driver");
     const step = Number(body.step || 1);
     const allowed = ["legal_name", "date_of_birth", "address_line1", "address_line2", "city", "state", "zip", "phone",
-      "license_number", "license_expiration", "vehicle_make", "vehicle_model", "vehicle_year", "vehicle_color", "vehicle_plate", "status"];
+      "license_number", "license_expiration", "vehicle_make", "vehicle_model", "vehicle_year", "vehicle_color", "vehicle_plate",
+      "emergency_contact_name", "emergency_contact_phone", "status"];
     const payload: Record<string, unknown> = { user_id: u.user_id, current_step: step, updated_at: new Date().toISOString() };
     for (const k of allowed) {
       if (body[k] !== undefined) payload[k] = body[k];
@@ -667,6 +671,140 @@ export async function handleComplianceRequest(
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
     return { ok: true, masked_id: maskTaxId(ssnOrEin) };
+  }
+
+  if (path === "/onboarding/restaurant" && method === "GET") {
+    const u = requireRole("vendor", "restaurant");
+    const { data } = await db.from("restaurant_onboarding").select("*").eq("user_id", u.user_id).maybeSingle();
+    return data || { user_id: u.user_id, current_step: 1, status: "incomplete" };
+  }
+
+  if (path === "/onboarding/restaurant" && method === "POST") {
+    const u = requireRole("vendor", "restaurant");
+    const allowed = [
+      "business_name", "owner_name", "business_address", "phone", "hours", "cuisine",
+      "sales_tax_id", "ein", "food_permit_number", "status", "application_signature",
+    ];
+    const payload: Record<string, unknown> = {
+      user_id: u.user_id,
+      current_step: 1,
+      updated_at: new Date().toISOString(),
+      status: body.status || "submitted",
+    };
+    for (const k of allowed) {
+      if (body[k] !== undefined) payload[k] = body[k];
+    }
+    if (body.signature_image) {
+      payload.metadata = { signature_image: body.signature_image };
+    }
+    const { data } = await db.from("restaurant_onboarding").upsert(payload, { onConflict: "user_id" }).select().single();
+    return data;
+  }
+
+  if (path === "/compliance/background-check" && method === "GET") {
+    const u = requireRole("delivery", "driver");
+    const userId = String(u.user_id);
+    const [{ data: disclosure }, { data: check }] = await Promise.all([
+      db.from("driver_background_disclosures").select("*").eq("user_id", userId).maybeSingle(),
+      db.from("background_checks").select("*").eq("user_id", userId).order("initiated_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    return {
+      submitted: Boolean(disclosure),
+      disclosure,
+      check_status: check?.status || "not_started",
+      check,
+    };
+  }
+
+  if (path === "/compliance/background-check" && method === "POST") {
+    const u = requireRole("delivery", "driver");
+    const userId = String(u.user_id);
+    if (!body.fcra_authorization || !body.mvr_authorization) {
+      throwErr("FCRA and MVR authorization required");
+    }
+    const disclosureId = uid("dbd");
+    const disclosureRow = {
+      disclosure_id: disclosureId,
+      user_id: userId,
+      legal_name: String(body.legal_name || ""),
+      date_of_birth: body.date_of_birth || null,
+      address_line1: body.address_line1 || null,
+      city: body.city || null,
+      state: body.state || null,
+      zip: body.zip || null,
+      phone: body.phone || null,
+      license_number: body.license_number || null,
+      license_state: body.license_state || null,
+      has_criminal_history: Boolean(body.has_criminal_history),
+      offenses: body.offenses || [],
+      fcra_authorization: Boolean(body.fcra_authorization),
+      mvr_authorization: Boolean(body.mvr_authorization),
+      disclosure_signature: body.disclosure_signature || null,
+      signature_image: body.signature_image || null,
+      updated_at: new Date().toISOString(),
+    };
+    await db.from("driver_background_disclosures").upsert(disclosureRow, { onConflict: "user_id" });
+
+    const checkId = uid("bgc");
+    await db.from("background_checks").upsert({
+      check_id: checkId,
+      user_id: userId,
+      disclosure_id: disclosureId,
+      status: "pending",
+      mvr_status: "pending",
+      form_payload: disclosureRow,
+      initiated_at: new Date().toISOString(),
+    });
+
+    await db.from("drivers").update({
+      approval_status: "verification",
+      documents_complete: false,
+      updated_at: new Date().toISOString(),
+    }).eq("user_id", userId);
+
+    await writeAuditLog(db, {
+      event_type: "background_check_submitted",
+      user_id: userId,
+      entity_type: "background_check",
+      entity_id: checkId,
+      message: "Driver background check authorization submitted",
+    });
+
+    return { ok: true, submitted: true, disclosure_id: disclosureId, check_id: checkId, check_status: "pending" };
+  }
+
+  if (path === "/agreements/driver/disclosure" && method === "POST") {
+    const u = requireRole("delivery", "driver");
+    const userId = String(u.user_id);
+    const disclosureId = uid("dbd");
+    const disclosureRow = {
+      disclosure_id: disclosureId,
+      user_id: userId,
+      legal_name: String(body.legal_name || u.name || ""),
+      has_criminal_history: Boolean(body.has_conviction),
+      offenses: body.has_conviction ? [{
+        offense_type: body.offense_type,
+        severity: body.severity,
+        conviction_date: body.conviction_date,
+        state: body.state,
+        explanation: body.explanation,
+      }] : [],
+      fcra_authorization: true,
+      mvr_authorization: true,
+      disclosure_signature: String(body.legal_name || u.name || ""),
+      updated_at: new Date().toISOString(),
+    };
+    await db.from("driver_background_disclosures").upsert(disclosureRow, { onConflict: "user_id" });
+    const checkId = uid("bgc");
+    await db.from("background_checks").upsert({
+      check_id: checkId,
+      user_id: userId,
+      disclosure_id: disclosureId,
+      status: "pending",
+      mvr_status: "pending",
+      form_payload: disclosureRow,
+    });
+    return { ok: true, review_id: checkId, disclosure_id: disclosureId };
   }
 
   if (path.startsWith("/uploads") && method === "GET") {

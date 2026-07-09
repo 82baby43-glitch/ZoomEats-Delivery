@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import RoleAgreementCenter from "@/components/pages/RoleAgreementCenter";
+import ComplianceAgreementWizard from "@/components/compliance/ComplianceAgreementWizard";
 
 const STEPS = [
   { id: 1, title: "Identity", fields: ["legal_name", "date_of_birth", "phone", "address_line1", "city", "state", "zip"] },
@@ -92,7 +92,14 @@ export default function DriverOnboardingWizard() {
   const current = STEPS.find((s) => s.id === step) || STEPS[0];
 
   if (current.agreements) {
-    return <RoleAgreementCenter roleLabel="Driver" />;
+    return (
+      <div>
+        <Header />
+        <div className="max-w-3xl mx-auto px-6 py-12">
+          <ComplianceAgreementWizard roleLabel="Driver" onAllComplete={() => router.push("/pending-approval")} />
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -34,7 +34,12 @@ export default function PendingApproval() {
           <p className="mt-2 text-sm text-red-400">Your application was not approved.</p>
         )}
         {!status?.agreement_complete && (
-          <Link href="/agreements" className="btn-primary inline-block mt-8">Complete agreements</Link>
+          <Link
+            href={user?.role === "vendor" || user?.role === "restaurant" ? "/restaurant/onboarding" : "/agreements"}
+            className="btn-primary inline-block mt-8"
+          >
+            Complete agreements &amp; forms
+          </Link>
         )}
         <Link href="/onboarding" className="block mt-4 text-sm hover:underline" style={{ color: "var(--muted)" }}>
           Switch mode
