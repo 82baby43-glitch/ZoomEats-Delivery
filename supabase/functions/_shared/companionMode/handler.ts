@@ -84,9 +84,16 @@ export async function handleCompanionRequest(
     const state = `${userId}:${provider}:${Date.now()}`;
     const authUrl = redirectUri ? buildMusicOAuthUrl(provider, redirectUri, state) : null;
 
-    if (body.confirmed === true) {
+    if (body.confirmed === true || !authUrl) {
       const settings = await connectMusicProvider(db, userId, role, provider);
-      return { ok: true, settings, message: "Music provider connected (status only — tokens remain on device)" };
+      return {
+        ok: true,
+        settings,
+        auto_connected: !authUrl,
+        message: authUrl
+          ? "Music provider connected (status only — tokens remain on device)"
+          : "Music provider linked for ambient companion playback (OAuth not configured on server)",
+      };
     }
 
     return {
@@ -94,9 +101,7 @@ export async function handleCompanionRequest(
       auth_url: authUrl,
       state,
       client_oauth: provider === "apple_music",
-      message: authUrl
-        ? "Open auth_url to authorize — store token in device session only"
-        : "Use client SDK (MusicKit / implicit OAuth) then POST with confirmed:true",
+      message: "Open auth_url to authorize — store token in device session only",
     };
   }
 

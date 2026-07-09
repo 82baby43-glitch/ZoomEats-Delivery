@@ -94,7 +94,16 @@ export function useCompanionMode() {
         provider,
         redirect_uri: redirectUri || `${window.location.origin}/companion/oauth/callback`,
       });
-      return r?.data;
+      const payload = r?.data as {
+        settings?: CompanionSettings;
+        auth_url?: string | null;
+        auto_connected?: boolean;
+        message?: string;
+      } | null;
+      if (payload?.settings) {
+        setSettings(payload.settings);
+      }
+      return payload;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not connect music provider";
       setError(msg);
@@ -106,8 +115,15 @@ export function useCompanionMode() {
     setError(null);
     try {
       const r = await api.post("/companion/music/connect", { provider, confirmed: true });
-      const payload = r?.data as { settings?: CompanionSettings } | null;
-      const data = payload?.settings as CompanionSettings;
+      const payload = r?.data as { settings?: CompanionSettings } | CompanionSettings | null;
+      const data = (
+        payload && typeof payload === "object" && "settings" in payload
+          ? payload.settings
+          : payload
+      ) as CompanionSettings | undefined;
+      if (!data?.audio_preferences) {
+        throw new Error("Could not confirm music connection");
+      }
       setSettings(data);
       return data;
     } catch (e) {
