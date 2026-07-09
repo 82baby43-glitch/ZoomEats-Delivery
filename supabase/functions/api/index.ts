@@ -34,6 +34,8 @@ import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
 import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geocodeAdmin.ts";
 import { handleLaunchAuditRequest } from "../_shared/launchAuditHandler.ts";
+import { handleFinancialAdminRequest } from "../_shared/financialAdminHandler.ts";
+import { recordOrderFinancials } from "../_shared/financial/engine.ts";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "../_shared/restaurantAdminHandler.ts";
 import { syncRestaurantLaunchState } from "../_shared/restaurant/readiness.ts";
 import { normalizeRole } from "../_shared/complianceAuthz.ts";
@@ -191,6 +193,9 @@ Deno.serve(async (req) => {
 
     const launchAuditResult = await handleLaunchAuditRequest(db, complianceCtx);
     if (launchAuditResult !== null) return json(launchAuditResult);
+
+    const financialResult = await handleFinancialAdminRequest(db, complianceCtx);
+    if (financialResult !== null) return json(financialResult);
 
     const restaurantAdminResult = await handleRestaurantAdminRequest(db, {
       path,
@@ -465,6 +470,11 @@ Deno.serve(async (req) => {
       } else {
         if (o.delivery_partner_id !== u.user_id) return err("Not your delivery", 403);
         await db.from("orders").update({ status: "delivered" }).eq("order_id", oid);
+        try {
+          await recordOrderFinancials(db, oid);
+        } catch (e) {
+          console.warn(JSON.stringify({ financial_ledger_skipped: String(e), order_id: oid }));
+        }
       }
       return json({ ok: true });
     }
@@ -560,6 +570,11 @@ Deno.serve(async (req) => {
           .from("drivers")
           .update({ workload: Math.max(0, (d.workload || 0) - 1), updated_at: new Date().toISOString() })
           .eq("driver_id", d.driver_id);
+        try {
+          await recordOrderFinancials(db, oid);
+        } catch (e) {
+          console.warn(JSON.stringify({ financial_ledger_skipped: String(e), order_id: oid }));
+        }
       }
 
       return json({ ok: true, order_id: oid, phase });

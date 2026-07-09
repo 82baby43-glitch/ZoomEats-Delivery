@@ -38,6 +38,26 @@ async function tableExists(db: SupabaseClient, table: string): Promise<boolean> 
   return !error;
 }
 
+async function financialCalculationReady(db: SupabaseClient): Promise<{ ok: boolean; detail: string }> {
+  const tables = ["driver_earnings", "restaurant_settlements", "platform_revenue"] as const;
+  for (const table of tables) {
+    const { error } = await db.from(table).select("id", { count: "exact", head: true }).limit(1);
+    if (error) return { ok: false, detail: `${table} unavailable` };
+  }
+  const { error: driverRpc } = await db.rpc("calculate_driver_pay", {
+    p_distance_miles: 3,
+    p_duration_minutes: 20,
+    p_wait_minutes: 5,
+    p_tip_amount: 0,
+    p_order_subtotal: 25,
+    p_weather_active: false,
+    p_peak_active: false,
+    p_bonus_pay: 0,
+  });
+  if (driverRpc) return { ok: false, detail: "calculate_driver_pay unavailable" };
+  return { ok: true, detail: "Ledger tables + pricing RPCs ready" };
+}
+
 async function countRows(
   db: SupabaseClient,
   table: string,
@@ -435,7 +455,24 @@ export async function runPaymentChecks(db: SupabaseClient): Promise<AuditCheck[]
   checks.push(mk("pay_failed_transactions", "payment_system", "Failed payments", failedTx === 0 ? "pass" : "warn", "high", `${failedTx} failed`));
 
   const earningsExists = await tableExists(db, "driver_earnings");
-  checks.push(mk("pay_driver_payouts", "payment_system", "Driver payout tracking", earningsExists ? "pass" : "warn", "medium", earningsExists ? "driver_earnings table ready" : "Not configured"));
+  const settlementsExist = await tableExists(db, "restaurant_settlements");
+  const financialReady = await financialCalculationReady(db);
+  checks.push(mk(
+    "pay_driver_payouts",
+    "payment_system",
+    "Driver payout tracking",
+    financialReady.ok ? "pass" : earningsExists ? "warn" : "warn",
+    "medium",
+    financialReady.detail
+  ));
+  checks.push(mk(
+    "pay_restaurant_payouts",
+    "payment_system",
+    "Restaurant payout tracking",
+    financialReady.ok ? "pass" : settlementsExist ? "warn" : "warn",
+    "medium",
+    financialReady.ok ? "restaurant_settlements + calculate_restaurant_payout ready" : settlementsExist ? "Table exists — RPC not verified" : "Not configured"
+  ));
 
   return checks;
 }
@@ -477,10 +514,18 @@ export async function runPricingChecks(db: SupabaseClient): Promise<AuditCheck[]
   const rulesExist = await tableExists(db, "pricing_rules");
   const snapshotsExist = await tableExists(db, "pricing_snapshots");
   const revenueExist = await tableExists(db, "platform_revenue");
+  const financialReady = await financialCalculationReady(db);
 
   checks.push(mk("pricing_rules", "pricing_engine", "Pricing rules", rulesExist ? "pass" : "warn", "high", rulesExist ? "Configured" : "Not migrated"));
   checks.push(mk("pricing_snapshots", "pricing_engine", "Pricing snapshots", snapshotsExist ? "pass" : "warn", "medium", snapshotsExist ? "Audit trail ready" : "Missing"));
-  checks.push(mk("pricing_revenue", "pricing_engine", "Platform revenue tracking", revenueExist ? "pass" : "warn", "medium", revenueExist ? "platform_revenue ready" : "Missing"));
+  checks.push(mk(
+    "pricing_revenue",
+    "pricing_engine",
+    "Platform revenue tracking",
+    financialReady.ok ? "pass" : revenueExist ? "warn" : "warn",
+    "medium",
+    financialReady.ok ? "platform_revenue + calculate_platform_profit ready" : revenueExist ? "platform_revenue table ready" : "Missing"
+  ));
 
   if (rulesExist) {
     const { count } = await countRows(db, "pricing_rules", (q) => q.eq("active", true));
@@ -495,6 +540,7 @@ export async function runAdminChecks(): Promise<AuditCheck[]> {
     mk("admin_dashboard", "admin_panel", "Admin dashboard", "pass", "low", "/admin route available"),
     mk("admin_compliance", "admin_panel", "Compliance center", "pass", "low", "/admin/compliance available"),
     mk("admin_stripe", "admin_panel", "Stripe admin", "pass", "low", "/admin/stripe available"),
+    mk("admin_revenue", "admin_panel", "Revenue center", "pass", "low", "/admin/revenue available"),
     mk("admin_logistics", "admin_panel", "Logistics map", "pass", "low", "/admin/logistics available"),
     mk("admin_audit_logs", "admin_panel", "Audit logs", "pass", "medium", "audit_logs table for compliance actions"),
     mk("admin_permissions", "admin_panel", "Role permissions", "pass", "medium", "ComplianceGate + requireRole admin checks"),
