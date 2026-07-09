@@ -8,23 +8,21 @@ import FloatingMusicPlayer from "@/components/companion/FloatingMusicPlayer";
 import DriverSafetyMode from "@/components/companion/DriverSafetyMode";
 import { useCompanionContext } from "@/components/companion/CompanionModeProvider";
 import { useEffect } from "react";
-import { useCompanionMode } from "@/lib/hooks/useCompanionMode";
 
 function DriverCompanionInner() {
-  const { settings, confirmConnection } = useCompanionContext();
-  const companion = useCompanionMode();
+  const { settings, confirmConnection, reload } = useCompanionContext();
 
   useEffect(() => {
     const onMessage = async (e) => {
       if (e.origin !== window.location.origin) return;
       if (e.data?.type === "companion_oauth" && e.data.provider) {
         await confirmConnection(e.data.provider);
-        companion.reload();
+        reload();
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [confirmConnection, companion]);
+  }, [confirmConnection, reload]);
 
   return (
     <>

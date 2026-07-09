@@ -29,7 +29,8 @@ function resolveRole(user: Record<string, unknown>): CompanionRole | null {
   const role = String(user.role || "").toLowerCase();
   if (role === "delivery" || role === "driver") return "driver";
   if (role === "vendor" || role === "restaurant") return "restaurant";
-  if (role === "admin") return null;
+  if (role === "admin") return "driver";
+  if (user.founder_driver === true) return "driver";
   return null;
 }
 
@@ -50,7 +51,7 @@ export async function handleCompanionRequest(
     return settings || { user_id: userId, role, music_connected: false, audio_preferences: { musicVolume: 70, duckingEnabled: true, safetyMode: false } };
   }
 
-  if (path === "/companion/settings" && method === "PATCH") {
+  if (path === "/companion/settings" && (method === "PATCH" || method === "POST")) {
     if (!role) throwErr("Companion Mode requires driver or restaurant role", 403);
     const patch = (body.audio_preferences && typeof body.audio_preferences === "object")
       ? body.audio_preferences as Record<string, unknown>
