@@ -13,6 +13,7 @@ import AttentionTab from "@/components/admin/AttentionTab";
 import ApprovalsTab from "@/components/admin/ApprovalsTab";
 import ComplianceDossier from "@/components/admin/ComplianceDossier";
 import GeocodeRestaurantsButton from "@/components/admin/GeocodeRestaurantsButton";
+import RestaurantLocationEditor from "@/components/admin/RestaurantLocationEditor";
 import { UsersTable, RestaurantsList, OrdersTable } from "@/components/admin/Tables";
 import { sanitizeActivity, sanitizeAttention, sanitizeMetrics, sanitizeOrders, sanitizeRestaurants, sanitizeUsers } from "@/lib/safeData";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
@@ -35,6 +36,7 @@ export default function AdminPanel() {
   const [loadError, setLoadError] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const [dossierUserId, setDossierUserId] = useState(null);
+  const [locationRestaurantId, setLocationRestaurantId] = useState(null);
 
   const loadApprovals = useCallback(async () => {
     try {
@@ -114,10 +116,15 @@ export default function AdminPanel() {
   const approve = async (rid) => {
     if (!rid) return;
     try {
-      await api.post(`/admin/restaurants/${rid}/approve`);
+      const r = await api.post(`/admin/restaurants/${rid}/approve`);
+      const d = r?.data || r;
+      if (d?.blockers?.length) {
+        alert(`Approved with blockers: ${d.blockers.join(", ")}\nStatus: ${d.launch_status_label || d.launch_status}`);
+      }
       await Promise.all([loadFast(), loadFull(), loadApprovals()]);
     } catch (e) {
       logClientError("admin.approve", e);
+      alert(e?.message || "Approval failed");
     }
   };
 
@@ -235,13 +242,26 @@ export default function AdminPanel() {
               )}
               {tab === "attention" && <AttentionTab attention={attention} onApprove={approve} />}
               {tab === "users" && <UsersTable users={users} />}
-              {tab === "restaurants" && <RestaurantsList restaurants={restaurants} onApprove={approve} />}
+              {tab === "restaurants" && (
+                <RestaurantsList
+                  restaurants={restaurants}
+                  onApprove={approve}
+                  onEditLocation={setLocationRestaurantId}
+                />
+              )}
               {tab === "orders" && <OrdersTable orders={orders} />}
             </>
           )}
         </div>
         {dossierUserId && (
           <ComplianceDossier userId={dossierUserId} onClose={() => setDossierUserId(null)} onAction={refreshAll} />
+        )}
+        {locationRestaurantId && (
+          <RestaurantLocationEditor
+            restaurantId={locationRestaurantId}
+            onClose={() => setLocationRestaurantId(null)}
+            onSaved={refreshAll}
+          />
         )}
       </div>
     </div>

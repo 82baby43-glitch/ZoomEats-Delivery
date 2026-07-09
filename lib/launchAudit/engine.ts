@@ -23,6 +23,7 @@ import {
   runSecurityChecks,
   runStorageChecks,
 } from "./checks";
+import { runFullDeliverySimulation } from "./testOrder";
 import type {
   AuditCheck,
   AuditStatus,
@@ -168,7 +169,6 @@ export async function runLaunchAudit(
     api_health,
     realtime,
     storage,
-    e2e_simulation,
   ] = await Promise.all([
     runDatabaseChecks(db),
     runAuthChecks(db),
@@ -187,8 +187,11 @@ export async function runLaunchAudit(
     runApiHealthChecks(db),
     runRealtimeChecks(),
     runStorageChecks(),
-    runE2eSimulation(db, options),
   ]);
+
+  const e2e_simulation = options.simulate_e2e
+    ? (await runFullDeliverySimulation(db)).checks
+    : await runE2eSimulation(db, options);
 
   const mobile_responsiveness = runMobileChecks();
   const accessibility = runAccessibilityChecks();

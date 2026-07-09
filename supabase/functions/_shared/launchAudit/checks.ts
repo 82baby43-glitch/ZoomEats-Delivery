@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AuditCheck, AuditStatus, FixSuggestion, IssueSeverity, LaunchAuditOptions } from "./types.ts";
+import { getSupabaseAnonKey, getSupabasePublicUrl, isSupabasePublicConfigured } from "../supabaseEnv.ts";
 
 function fix(
   problem: string,
@@ -119,8 +120,8 @@ export async function runDatabaseChecks(db: SupabaseClient): Promise<AuditCheck[
 
 export async function runAuthChecks(db: SupabaseClient): Promise<AuditCheck[]> {
   const checks: AuditCheck[] = [];
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = getSupabasePublicUrl();
+  const anon = getSupabaseAnonKey();
 
   checks.push(mk(
     "auth_supabase_url",
@@ -128,7 +129,7 @@ export async function runAuthChecks(db: SupabaseClient): Promise<AuditCheck[]> {
     "Supabase URL configured",
     url ? "pass" : "fail",
     "critical",
-    url ? "Set" : "Missing NEXT_PUBLIC_SUPABASE_URL"
+    url ? "Set" : "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL"
   ));
   checks.push(mk(
     "auth_anon_key",
@@ -136,7 +137,7 @@ export async function runAuthChecks(db: SupabaseClient): Promise<AuditCheck[]> {
     "Supabase anon key configured",
     anon ? "pass" : "fail",
     "critical",
-    anon ? "Set" : "Missing NEXT_PUBLIC_SUPABASE_ANON_KEY"
+    anon ? "Set" : "Missing NEXT_PUBLIC_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY"
   ));
   checks.push(mk(
     "auth_service_role",
@@ -467,7 +468,7 @@ export async function runAdminChecks(): Promise<AuditCheck[]> {
 
 export async function runSecurityChecks(db: SupabaseClient): Promise<AuditCheck[]> {
   const checks: AuditCheck[] = [];
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const anon = getSupabaseAnonKey();
 
   checks.push(mk(
     "sec_service_key_server_only",
@@ -484,7 +485,7 @@ export async function runSecurityChecks(db: SupabaseClient): Promise<AuditCheck[
     "Anon key for client auth",
     anon ? "pass" : "fail",
     "critical",
-    anon ? "NEXT_PUBLIC_SUPABASE_ANON_KEY set" : "Missing anon key"
+    anon ? "NEXT_PUBLIC_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY set" : "Missing anon key"
   ));
 
   checks.push(mk(
@@ -525,7 +526,7 @@ export async function runPerformanceChecks(db: SupabaseClient): Promise<{ checks
   metrics.database_latency_ms = dbMs;
   checks.push(mk("perf_db_latency", "performance", "Database query latency", dbMs < 500 ? "pass" : "warn", "medium", `${dbMs}ms`));
 
-  const fnBase = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "") + "/functions/v1";
+  const fnBase = `${(getSupabasePublicUrl() || "").replace(/\/$/, "")}/functions/v1`;
   if (fnBase.startsWith("http")) {
     try {
       const { result: res, ms } = await timed(() =>
@@ -548,7 +549,7 @@ export async function runPerformanceChecks(db: SupabaseClient): Promise<{ checks
 
 export async function runEdgeFunctionChecks(): Promise<AuditCheck[]> {
   const functions = ["api", "stripe-webhook", "dispatch-order", "routing-engine", "reconcile-payments"];
-  const fnBase = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "") + "/functions/v1";
+  const fnBase = `${(getSupabasePublicUrl() || "").replace(/\/$/, "")}/functions/v1`;
   const checks: AuditCheck[] = [];
 
   for (const fn of functions) {
@@ -582,7 +583,7 @@ export async function runApiHealthChecks(db: SupabaseClient): Promise<AuditCheck
     { path: "/restaurants", method: "GET", label: "Restaurants list" },
   ];
 
-  const fnBase = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "") + "/functions/v1/api";
+  const fnBase = `${(getSupabasePublicUrl() || "").replace(/\/$/, "")}/functions/v1/api`;
   if (!fnBase.startsWith("http")) {
     return [mk("api_health", "api_health", "API health probes", "skip", "medium", "No Supabase URL")];
   }
@@ -706,7 +707,7 @@ export async function runE2eSimulation(db: SupabaseClient, options: LaunchAuditO
   }
   checks.push(mk("e2e_create", "e2e_simulation", "Create test order", "pass", "low", testOrderId));
 
-  const fnBase = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "") + "/functions/v1";
+  const fnBase = `${(getSupabasePublicUrl() || "").replace(/\/$/, "")}/functions/v1`;
   try {
     const res = await fetch(`${fnBase}/dispatch-order`, {
       method: "POST",

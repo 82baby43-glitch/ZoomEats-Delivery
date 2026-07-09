@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { runLaunchAudit } from "./launchAudit/engine.ts";
 import { reportToJson, reportToMarkdown } from "./launchAudit/report.ts";
+import { runFullDeliverySimulation } from "./launchAudit/testOrder.ts";
 import type { LaunchAuditOptions } from "./launchAudit/types.ts";
 
 function throwErr(message: string, status = 400): never {
@@ -65,6 +66,16 @@ export async function handleLaunchAuditRequest(
   if (path === "/admin/launch-audit/report.json" && method === "GET") {
     const report = cachedReport?.report ?? await runLaunchAudit(db, options);
     return { content: reportToJson(report), filename: `zoomeats-launch-readiness-${report.checked_at.slice(0, 10)}.json` };
+  }
+
+  if (path === "/admin/system-health/test-order" && method === "POST") {
+    const result = await runFullDeliverySimulation(db);
+    return result;
+  }
+
+  if (path === "/admin/launch-audit/test-order" && method === "POST") {
+    const result = await runFullDeliverySimulation(db);
+    return result;
   }
 
   if (path === "/admin/system-health/status" && method === "GET") {

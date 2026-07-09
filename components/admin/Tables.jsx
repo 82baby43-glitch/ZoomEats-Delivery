@@ -40,12 +40,20 @@ export function UsersTable({ users }) {
   );
 }
 
-export function RestaurantsList({ restaurants, onApprove }) {
+export function RestaurantsList({ restaurants, onApprove, onEditLocation }) {
   const rows = sanitizeRestaurants(restaurants);
 
   if (rows.length === 0) {
     return <EmptyState title="No restaurants" description="Restaurants will appear here once vendors register." />;
   }
+
+  const statusLabel = (r) => {
+    if (!r.approved) return "Pending approval";
+    if (r.launch_status === "pending_location") return "Pending Location";
+    if (r.launch_status === "pending_menu") return "Pending Menu Setup";
+    if (r.accepting_orders) return "Active";
+    return r.launch_status === "ready" ? "Ready" : "Approved";
+  };
 
   return (
     <div className="space-y-3">
@@ -56,22 +64,33 @@ export function RestaurantsList({ restaurants, onApprove }) {
           ) : (
             <div className="w-16 h-16 rounded-xl" style={{ background: "var(--surface-2)" }} />
           )}
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <div className="font-bold">{r.name}</div>
               {r.import_source && (
                 <span className="badge uppercase text-[10px]">{r.import_source}</span>
               )}
+              <span className={`badge text-[10px] ${r.accepting_orders ? "text-green-400" : "text-amber-400"}`}>
+                {statusLabel(r)}
+              </span>
             </div>
-            <div className="text-sm" style={{ color: "var(--muted)" }}>{r.cuisine || "—"} · {r.address || "—"}</div>
+            <div className="text-sm" style={{ color: "var(--muted)" }}>
+              {r.cuisine || "—"} · {r.address || "—"}
+              {r.latitude && r.longitude ? ` · 📍 ${Number(r.latitude).toFixed(4)}, ${Number(r.longitude).toFixed(4)}` : " · No coordinates"}
+            </div>
           </div>
-          {r.approved ? (
-            <span className="badge">Approved</span>
-          ) : (
-            <button className="btn-primary !py-2" onClick={() => onApprove?.(r.restaurant_id)} data-testid={`approve-${r.restaurant_id}`}>
-              Approve
+          <div className="flex flex-col gap-2 shrink-0">
+            <button type="button" className="btn-ghost !py-1 text-xs" onClick={() => onEditLocation?.(r.restaurant_id)}>
+              Location
             </button>
-          )}
+            {r.approved ? (
+              <span className="badge text-center">Approved</span>
+            ) : (
+              <button className="btn-primary !py-2" onClick={() => onApprove?.(r.restaurant_id)} data-testid={`approve-${r.restaurant_id}`}>
+                Approve
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>

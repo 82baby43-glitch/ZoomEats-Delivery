@@ -24,6 +24,8 @@ import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { handleStripeAdminRequest } from "./stripeAdmin";
 import { handleGeocodeAdminRequest } from "./geocodeAdmin";
 import { handleLaunchAuditRequest } from "./launchAuditHandler";
+import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "./restaurantAdminHandler";
+import { syncRestaurantLaunchState } from "../restaurant/readiness";
 import { geocodeOrderAddress } from "./geocodeAdmin";
 import { normalizeRole } from "../compliance/authz";
 import { isTestRestaurantName } from "../restaurants";
@@ -156,6 +158,14 @@ export async function handleApiRequest(
     const launchAuditResult = await handleLaunchAuditRequest(db, complianceCtx);
     if (launchAuditResult !== null) return launchAuditResult;
 
+    const restaurantAdminResult = await handleRestaurantAdminRequest(db, {
+      path,
+      method,
+      body,
+      requireRole,
+    });
+    if (restaurantAdminResult !== null) return restaurantAdminResult;
+
     const dreamlandResult = await handleDreamlandRequest(db, {
       path,
       method,
@@ -282,6 +292,7 @@ export async function handleApiRequest(
         available: true,
       };
       const { data } = await db.from("menu_items").insert(item).select().single();
+      await syncRestaurantLaunchState(db, rest.restaurant_id);
       return data;
     }
     const delMenuMatch = path.match(/^\/vendor\/menu-items\/([^/]+)$/);
@@ -290,6 +301,7 @@ export async function handleApiRequest(
       const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).limit(1).maybeSingle();
       if (!rest) throwErr("No restaurant", 404);
       await db.from("menu_items").delete().eq("item_id", delMenuMatch[1]).eq("restaurant_id", rest.restaurant_id);
+      await syncRestaurantLaunchState(db, rest.restaurant_id);
       return { ok: true };
     }
     if (path === "/vendor/orders" && method === "GET") {
@@ -806,24 +818,7 @@ export async function handleApiRequest(
     const approveMatch = path.match(/^\/admin\/restaurants\/([^/]+)\/approve$/);
     if (approveMatch && method === "POST") {
       const admin = requireRole("admin");
-      const restaurantId = approveMatch[1];
-      const { data: rest } = await db.from("restaurants").select("owner_id").eq("restaurant_id", restaurantId).maybeSingle();
-      await db.from("restaurants").update({
-        approved: true,
-        approval_status: "approved",
-        active: true,
-      }).eq("restaurant_id", restaurantId);
-      if (rest?.owner_id) {
-        await db.from("users").update({ approval_status: "approved", active: true }).eq("user_id", rest.owner_id);
-        await db.from("compliance_reviews").update({
-          status: "approved",
-          approval_status: "approved",
-          reviewed_by: admin.user_id,
-          reviewed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }).eq("user_id", rest.owner_id).in("status", ["pending"]);
-      }
-      return { ok: true };
+      return approveRestaurantWithReadiness(db, admin, approveMatch[1]);
     }
     if (path === "/admin/orders" && method === "GET") {
       requireRole("admin");
