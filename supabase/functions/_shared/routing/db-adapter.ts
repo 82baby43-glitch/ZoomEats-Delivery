@@ -1,6 +1,7 @@
-import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import type { ActiveOrderRef, DriverRouteState } from "./types.ts";
-import type { RoutingDbAdapter } from "./uber-routing-ai.ts";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { ActiveOrderRef, DriverRouteState } from "./types";
+import type { RoutingDbAdapter } from "./uber-routing-ai";
+import { haversineKm } from "./geo";
 
 /** Supabase persistence adapter for routing state (used by API + edge). */
 export function createRoutingDbAdapter(db: SupabaseClient): RoutingDbAdapter {
@@ -61,15 +62,24 @@ export function createRoutingDbAdapter(db: SupabaseClient): RoutingDbAdapter {
       const dropLat = order.customer_lat ?? pickupLat;
       const dropLng = order.customer_lng ?? pickupLng;
 
+      const pickup = { lat: Number(pickupLat) || 0, lng: Number(pickupLng) || 0 };
+      const dropoff = { lat: Number(dropLat) || 0, lng: Number(dropLng) || 0 };
+
       return {
         order_id: order.order_id,
         restaurant_id: order.restaurant_id,
         restaurant_name: order.restaurant_name ?? restaurant?.name,
-        pickup: { lat: Number(pickupLat) || 0, lng: Number(pickupLng) || 0 },
-        dropoff: { lat: Number(dropLat) || 0, lng: Number(dropLng) || 0 },
+        pickup,
+        dropoff,
         priority: order.priority ?? 0,
         status: order.status,
         picked_up: order.status === "picked_up",
+        estimated_weight_lbs: order.estimated_weight_lbs ?? undefined,
+        bag_count: order.bag_count ?? undefined,
+        large_drink_count: order.large_drink_count ?? undefined,
+        delivery_distance_km: order.delivery_distance_km ?? haversineKm(pickup, dropoff),
+        required_vehicle_class: order.required_vehicle_class ?? undefined,
+        special_handling: order.special_handling ?? undefined,
       };
     },
   };

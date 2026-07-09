@@ -8,6 +8,7 @@ import Header from "@/components/Header";
 import { MapPin, Power, Truck } from "lucide-react";
 import { formatMoney, sanitizeOrders, sanitizeWallet } from "@/lib/safeData";
 import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
+import VehicleCenter from "@/components/driver/VehicleCenter";
 import { logClientError } from "@/lib/clientErrorLog";
 import { ErrorState } from "@/components/ui/PageStates";
 import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
@@ -191,6 +192,10 @@ export default function DeliveryDashboard() {
           >
             {online ? "Go offline" : "Go online"}
           </button>
+        </div>
+
+        <div className="mt-6">
+          <VehicleCenter compact={false} />
         </div>
 
         {/* Live optimized route (routing intelligence layer) */}

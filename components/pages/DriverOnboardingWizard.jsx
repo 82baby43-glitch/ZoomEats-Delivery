@@ -6,13 +6,16 @@ import Header from "@/components/Header";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import ComplianceAgreementWizard from "@/components/compliance/ComplianceAgreementWizard";
+import DeliveryModeStep from "@/components/driver/DeliveryModeStep";
+import { VEHICLE_MODES } from "@/lib/deliveryModes/constants";
 
 const STEPS = [
   { id: 1, title: "Identity", fields: ["legal_name", "date_of_birth", "phone", "address_line1", "city", "state", "zip"] },
-  { id: 2, title: "Government ID", docTypes: ["drivers_license", "selfie"] },
-  { id: 3, title: "Vehicle", fields: ["vehicle_make", "vehicle_model", "vehicle_year", "vehicle_color", "vehicle_plate", "license_expiration"], docTypes: ["vehicle_registration", "insurance"] },
-  { id: 4, title: "Tax (W-9)", tax: true },
-  { id: 5, title: "Agreements", agreements: true },
+  { id: 2, title: "Delivery Method", deliveryMode: true },
+  { id: 3, title: "Government ID", docTypes: ["drivers_license", "selfie"] },
+  { id: 4, title: "Vehicle", fields: ["vehicle_make", "vehicle_model", "vehicle_year", "vehicle_color", "vehicle_plate", "license_expiration"], docTypes: ["vehicle_registration", "insurance"], vehicleOnly: true },
+  { id: 5, title: "Tax (W-9)", tax: true },
+  { id: 6, title: "Agreements", agreements: true },
 ];
 
 export default function DriverOnboardingWizard() {
@@ -20,6 +23,7 @@ export default function DriverOnboardingWizard() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({});
+  const [selectedModes, setSelectedModes] = useState([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -28,10 +32,13 @@ export default function DriverOnboardingWizard() {
       const d = r?.data;
       if (d?.current_step) setStep(d.current_step);
       setForm((f) => ({ ...f, ...d }));
+      if (Array.isArray(d?.selected_delivery_modes)) setSelectedModes(d.selected_delivery_modes);
     }).catch(() => {});
   }, [user]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const needsVehicleStep = selectedModes.some((m) => VEHICLE_MODES.includes(m));
 
   const saveStep = async (nextStep) => {
     setBusy(true);
@@ -44,6 +51,19 @@ export default function DriverOnboardingWizard() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const advanceFromStep = (fromStep) => {
+    let next = fromStep + 1;
+    // Skip vehicle step if no vehicle modes selected
+    if (next === 4 && !needsVehicleStep) next = 5;
+    saveStep(next);
+  };
+
+  const goBack = () => {
+    let prev = step - 1;
+    if (prev === 4 && !needsVehicleStep) prev = 3;
+    setStep(prev);
   };
 
   const uploadDoc = async (documentType, file) => {
@@ -79,7 +99,7 @@ export default function DriverOnboardingWizard() {
         zip: form.zip,
         signature: form.tax_signature,
       });
-      await saveStep(step + 1);
+      advanceFromStep(step);
     } catch (e) {
       alert(e?.message || "Tax save failed");
     } finally {
@@ -110,26 +130,36 @@ export default function DriverOnboardingWizard() {
         <h1 className="font-display text-3xl font-bold mt-2">{current.title}</h1>
 
         <div className="card p-6 mt-8 space-y-4">
-          {current.fields?.map((field) => (
+          {current.deliveryMode && (
+            <DeliveryModeStep
+              onBack={step > 1 ? goBack : undefined}
+              onComplete={(modes) => {
+                setSelectedModes(modes);
+                advanceFromStep(step);
+              }}
+            />
+          )}
+
+          {!current.deliveryMode && current.fields?.map((field) => (
             <div key={field}>
               <label className="label capitalize">{field.replace(/_/g, " ")}</label>
               <input
                 className="input-field w-full"
-                type={field.includes("date") ? "date" : field === "vehicle_year" ? "number" : "text"}
+                type={field.includes("date") || field.includes("expiration") ? "date" : field === "vehicle_year" ? "number" : "text"}
                 value={form[field] || ""}
                 onChange={(e) => set(field, e.target.value)}
               />
             </div>
           ))}
 
-          {current.docTypes?.map((dt) => (
+          {!current.deliveryMode && current.docTypes?.map((dt) => (
             <div key={dt}>
               <label className="label capitalize">{dt.replace(/_/g, " ")}</label>
               <input type="file" accept="image/*,application/pdf" className="input-field w-full" onChange={(e) => uploadDoc(dt, e.target.files?.[0])} />
             </div>
           ))}
 
-          {current.tax && (
+          {!current.deliveryMode && current.tax && (
             <>
               <input className="input-field w-full" placeholder="SSN or EIN" value={form.tax_id || ""} onChange={(e) => set("tax_id", e.target.value)} />
               <select className="input-field w-full" value={form.tax_classification || "individual"} onChange={(e) => set("tax_classification", e.target.value)}>
@@ -141,19 +171,21 @@ export default function DriverOnboardingWizard() {
             </>
           )}
 
-          <div className="flex gap-3 pt-4">
-            {step > 1 && (
-              <button type="button" className="btn-ghost" disabled={busy} onClick={() => setStep(step - 1)}>Back</button>
-            )}
-            <button
-              type="button"
-              className="btn-primary flex-1"
-              disabled={busy}
-              onClick={() => (current.tax ? submitTax() : saveStep(step + 1))}
-            >
-              {busy ? "Saving…" : step >= STEPS.length ? "Submit for review" : "Continue"}
-            </button>
-          </div>
+          {!current.deliveryMode && (
+            <div className="flex gap-3 pt-4">
+              {step > 1 && (
+                <button type="button" className="btn-ghost" disabled={busy} onClick={goBack}>Back</button>
+              )}
+              <button
+                type="button"
+                className="btn-primary flex-1"
+                disabled={busy}
+                onClick={() => (current.tax ? submitTax() : advanceFromStep(step))}
+              >
+                {busy ? "Saving…" : step >= STEPS.length ? "Submit for review" : "Continue"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

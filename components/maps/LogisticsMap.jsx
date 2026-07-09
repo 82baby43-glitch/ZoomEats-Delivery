@@ -34,6 +34,25 @@ const ICONS = {
   hotspot: pinIcon("#D49A36", "H"),
 };
 
+const MODE_COLORS = {
+  car: "#FBBF24",
+  bicycle: "#34D399",
+  scooter: "#A78BFA",
+  walking: "#7DD3FC",
+  suv: "#F97316",
+};
+
+function modeDriverIcon(mode) {
+  const icons = { car: "🚗", bicycle: "🚲", scooter: "🛵", walking: "🚶", suv: "🚙" };
+  const emoji = icons[mode] || "🚗";
+  const color = MODE_COLORS[mode] || "#FBBF24";
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'>
+    <circle cx='16' cy='16' r='14' fill='${color}' fill-opacity='0.9' stroke='#0A0A0A' stroke-width='2'/>
+    <text x='16' y='21' text-anchor='middle' font-size='14'>${emoji}</text>
+  </svg>`;
+  return new L.DivIcon({ html: svg, className: "", iconSize: [32, 32], iconAnchor: [16, 16], popupAnchor: [0, -16] });
+}
+
 function hotspotCircle(level) {
   const color = level === "high" ? "#C2533B" : level === "medium" ? "#D49A36" : "#43614B";
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='20' cy='20' r='18' fill='${color}' fill-opacity='0.35' stroke='${color}' stroke-width='2'/></svg>`;
@@ -70,7 +89,9 @@ function AnimatedMarker({ marker, animate }) {
 
   const icon = marker.type === "hotspot"
     ? hotspotCircle(String(marker.meta?.level || "medium"))
-    : ICONS[marker.type] || ICONS.driver;
+    : marker.type === "driver" && marker.meta?.delivery_mode
+      ? modeDriverIcon(marker.meta.delivery_mode)
+      : ICONS[marker.type] || ICONS.driver;
 
   return (
     <Marker position={[pos.lat, pos.lng]} icon={icon}>

@@ -34,6 +34,12 @@ export interface ActiveOrderRef {
   priority?: number;
   status?: string;
   picked_up?: boolean;
+  estimated_weight_lbs?: number;
+  bag_count?: number;
+  large_drink_count?: number;
+  delivery_distance_km?: number;
+  required_vehicle_class?: string;
+  special_handling?: string;
 }
 
 export interface DriverRouteState {
