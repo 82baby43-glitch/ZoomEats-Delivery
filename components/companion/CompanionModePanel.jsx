@@ -6,6 +6,7 @@ import { useCompanionContext } from "./CompanionModeProvider";
 import {
   buildClientMusicOAuthUrl,
   openMusicOAuth,
+  startYouTubeMusicGoogleOAuth,
 } from "@/lib/companionMode/musicOAuth";
 
 const PROVIDERS = [
@@ -61,14 +62,24 @@ export default function CompanionModePanel({ role = "driver" }) {
     setConnecting(provider);
     setConnectStatus(null);
     try {
+      if (provider === "youtube_music") {
+        setConnectStatus({
+          type: "info",
+          message: "Redirecting to Google sign-in for YouTube Music…",
+        });
+        await startYouTubeMusicGoogleOAuth();
+        return;
+      }
+
       const res = await connectProvider(provider);
 
       if (res?.use_supabase_google_oauth) {
-        const clientUrl = buildClientMusicOAuthUrl(provider, oauthFallbackState(provider));
-        if (clientUrl) {
-          beginOAuthRedirect(clientUrl, label, provider);
-          return;
-        }
+        setConnectStatus({
+          type: "info",
+          message: "Redirecting to Google sign-in for YouTube Music…",
+        });
+        await startYouTubeMusicGoogleOAuth();
+        return;
       }
 
       if (res?.auth_url) {

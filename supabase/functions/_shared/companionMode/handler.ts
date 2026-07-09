@@ -108,7 +108,15 @@ export async function handleCompanionRequest(
       return {
         provider,
         use_supabase_google_oauth: true,
-        message: "Redirect to Google to authorize YouTube Music access",
+        message: "Redirect to Google via Supabase OAuth (registered redirect URI)",
+      };
+    }
+
+    if (provider === "youtube_music" && authUrl) {
+      return {
+        provider,
+        use_supabase_google_oauth: true,
+        message: "Use Supabase Google OAuth for YouTube Music",
       };
     }
 
