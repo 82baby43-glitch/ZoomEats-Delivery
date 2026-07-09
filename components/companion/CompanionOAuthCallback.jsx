@@ -1,26 +1,54 @@
 "use client";
 
 import { useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 /** OAuth implicit-grant callback — tokens stay in sessionStorage only. */
 export default function CompanionOAuthCallback() {
   const params = useSearchParams();
+  const router = useRouter();
 
   useEffect(() => {
     const hash = typeof window !== "undefined" ? window.location.hash.slice(1) : "";
     const hashParams = new URLSearchParams(hash);
+    const queryError = params.get("error");
+    const hashError = hashParams.get("error");
+    const oauthError = queryError || hashError;
+
+    if (oauthError) {
+      sessionStorage.removeItem("companion_music_pending");
+      const desc = params.get("error_description") || hashParams.get("error_description") || "";
+      const q = new URLSearchParams({ music_oauth_error: oauthError });
+      if (desc) q.set("error_description", desc);
+      router.replace(`/driver/companion?${q.toString()}`);
+      return;
+    }
+
     const token = hashParams.get("access_token");
     const state = params.get("state") || hashParams.get("state");
-    const provider = state?.split(":")[1];
+    const provider = state?.includes("youtube_music")
+      ? "youtube_music"
+      : state?.includes("spotify")
+        ? "spotify"
+        : state?.split(":")[1];
 
     if (token && provider) {
       sessionStorage.setItem(`zoomeats_music_token_${provider}`, token);
-      window.opener?.postMessage({ type: "companion_oauth", provider, ok: true }, window.location.origin);
+      sessionStorage.setItem("companion_music_pending", provider);
+
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: "companion_oauth", provider, ok: true }, window.location.origin);
+        window.close();
+        return;
+      }
+
+      router.replace(`/driver/companion?music_oauth=${provider}`);
+      return;
     }
-    window.close();
-  }, [params]);
+
+    router.replace("/driver/companion?music_oauth_error=missing_token");
+  }, [params, router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6">

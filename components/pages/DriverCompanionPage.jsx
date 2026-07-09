@@ -8,24 +8,35 @@ import FloatingMusicPlayer from "@/components/companion/FloatingMusicPlayer";
 import DriverSafetyMode from "@/components/companion/DriverSafetyMode";
 import { useCompanionContext } from "@/components/companion/CompanionModeProvider";
 import { useEffect, useState } from "react";
-import { finishPendingMusicOAuth } from "@/lib/companionMode/musicOAuth";
+import { finishPendingMusicOAuth, parseMusicOAuthError } from "@/lib/companionMode/musicOAuth";
 
 function DriverCompanionInner() {
   const { settings, confirmConnection, reload } = useCompanionContext();
   const [oauthMessage, setOauthMessage] = useState(null);
+  const [oauthError, setOauthError] = useState(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("music_oauth") !== "youtube_music") return;
+    const errMsg = parseMusicOAuthError(params);
+    if (errMsg) {
+      setOauthError(errMsg);
+      sessionStorage.removeItem("companion_music_pending");
+      window.history.replaceState({}, "", "/driver/companion");
+      return;
+    }
+
+    const musicOauth = params.get("music_oauth");
+    if (!musicOauth) return;
 
     (async () => {
-      const ok = await finishPendingMusicOAuth("youtube_music");
+      const ok = await finishPendingMusicOAuth(musicOauth);
       if (ok) {
-        await confirmConnection("youtube_music");
+        await confirmConnection(musicOauth);
         await reload();
-        setOauthMessage("YouTube Music connected via Google.");
+        setOauthMessage(`${musicOauth === "youtube_music" ? "YouTube Music" : musicOauth} connected via Google.`);
+        setOauthError(null);
       } else {
-        setOauthMessage("Google sign-in did not return a music token. Try again and allow YouTube access.");
+        setOauthError("Google sign-in did not return a music token. Try again or use ZoomEats Ambient.");
       }
       window.history.replaceState({}, "", "/driver/companion");
     })();
@@ -52,6 +63,19 @@ function DriverCompanionInner() {
         onArrivedRestaurant={() => {}}
         onDelivered={() => {}}
       />
+      {oauthError && (
+        <div
+          className="card p-4 mb-4 text-sm space-y-2"
+          style={{ borderColor: "rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.08)", color: "#fca5a5" }}
+        >
+          <p className="font-bold">Google sign-in blocked</p>
+          <p>{oauthError}</p>
+          <p className="text-xs" style={{ color: "var(--muted)" }}>
+            Admin: Google Cloud Console → OAuth consent screen → Test users → add your Gmail.
+            Or use <strong>ZoomEats Ambient</strong> below (works now, no Google needed).
+          </p>
+        </div>
+      )}
       {oauthMessage && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "var(--primary)" }}>
           {oauthMessage}

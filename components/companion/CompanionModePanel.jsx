@@ -6,7 +6,6 @@ import { useCompanionContext } from "./CompanionModeProvider";
 import {
   buildClientMusicOAuthUrl,
   openMusicOAuth,
-  startYouTubeMusicGoogleOAuth,
 } from "@/lib/companionMode/musicOAuth";
 
 const PROVIDERS = [
@@ -41,8 +40,8 @@ export default function CompanionModePanel({ role = "driver" }) {
   const prefs = settings?.audio_preferences || { musicVolume: 70, duckingEnabled: true, safetyMode: false };
   const isAmbient = settings?.music_connected && !settings?.music_provider;
 
-  const beginOAuthRedirect = (url, label) => {
-    const mode = openMusicOAuth(url);
+  const beginOAuthRedirect = (url, label, providerId) => {
+    const mode = openMusicOAuth(url, providerId);
     if (mode === "redirect") {
       setConnectStatus({
         type: "info",
@@ -62,28 +61,18 @@ export default function CompanionModePanel({ role = "driver" }) {
     setConnecting(provider);
     setConnectStatus(null);
     try {
-      if (provider === "youtube_music") {
-        setConnectStatus({
-          type: "info",
-          message: "Redirecting to Google to authorize YouTube Music…",
-        });
-        await startYouTubeMusicGoogleOAuth();
-        return;
-      }
-
       const res = await connectProvider(provider);
 
       if (res?.use_supabase_google_oauth) {
-        setConnectStatus({
-          type: "info",
-          message: "Redirecting to Google to authorize YouTube Music…",
-        });
-        await startYouTubeMusicGoogleOAuth();
-        return;
+        const clientUrl = buildClientMusicOAuthUrl(provider, oauthFallbackState(provider));
+        if (clientUrl) {
+          beginOAuthRedirect(clientUrl, label, provider);
+          return;
+        }
       }
 
       if (res?.auth_url) {
-        beginOAuthRedirect(res.auth_url, label);
+        beginOAuthRedirect(res.auth_url, label, provider);
         return;
       }
 
@@ -92,7 +81,7 @@ export default function CompanionModePanel({ role = "driver" }) {
         res?.state || oauthFallbackState(provider),
       );
       if (clientUrl) {
-        beginOAuthRedirect(clientUrl, label);
+        beginOAuthRedirect(clientUrl, label, provider);
         return;
       }
 
@@ -254,8 +243,8 @@ export default function CompanionModePanel({ role = "driver" }) {
 
         {providers && (
           <p className="text-xs" style={{ color: "var(--muted)" }}>
-            YouTube Music opens Google sign-in. Spotify requires Spotify OAuth keys on the server.
-            Tokens stay on your device only.
+            YouTube Music uses Google sign-in. If Google shows &quot;access_denied&quot;, your email must be added as a
+            Test user in Google Cloud Console, or use <strong>ZoomEats Ambient</strong> (no account needed).
           </p>
         )}
       </div>
