@@ -3,11 +3,16 @@
 import { useState } from "react";
 import { Music, Headphones, Shield, Volume2, RefreshCw, CheckCircle2 } from "lucide-react";
 import { useCompanionContext } from "./CompanionModeProvider";
+import {
+  buildClientMusicOAuthUrl,
+  openMusicOAuth,
+  startYouTubeMusicGoogleOAuth,
+} from "@/lib/companionMode/musicOAuth";
 
 const PROVIDERS = [
-  { id: "spotify", label: "Spotify" },
-  { id: "apple_music", label: "Apple Music" },
-  { id: "youtube_music", label: "YouTube Music" },
+  { id: "youtube_music", label: "YouTube Music", viaGoogle: true },
+  { id: "spotify", label: "Spotify", viaGoogle: false },
+  { id: "apple_music", label: "Apple Music", viaGoogle: false },
 ];
 
 function providerLabel(id) {
@@ -22,6 +27,7 @@ export default function CompanionModePanel({ role = "driver" }) {
     providers,
     reload,
     connectProvider,
+    connectAmbient,
     confirmConnection,
     disconnect,
     updateSettings,
@@ -30,58 +36,99 @@ export default function CompanionModePanel({ role = "driver" }) {
   const [connectStatus, setConnectStatus] = useState(null);
 
   const prefs = settings?.audio_preferences || { musicVolume: 70, duckingEnabled: true, safetyMode: false };
+  const isAmbient = settings?.music_connected && !settings?.music_provider;
+
+  const beginOAuthRedirect = (url, label) => {
+    const mode = openMusicOAuth(url);
+    if (mode === "redirect") {
+      setConnectStatus({
+        type: "info",
+        message: `Redirecting to ${label} sign-in…`,
+      });
+      return;
+    }
+    setConnectStatus({
+      type: "info",
+      message: `Finish signing in to ${label} in the popup window.`,
+    });
+  };
 
   const handleConnect = async (provider) => {
-    const label = providerLabel(provider);
+    const meta = PROVIDERS.find((p) => p.id === provider);
+    const label = meta?.label || provider;
     setConnecting(provider);
     setConnectStatus(null);
     try {
+      if (provider === "youtube_music") {
+        setConnectStatus({
+          type: "info",
+          message: "Redirecting to Google to authorize YouTube Music…",
+        });
+        await startYouTubeMusicGoogleOAuth();
+        return;
+      }
+
       const res = await connectProvider(provider);
 
-      if (res?.settings) {
+      if (res?.use_supabase_google_oauth) {
         setConnectStatus({
-          type: "success",
-          message: `${label} connected. Use the floating player below to start music.`,
+          type: "info",
+          message: "Redirecting to Google to authorize YouTube Music…",
         });
-        await reload();
+        await startYouTubeMusicGoogleOAuth();
         return;
       }
 
       if (res?.auth_url) {
-        const popup = window.open(res.auth_url, "companion_oauth", "width=500,height=700");
-        if (!popup) {
-          setConnectStatus({
-            type: "info",
-            message: `Popup blocked. Tap here to sign in to ${label}.`,
-            href: res.auth_url,
-          });
-          return;
-        }
-        setConnectStatus({
-          type: "info",
-          message: `Finish signing in to ${label} in the popup window.`,
-        });
+        beginOAuthRedirect(res.auth_url, label);
         return;
       }
 
-      if (res?.client_oauth) {
-        await confirmConnection(provider);
+      const clientUrl = buildClientMusicOAuthUrl(
+        provider,
+        res?.state || `local:${provider}:${Date.now()}`,
+      );
+      if (clientUrl) {
+        beginOAuthRedirect(clientUrl, label);
+        return;
+      }
+
+      if (res?.oauth_required) {
         setConnectStatus({
-          type: "success",
-          message: `${label} connected. Use the floating player below to start music.`,
+          type: "error",
+          message: res.message || `${label} sign-in is not configured yet. Try YouTube Music (Google) or ZoomEats Ambient below.`,
         });
-        await reload();
         return;
       }
 
       setConnectStatus({
         type: "error",
-        message: `Could not connect ${label}. Please try again.`,
+        message: `Could not start ${label} sign-in. Try YouTube Music (Google) or ZoomEats Ambient.`,
       });
     } catch (e) {
       setConnectStatus({
         type: "error",
         message: e instanceof Error ? e.message : `Could not connect ${label}`,
+      });
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const handleAmbient = async () => {
+    setConnecting("ambient");
+    setConnectStatus(null);
+    try {
+      await connectAmbient();
+      setConnectStatus({
+        type: "success",
+        message: "ZoomEats Ambient enabled. Press play on the floating player below.",
+      });
+      await reload();
+    } catch (e) {
+      setConnectStatus({
+        type: "error",
+        message: e instanceof Error ? e.message : "Could not enable ambient playback",
       });
     } finally {
       setConnecting(null);
@@ -144,10 +191,24 @@ export default function CompanionModePanel({ role = "driver" }) {
                 disabled={connecting === p.id}
                 onClick={() => handleConnect(p.id)}
               >
-                {connecting === p.id ? "Connecting…" : isConnected ? `${p.label} ✓` : p.label}
+                {connecting === p.id
+                  ? "Opening…"
+                  : isConnected
+                    ? `${p.label} ✓`
+                    : p.viaGoogle
+                      ? `${p.label} (Google)`
+                      : p.label}
               </button>
             );
           })}
+          <button
+            type="button"
+            className={isAmbient ? "btn-primary" : "btn-secondary"}
+            disabled={connecting === "ambient"}
+            onClick={handleAmbient}
+          >
+            {connecting === "ambient" ? "Enabling…" : isAmbient ? "ZoomEats Ambient ✓" : "ZoomEats Ambient"}
+          </button>
           {settings?.music_connected && (
             <button type="button" className="btn-ghost text-sm" onClick={handleDisconnect}>Disconnect</button>
           )}
@@ -182,16 +243,16 @@ export default function CompanionModePanel({ role = "driver" }) {
           </div>
         )}
 
-        {settings?.music_connected && settings?.music_provider && (
+        {settings?.music_connected && (
           <p className="text-xs mb-3" style={{ color: "var(--primary)" }}>
-            Active: {providerLabel(settings.music_provider)} — open the floating player at the bottom of the screen and press play.
+            Active: {isAmbient ? "ZoomEats Ambient" : providerLabel(settings.music_provider)} — open the floating player and press play.
           </p>
         )}
 
         {providers && (
           <p className="text-xs" style={{ color: "var(--muted)" }}>
-            OAuth via official APIs when configured — credentials stay on your device, never stored on ZoomEats servers.
-            {providers.oauth_available?.spotify === false && " Spotify sign-in opens when OAuth is configured."}
+            YouTube Music opens Google sign-in. Spotify requires Spotify OAuth keys on the server.
+            Tokens stay on your device only.
           </p>
         )}
       </div>

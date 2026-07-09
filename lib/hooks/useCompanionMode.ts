@@ -97,8 +97,11 @@ export function useCompanionMode() {
       const payload = r?.data as {
         settings?: CompanionSettings;
         auth_url?: string | null;
-        auto_connected?: boolean;
+        use_supabase_google_oauth?: boolean;
+        oauth_required?: boolean;
+        oauth_available?: boolean;
         message?: string;
+        state?: string;
       } | null;
       if (payload?.settings) {
         setSettings(payload.settings);
@@ -106,6 +109,22 @@ export function useCompanionMode() {
       return payload;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not connect music provider";
+      setError(msg);
+      throw e;
+    }
+  }, []);
+
+  const connectAmbient = useCallback(async () => {
+    setError(null);
+    try {
+      const r = await api.post("/companion/music/connect", { mode: "ambient" });
+      const payload = r?.data as { settings?: CompanionSettings } | null;
+      if (payload?.settings) {
+        setSettings(payload.settings);
+      }
+      return payload;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Could not enable ambient playback";
       setError(msg);
       throw e;
     }
@@ -154,6 +173,7 @@ export function useCompanionMode() {
     reload: load,
     updateSettings,
     connectProvider,
+    connectAmbient,
     confirmConnection,
     disconnect,
   };
