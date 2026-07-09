@@ -3,43 +3,37 @@
  * Print Google OAuth setup steps for Companion Mode / YouTube Music.
  * Usage: node scripts/print-google-music-oauth-setup.mjs [email-to-whitelist]
  */
-const PROJECT_REF = "njrrhckegbfqhwkqkzvw";
+const PROJECT_REF = process.env.SUPABASE_PROJECT_REF || "njrrhckegbfqhwkqkzvw";
 const CANONICAL_APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://zoom-eats-delivery.vercel.app";
-const REDIRECT_URI = `${CANONICAL_APP_URL.replace(/\/$/, "")}/companion/oauth/callback`;
+const SUPABASE_CALLBACK = `https://${PROJECT_REF}.supabase.co/auth/v1/callback`;
 
-const testEmail = process.argv[2] || "your-email@gmail.com";
+const testEmail = process.argv[2] || "alexanderrymelo@gmail.com";
 
 console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
-║  Google OAuth — Companion Mode / YouTube Music setup             ║
+║  Google OAuth — YouTube Music (via Supabase)                     ║
 ╚══════════════════════════════════════════════════════════════════╝
 
-Error 403 access_denied means your Google OAuth app is in TESTING mode.
-Only emails listed as Test users can approve YouTube access.
+YouTube Music uses Supabase Google sign-in (same as ZoomEats login).
+Redirect URI sent to Google (must be in Google Cloud Console):
+  ${SUPABASE_CALLBACK}
 
-── Step 1: Open Google Cloud Console ──
+── Step 1: Add Test user (required while app is in Testing) ──
 https://console.cloud.google.com/apis/credentials/consent
+→ Audience → Test users → Add users
+→ Add: ${testEmail}
 
-── Step 2: Add Test user ──
-OAuth consent screen → Audience → Test users → Add users
-Add: ${testEmail}
+── Step 2: Verify redirect URI exists ──
+https://console.cloud.google.com/apis/credentials
+→ OAuth 2.0 Client IDs → your web client
+→ Authorized redirect URIs must include:
+  ${SUPABASE_CALLBACK}
 
-── Step 3: Add redirect URI ──
-APIs & Services → Credentials → OAuth 2.0 Client IDs → (your web client)
-Authorized redirect URIs → Add:
-  ${REDIRECT_URI}
-  http://localhost:3000/companion/oauth/callback
-
-── Step 4: Enable YouTube Data API v3 ──
+── Step 3: Enable YouTube Data API v3 ──
 https://console.cloud.google.com/apis/library/youtube.googleapis.com
 
-── Step 5: Retry in ZoomEats ──
-Companion Mode → YouTube Music (Google)
+── Step 4: Retry ──
+${CANONICAL_APP_URL}/driver/companion → YouTube Music (Google)
 
-── Until verified / test user added ──
-Use "ZoomEats Ambient" on Companion Mode (no Google sign-in required).
-
-Supabase project: ${PROJECT_REF}
-Production URL: ${CANONICAL_APP_URL}
-Required redirect URI (copy exactly): ${REDIRECT_URI}
+── No Google? Use ZoomEats Ambient (works immediately) ──
 `);
