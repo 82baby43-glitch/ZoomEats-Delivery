@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import DreamlandRecCard from "./DreamlandRecCard";
 import MoodQuickReorder from "./MoodQuickReorder";
-import { LoadingSkeleton } from "@/components/ui/PageStates";
 
 const MOOD_CHIPS = [
   { id: "tired", label: "Tired 😴" },
@@ -15,7 +14,11 @@ const MOOD_CHIPS = [
   { id: "lazy", label: "Lazy 🛋️" },
 ];
 
-export default function DreamlandHome({ onOpenChat }) {
+export default function DreamlandHome({
+  compact = false,
+  onAfterMood,
+  onAfterSurprise,
+}) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -33,11 +36,11 @@ export default function DreamlandHome({ onOpenChat }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const setMood = async (mood) => {
+  const setMood = async (mood, label) => {
     try {
       await api.post("/dreamland/mood", { mood });
       await load();
-      onOpenChat?.();
+      onAfterMood?.(mood, label);
     } catch (e) {
       console.warn(e);
     }
@@ -46,15 +49,66 @@ export default function DreamlandHome({ onOpenChat }) {
   const surprise = async () => {
     try {
       const res = await api.post("/dreamland/surprise", {});
-      if (res?.data?.surprise) {
-        onOpenChat?.(res.data.message);
+      if (res?.data) {
+        await load();
+        onAfterSurprise?.(res.data);
       }
     } catch (e) {
       console.warn(e);
     }
   };
 
-  if (loading) return <LoadingSkeleton label="Dreamland is thinking…" rows={2} />;
+  if (loading) {
+    return (
+      <div className={`text-center text-xs py-3 ${compact ? "" : "py-8"}`} style={{ color: "var(--muted)" }}>
+        Dreamland is thinking…
+      </div>
+    );
+  }
+
+  if (compact) {
+    return (
+      <div className="space-y-3 pb-2 border-b mb-2" style={{ borderColor: "var(--border)" }}>
+        {data?.last_win && <MoodQuickReorder lastWin={data.last_win} compact />}
+
+        <div>
+          <p className="text-xs font-bold mb-2">How are you feeling?</p>
+          <div className="flex flex-wrap gap-1.5">
+            {MOOD_CHIPS.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className="px-2.5 py-1 rounded-full text-xs font-bold border transition hover:scale-105"
+                style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+                onClick={() => setMood(m.id, m.label)}
+                data-testid={`dreamland-mood-${m.id}`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="btn-primary w-full text-xs py-2"
+          onClick={surprise}
+          data-testid="dreamland-surprise-button"
+        >
+          ✨ Surprise Me
+        </button>
+
+        {data?.top_picks?.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-bold">Perfect for {data.timeLabel || "right now"}</p>
+            {data.top_picks.slice(0, 2).map((rec) => (
+              <DreamlandRecCard key={`${rec.restaurant_id}-${rec.menu_item_id}`} rec={rec} compact />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-10 mb-12">
@@ -80,7 +134,7 @@ export default function DreamlandHome({ onOpenChat }) {
                 type="button"
                 className="px-3 py-1.5 rounded-full text-sm font-bold border transition hover:scale-105"
                 style={{ borderColor: "var(--border)", background: "var(--surface)" }}
-                onClick={() => setMood(m.id)}
+                onClick={() => setMood(m.id, m.label)}
               >
                 {m.label}
               </button>
@@ -103,7 +157,7 @@ export default function DreamlandHome({ onOpenChat }) {
           <h3 className="font-display text-xl font-bold mb-4">Perfect for {data.timeLabel || "right now"}</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {data.top_picks.slice(0, 3).map((rec) => (
-              <DreamlandRecCard key={`${rec.restaurant_id}-${rec.menu_item_id}`} rec={rec} />
+              <DreamlandRecCard key={`${rec.restaurant_id}-${rec.menu_item_id}`} rec={rec} compact />
             ))}
           </div>
         </section>

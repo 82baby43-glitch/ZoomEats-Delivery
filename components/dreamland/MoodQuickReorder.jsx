@@ -6,7 +6,7 @@ import { RotateCcw } from "lucide-react";
 import { useCart } from "@/lib/cart";
 import { formatMoney } from "@/lib/safeData";
 
-export default function MoodQuickReorder({ lastWin }) {
+export default function MoodQuickReorder({ lastWin, compact = false }) {
   const { addItem, updateQty } = useCart();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -33,6 +33,37 @@ export default function MoodQuickReorder({ lastWin }) {
       setBusy(false);
     }
   };
+
+  if (compact) {
+    return (
+      <div
+        className="rounded-xl border p-3 space-y-2"
+        style={{
+          borderColor: "var(--border)",
+          background: "linear-gradient(135deg, rgba(67,97,75,0.08) 0%, rgba(212,154,54,0.06) 100%)",
+        }}
+        data-testid="mood-quick-reorder-card"
+      >
+        <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--muted)" }}>
+          Same vibe, same meal
+        </div>
+        <p className="text-sm font-bold leading-snug">{lastWin.headline}</p>
+        <p className="text-xs" style={{ color: "var(--muted)" }}>
+          {lastWin.restaurant.name} · {lastWin.item.name} · ${formatMoney(lastWin.item.price)}
+        </p>
+        <button
+          type="button"
+          className="btn-primary w-full text-xs py-2"
+          onClick={reorder}
+          disabled={busy}
+          data-testid="mood-quick-reorder-button"
+        >
+          <RotateCcw size={14} />
+          {busy ? "Adding…" : "Order again"}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <section

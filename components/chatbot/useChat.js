@@ -74,7 +74,12 @@ export function useDreamlandChat(open) {
     setMsgs((m) => [...m, { role: "assistant", text }]);
   }, []);
 
-  return { msgs, busy, send, lastRecs, injectMessage };
+  const appendAssistant = useCallback((text, recommendations = []) => {
+    setMsgs((m) => [...m, { role: "assistant", text, recommendations }]);
+    if (recommendations.length) setLastRecs(recommendations);
+  }, []);
+
+  return { msgs, busy, send, lastRecs, injectMessage, appendAssistant };
 }
 
 // Backward-compatible alias

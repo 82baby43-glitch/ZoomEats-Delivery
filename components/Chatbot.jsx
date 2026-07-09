@@ -1,23 +1,38 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, MessageCircle } from "lucide-react";
 import ChatMessage from "@/components/chatbot/ChatMessage";
 import ChatTyping from "@/components/chatbot/ChatTyping";
 import ChatInput from "@/components/chatbot/ChatInput";
 import DreamlandAvatar from "@/components/dreamland/DreamlandAvatar";
+import DreamlandHome from "@/components/dreamland/DreamlandHome";
 import { DREAMLAND_CHAT_SUBTITLE } from "@/lib/dreamland/prompts";
 import { useDreamlandChat } from "@/components/chatbot/useChat";
+import { useAuth } from "@/lib/auth";
 
 export default function Chatbot() {
   const [open, setOpen] = useState(false);
-  const { msgs, busy, send } = useDreamlandChat(open);
+  const { user } = useAuth();
+  const { msgs, busy, send, appendAssistant } = useDreamlandChat(open);
   const endRef = useRef();
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs, busy]);
+  }, [msgs, busy, open]);
+
+  const handleMood = useCallback((mood, label) => {
+    const text = label.replace(/[^\w\s]/g, "").trim() || mood.replace(/_/g, " ");
+    send(`I'm feeling ${text.toLowerCase()}`);
+  }, [send]);
+
+  const handleSurprise = useCallback((data) => {
+    if (!data?.message) return;
+    const text = String(data.message).replace(/\*\*/g, "");
+    const recs = data.surprise ? [data.surprise] : [];
+    appendAssistant(text, recs);
+  }, [appendAssistant]);
 
   return (
     <>
@@ -48,7 +63,7 @@ export default function Chatbot() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
-            className="fixed bottom-24 right-6 w-[380px] max-w-[calc(100vw-3rem)] h-[520px] border rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden"
+            className="fixed bottom-24 right-6 w-[380px] max-w-[calc(100vw-3rem)] h-[560px] border rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden"
             style={{
               background: "var(--surface)",
               borderColor: "var(--border)",
@@ -57,7 +72,7 @@ export default function Chatbot() {
             data-testid="chatbot-panel"
           >
             <div
-              className="px-4 py-3 border-b flex items-center gap-3"
+              className="px-4 py-3 border-b flex items-center gap-3 shrink-0"
               style={{
                 borderColor: "var(--border)",
                 background: "var(--surface-2)",
@@ -70,6 +85,13 @@ export default function Chatbot() {
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3" data-testid="chatbot-messages">
+              {user && (
+                <DreamlandHome
+                  compact
+                  onAfterMood={handleMood}
+                  onAfterSurprise={handleSurprise}
+                />
+              )}
               {msgs.map((m, i) => (
                 <ChatMessage key={`${m.role}-${i}-${m.text.slice(0, 16)}`} message={m} />
               ))}
