@@ -7,11 +7,17 @@ import Header from "@/components/Header";
 import { useRealtimeRow } from "@/lib/useRealtime";
 import { useWebPush } from "@/lib/useWebPush";
 import { primeChime, playChime } from "@/lib/chime";
-import { Plus, Trash2, Wifi, Bell, BellOff, MapPin } from "lucide-react";
+import { Plus, Trash2, Wifi, Bell, BellOff, MapPin, Headphones } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatMoney, sanitizeOrders, sanitizeWallet, safeArray } from "@/lib/safeData";
 import { isPaymentConfirmed } from "@/lib/orderState";
 import { logClientError } from "@/lib/clientErrorLog";
+import { CompanionModeProvider } from "@/components/companion/CompanionModeProvider";
+import KitchenCompanion from "@/components/companion/KitchenCompanion";
+import FloatingMusicPlayer from "@/components/companion/FloatingMusicPlayer";
+import { useCompanionRealtime } from "@/lib/hooks/useCompanionRealtime";
+import { useCompanionMode } from "@/lib/hooks/useCompanionMode";
+import { useAuth } from "@/lib/auth";
 
 const STATUS_NEXT = {
   placed: "accepted",
@@ -22,6 +28,14 @@ const STATUS_NEXT = {
 const FOOD_IMG = "https://images.pexels.com/photos/32594346/pexels-photo-32594346.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
 
 export default function VendorDashboard() {
+  return (
+    <CompanionModeProvider>
+      <VendorDashboardInner />
+    </CompanionModeProvider>
+  );
+}
+
+function VendorDashboardInner() {
   const [restaurant, setRestaurant] = useState(null);
   const [menu, setMenu] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -36,6 +50,8 @@ export default function VendorDashboard() {
   const notifiedRef = useRef(new Set());
   // First load is silent — only orders that *arrive* after mount trigger a notification.
   const primedRef = useRef(false);
+  const { user } = useAuth();
+  const { settings: companionSettings } = useCompanionMode();
 
   const load = useCallback(async () => {
     try {
@@ -101,6 +117,15 @@ export default function VendorDashboard() {
     load();
   }, [load]);
   useRealtimeRow("orders", "restaurant_id", restaurant?.restaurant_id, onRealtime);
+
+  useCompanionRealtime({
+    role: "restaurant",
+    userId: user?.user_id,
+    restaurantId: restaurant?.restaurant_id,
+    enabled: !!user?.user_id && !!restaurant?.restaurant_id,
+    audioPreferences: companionSettings?.audio_preferences,
+    onRefresh: load,
+  });
 
   // Fallback polling every 10s so reloads aren't realtime-only
   useEffect(() => {
@@ -179,6 +204,9 @@ export default function VendorDashboard() {
           <Link href="/restaurant/live-map" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="restaurant-live-map-link">
             <MapPin size={16} /> Live Map
           </Link>
+          <Link href="/restaurant/companion" className="btn-secondary inline-flex items-center gap-2 text-sm" data-testid="kitchen-companion-link">
+            <Headphones size={16} /> Kitchen Companion
+          </Link>
           <span
             className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-md"
             style={{ background: "var(--surface-2)", color: livePulse > 0 ? "var(--primary)" : "var(--muted)" }}
@@ -227,7 +255,7 @@ export default function VendorDashboard() {
         </div>
         <p className="mt-2" style={{ color: "var(--muted)" }}>Vendor dashboard</p>
         <div className="flex gap-2 mt-6 border-b" style={{ borderColor: "var(--border)" }}>
-          {["orders", "menu", "profile"].map((t) => (
+          {["orders", "companion", "menu", "profile"].map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -283,6 +311,12 @@ export default function VendorDashboard() {
                 </motion.div>
               ))}
             </AnimatePresence>
+          </div>
+        )}
+
+        {tab === "companion" && (
+          <div className="mt-6">
+            <KitchenCompanion orders={orders} />
           </div>
         )}
 
@@ -343,6 +377,7 @@ export default function VendorDashboard() {
           </div>
         )}
       </div>
+      <FloatingMusicPlayer className="bottom-6" />
     </div>
   );
 }

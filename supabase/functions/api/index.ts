@@ -35,6 +35,7 @@ import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
 import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geocodeAdmin.ts";
 import { handleLaunchAuditRequest } from "../_shared/launchAuditHandler.ts";
 import { handleFinancialAdminRequest } from "../_shared/financialAdminHandler.ts";
+import { handleCompanionRequest } from "../_shared/companionMode/handler.ts";
 import { recordOrderFinancials } from "../_shared/financial/engine.ts";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "../_shared/restaurantAdminHandler.ts";
 import { syncRestaurantLaunchState } from "../_shared/restaurant/readiness.ts";
@@ -196,6 +197,15 @@ Deno.serve(async (req) => {
 
     const financialResult = await handleFinancialAdminRequest(db, complianceCtx);
     if (financialResult !== null) return json(financialResult);
+
+    const companionResult = await handleCompanionRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+    });
+    if (companionResult !== null) return json(companionResult);
 
     const restaurantAdminResult = await handleRestaurantAdminRequest(db, {
       path,

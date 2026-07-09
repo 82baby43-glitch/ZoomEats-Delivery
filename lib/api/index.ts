@@ -130,6 +130,9 @@ export const api = {
   put: async (path: string, body: unknown = {}) => ({
     data: await request(path, "PUT", body),
   }),
+  patch: async (path: string, body: unknown = {}) => ({
+    data: await request(path, "PATCH", body),
+  }),
   delete: async (path: string) => ({
     data: await request(path, "DELETE"),
   }),

@@ -5,13 +5,19 @@ import { isFounderDriverModeActive } from "@/lib/founderDriver/session";
 import Link from "next/link";
 import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
-import { MapPin, Power, Truck } from "lucide-react";
+import { MapPin, Power, Truck, Navigation } from "lucide-react";
+import CompanionModeButton from "@/components/companion/CompanionModeButton";
+import { CompanionModeProvider } from "@/components/companion/CompanionModeProvider";
+import FloatingMusicPlayer from "@/components/companion/FloatingMusicPlayer";
+import DriverSafetyMode from "@/components/companion/DriverSafetyMode";
+import { useCompanionMode } from "@/lib/hooks/useCompanionMode";
+import { useCompanionRealtime } from "@/lib/hooks/useCompanionRealtime";
+import { useAuth } from "@/lib/auth";
 import { formatMoney, sanitizeOrders, sanitizeWallet } from "@/lib/safeData";
 import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
 import { logClientError } from "@/lib/clientErrorLog";
 import { ErrorState } from "@/components/ui/PageStates";
 import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
-import { Navigation } from "lucide-react";
 
 const HEARTBEAT_MS = 3000;
 
@@ -31,6 +37,14 @@ function useGeolocation(active) {
 }
 
 export default function DeliveryDashboard() {
+  return (
+    <CompanionModeProvider>
+      <DeliveryDashboardInner />
+    </CompanionModeProvider>
+  );
+}
+
+function DeliveryDashboardInner() {
   const [online, setOnline] = useState(false);
   const [available, setAvailable] = useState([]);
   const [mine, setMine] = useState([]);
@@ -42,6 +56,8 @@ export default function DeliveryDashboard() {
   const lastSentRef = useRef(0);
 
   const [founderMode, setFounderMode] = useState(false);
+  const { user } = useAuth();
+  const { settings: companionSettings } = useCompanionMode();
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -92,6 +108,17 @@ export default function DeliveryDashboard() {
   useRoutingRealtime(driverId, () => {
     refresh();
   });
+
+  useCompanionRealtime({
+    role: "driver",
+    userId: user?.user_id,
+    driverId,
+    enabled: !!user?.user_id,
+    audioPreferences: companionSettings?.audio_preferences,
+    onRefresh: refresh,
+  });
+
+  const firstAvailable = available[0];
 
   // Toggle online → flip availability + persist
   const toggleOnline = async () => {
@@ -161,7 +188,22 @@ export default function DeliveryDashboard() {
           <Link href="/driver/live-map" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="driver-live-map-link">
             <MapPin size={16} /> Live Map Dashboard
           </Link>
+          <CompanionModeButton href="/driver/companion" label="Companion Mode" />
         </div>
+
+        <DriverSafetyMode
+          enabled={!!companionSettings?.audio_preferences?.safetyMode}
+          onAcceptOrder={() => firstAvailable && action(firstAvailable.order_id, "accept")}
+          onStartNavigation={() => window.open("https://maps.google.com", "_blank")}
+          onArrivedRestaurant={() => {
+            const o = dispatchOrders[0] || mine[0];
+            if (o?.order_id) action(o.order_id, "pickup", true);
+          }}
+          onDelivered={() => {
+            const o = mine.find((x) => x.status === "picked_up") || dispatchOrders.find((x) => x.status === "picked_up");
+            if (o?.order_id) action(o.order_id, "deliver", o.delivery_type === "internal");
+          }}
+        />
 
         {/* Online toggle banner */}
         <div className="card p-5 flex items-center gap-4 mt-4" data-testid="online-toggle-card">
@@ -362,6 +404,7 @@ export default function DeliveryDashboard() {
           )}
         </div>
       </div>
+      <FloatingMusicPlayer />
     </div>
   );
 }

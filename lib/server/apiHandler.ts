@@ -25,6 +25,7 @@ import { handleStripeAdminRequest } from "./stripeAdmin";
 import { handleGeocodeAdminRequest } from "./geocodeAdmin";
 import { handleLaunchAuditRequest } from "./launchAuditHandler";
 import { handleFinancialAdminRequest } from "./financialAdminHandler";
+import { handleCompanionRequest } from "../companionMode/handler";
 import { recordOrderFinancials } from "../financial/engine";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "./restaurantAdminHandler";
 import { syncRestaurantLaunchState } from "../restaurant/readiness";
@@ -177,6 +178,15 @@ export async function handleApiRequest(
 
     const financialResult = await handleFinancialAdminRequest(db, complianceCtx);
     if (financialResult !== null) return financialResult;
+
+    const companionResult = await handleCompanionRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+    });
+    if (companionResult !== null) return companionResult;
 
     const restaurantAdminResult = await handleRestaurantAdminRequest(db, {
       path,
