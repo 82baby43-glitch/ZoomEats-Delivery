@@ -25,6 +25,7 @@ async function fetchStripeAccount(accountId: string) {
   }
 }
 
+/** Restaurant Stripe Connect payout readiness from onboarding + live account status. */
 export async function evaluateStripePayoutReadiness(
   db: SupabaseClient,
   restaurantId: string
@@ -37,7 +38,7 @@ export async function evaluateStripePayoutReadiness(
     .eq("restaurant_id", restaurantId)
     .maybeSingle();
 
-  if (!rest?.owner_id) {
+  if (!rest) {
     return {
       connected: false,
       account_id: null,
@@ -45,13 +46,13 @@ export async function evaluateStripePayoutReadiness(
       charges_enabled: false,
       payouts_enabled: false,
       ready: false,
-      blockers: ["Restaurant owner not found"],
+      blockers: ["Restaurant not found"],
     };
   }
 
   const { data: onboarding } = await db
     .from("restaurant_onboarding")
-    .select("stripe_connect_id,stripe_connect_complete")
+    .select("stripe_connect_id,stripe_connect_complete,user_id")
     .eq("restaurant_id", restaurantId)
     .maybeSingle();
 
@@ -89,4 +90,29 @@ export async function evaluateStripePayoutReadiness(
     ready,
     blockers,
   };
+}
+
+/** Approved restaurant with coordinates and at least one priced menu item — for audit simulation. */
+export async function findSimulationRestaurant(db: SupabaseClient) {
+  const { data: approved } = await db
+    .from("restaurants")
+    .select("restaurant_id,name,latitude,longitude,approved,accepting_orders")
+    .eq("approved", true)
+    .limit(50);
+
+  for (const r of approved || []) {
+    const lat = Number(r.latitude);
+    const lng = Number(r.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat === 0 || lng === 0) continue;
+
+    const { count } = await db
+      .from("menu_items")
+      .select("*", { count: "exact", head: true })
+      .eq("restaurant_id", r.restaurant_id)
+      .eq("available", true)
+      .gt("price", 0);
+
+    if ((count ?? 0) > 0) return r;
+  }
+  return null;
 }

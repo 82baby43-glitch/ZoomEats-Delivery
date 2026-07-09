@@ -3,6 +3,7 @@ import type { AuditCheck, AuditStatus, FixSuggestion, IssueSeverity, LaunchAudit
 import { getSupabaseAnonKey, getSupabasePublicUrl } from "../supabaseEnv";
 import { getAdminEmails, isAdminEmailsConfigured } from "../adminEnv";
 import { getRateLimitMetrics } from "../rateLimiter";
+import { resolveSimulationCustomerId } from "./simulationCustomer";
 
 function fix(
   problem: string,
@@ -296,26 +297,38 @@ export async function runRestaurantChecks(db: SupabaseClient): Promise<AuditChec
   ));
 
   const sampleApproved = approved.find((r) => r.latitude && r.longitude) || approved[0];
-  if (sampleApproved) {
+
+  let restaurantsWithMenu = 0;
+  let totalMenuItems = 0;
+  let sampleMenuRest: (typeof approved)[0] | undefined;
+  for (const r of approved) {
     const { count: menuCount } = await countRows(db, "menu_items", (q) =>
-      q.eq("restaurant_id", sampleApproved.restaurant_id).eq("available", true)
+      q.eq("restaurant_id", r.restaurant_id).eq("available", true)
     );
+    if ((menuCount ?? 0) > 0) {
+      restaurantsWithMenu += 1;
+      totalMenuItems += menuCount ?? 0;
+      if (!sampleMenuRest) sampleMenuRest = r;
+    }
+  }
+
+  if (approvedCount > 0) {
     checks.push(mk(
       "rest_menu_items",
       "restaurant_system",
       "Menu items available",
-      (menuCount ?? 0) > 0 ? "pass" : "fail",
+      restaurantsWithMenu > 0 ? "pass" : "fail",
       "critical",
-      `${menuCount} items at approved restaurant ${sampleApproved.restaurant_id}`
-    ));
-  } else if (approvedCount > 0) {
-    checks.push(mk(
-      "rest_menu_items",
-      "restaurant_system",
-      "Menu items available",
-      "warn",
-      "high",
-      "Approved restaurants found but could not sample menu"
+      restaurantsWithMenu > 0
+        ? `${restaurantsWithMenu} approved restaurant(s) with ${totalMenuItems} available items`
+        : `No approved restaurant has available menu items (sampled ${sampleApproved?.restaurant_id || "none"})`,
+      restaurantsWithMenu > 0 ? undefined : fix(
+        "No orderable menus",
+        "Customers cannot add items to cart",
+        "Imported or approved restaurants missing menu_items",
+        "Add available menu items via Vendor dashboard or admin import",
+        "low"
+      )
     ));
   }
 
@@ -717,9 +730,10 @@ export async function runE2eSimulation(db: SupabaseClient, options: LaunchAuditO
   }
 
   const testOrderId = `ord_audit_${Date.now().toString(36)}`;
+  const customerId = await resolveSimulationCustomerId(db);
   const orderRow = {
     order_id: testOrderId,
-    customer_id: "launch_audit_bot",
+    customer_id: customerId,
     customer_name: "Launch Audit Bot",
     restaurant_id: sampleRest.restaurant_id,
     restaurant_name: sampleRest.name,

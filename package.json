@@ -17,7 +17,8 @@
     "auth:redirects": "node scripts/sync-auth-redirects.mjs",
     "signup:test": "node scripts/signup-test.mjs",
     "geocode:restaurants": "node scripts/geocode-restaurants.mjs",
-    "launch:readiness": "node scripts/launch-readiness.mjs"
+    "launch:readiness": "node scripts/launch-readiness.mjs",
+    "launch:regression": "npx tsx scripts/launch-regression-test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",
