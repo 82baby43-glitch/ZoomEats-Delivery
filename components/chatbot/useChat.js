@@ -14,7 +14,7 @@ function normalizeHistoryMessage(text) {
     .replace(/Hey! I'm Dreamland 👋 What are you in the mood for tonight\?/i, DREAMLAND_SEED_MESSAGE);
 }
 
-export function useDreamlandChat(open) {
+export function useDreamlandChat(open, { skipSeed = false } = {}) {
   const [msgs, setMsgs] = useState([]);
   const [busy, setBusy] = useState(false);
   const [lastRecs, setLastRecs] = useState([]);
@@ -35,15 +35,18 @@ export function useDreamlandChat(open) {
           })));
           const withRecs = [...history].reverse().find((m) => m?.recommendations?.length);
           if (withRecs) setLastRecs(withRecs.recommendations);
-        } else {
+        } else if (!skipSeed) {
           setMsgs(SEED);
+        } else {
+          setMsgs([]);
         }
       } catch (e) {
         console.warn("[dreamland] history load failed:", e);
-        setMsgs(SEED);
+        if (!skipSeed) setMsgs(SEED);
+        else setMsgs([]);
       }
     })();
-  }, [open]);
+  }, [open, skipSeed]);
 
   const send = useCallback(async (text) => {
     if (!text || busy) return;

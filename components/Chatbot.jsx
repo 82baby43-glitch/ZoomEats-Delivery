@@ -7,7 +7,7 @@ import ChatMessage from "@/components/chatbot/ChatMessage";
 import ChatTyping from "@/components/chatbot/ChatTyping";
 import ChatInput from "@/components/chatbot/ChatInput";
 import DreamlandAvatar from "@/components/dreamland/DreamlandAvatar";
-import DreamlandHome from "@/components/dreamland/DreamlandHome";
+import DreamlandChatHub from "@/components/dreamland/DreamlandChatHub";
 import { DREAMLAND_CHAT_SUBTITLE } from "@/lib/dreamland/prompts";
 import { useDreamlandChat } from "@/components/chatbot/useChat";
 import { useAuth } from "@/lib/auth";
@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth";
 export default function Chatbot() {
   const [open, setOpen] = useState(false);
   const { user } = useAuth();
-  const { msgs, busy, send, appendAssistant } = useDreamlandChat(open);
+  const { msgs, busy, send, appendAssistant } = useDreamlandChat(open, { skipSeed: !!user });
   const endRef = useRef();
 
   useEffect(() => {
@@ -86,8 +86,7 @@ export default function Chatbot() {
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3" data-testid="chatbot-messages">
               {user && (
-                <DreamlandHome
-                  compact
+                <DreamlandChatHub
                   onAfterMood={handleMood}
                   onAfterSurprise={handleSurprise}
                 />
