@@ -210,21 +210,90 @@ export async function runDriverChecks(db: SupabaseClient): Promise<AuditCheck[]>
 
 export async function runRestaurantChecks(db: SupabaseClient): Promise<AuditCheck[]> {
   const checks: AuditCheck[] = [];
-  const { data: rests } = await db.from("restaurants").select("restaurant_id,approved,accepting_orders,latitude,longitude,stripe_account_id").limit(20);
 
-  const approved = (rests || []).filter((r) => r.approved);
-  const accepting = (rests || []).filter((r) => r.accepting_orders);
-  const geocoded = (rests || []).filter((r) => r.latitude && r.longitude);
-  const stripeOnboarded = (rests || []).filter((r) => r.stripe_account_id);
+  const [{ count: approvedCount }, { count: acceptingCount }] = await Promise.all([
+    countRows(db, "restaurants", (q) => q.eq("approved", true)),
+    countRows(db, "restaurants", (q) => q.eq("accepting_orders", true)),
+  ]);
 
-  checks.push(mk("rest_approved", "restaurant_system", "Restaurant approval workflow", approved.length > 0 ? "pass" : "fail", "critical", `${approved.length} approved`));
-  checks.push(mk("rest_accepting", "restaurant_system", "Restaurants accepting orders", accepting.length > 0 ? "pass" : "warn", "high", `${accepting.length} accepting`));
-  checks.push(mk("rest_geocoded", "restaurant_system", "Restaurant locations", geocoded.length >= approved.length ? "pass" : "warn", "high", `${geocoded.length}/${approved.length} have coordinates`));
-  checks.push(mk("rest_stripe_connect", "restaurant_system", "Stripe Connect onboarding", stripeOnboarded.length > 0 ? "pass" : "warn", "medium", `${stripeOnboarded.length} with Stripe account`));
+  const { data: approvedRests } = await db
+    .from("restaurants")
+    .select("restaurant_id,approved,accepting_orders,latitude,longitude,stripe_account_id")
+    .eq("approved", true)
+    .limit(100);
 
-  if (approved[0]) {
-    const { count: menuCount } = await countRows(db, "menu_items", (q) => q.eq("restaurant_id", approved[0].restaurant_id).eq("available", true));
-    checks.push(mk("rest_menu_items", "restaurant_system", "Menu items available", (menuCount ?? 0) > 0 ? "pass" : "fail", "critical", `${menuCount} items at sample restaurant`));
+  const approved = approvedRests || [];
+  const geocodedApproved = approved.filter((r) => r.latitude && r.longitude);
+  const stripeOnboarded = approved.filter((r) => r.stripe_account_id);
+
+  checks.push(mk(
+    "rest_approved",
+    "restaurant_system",
+    "Restaurant approval workflow",
+    approvedCount > 0 ? "pass" : "fail",
+    "critical",
+    `${approvedCount} approved`,
+    approvedCount > 0 ? undefined : fix(
+      "No approved restaurants",
+      "Customers cannot place orders",
+      "Restaurants pending admin approval",
+      "Approve at least one restaurant in Admin → Approvals",
+      "low"
+    )
+  ));
+  checks.push(mk(
+    "rest_accepting",
+    "restaurant_system",
+    "Restaurants accepting orders",
+    acceptingCount > 0 ? "pass" : "warn",
+    "high",
+    `${acceptingCount} accepting`
+  ));
+  checks.push(mk(
+    "rest_geocoded",
+    "restaurant_system",
+    "Restaurant locations",
+    approvedCount === 0
+      ? "warn"
+      : geocodedApproved.length >= approvedCount
+        ? "pass"
+        : "warn",
+    "high",
+    approvedCount === 0
+      ? "No approved restaurants to geocode"
+      : `${geocodedApproved.length}/${approvedCount} approved have coordinates`
+  ));
+  checks.push(mk(
+    "rest_stripe_connect",
+    "restaurant_system",
+    "Stripe Connect onboarding",
+    stripeOnboarded.length > 0 ? "pass" : "warn",
+    "medium",
+    `${stripeOnboarded.length} approved with Stripe account`
+  ));
+
+  const sampleApproved = approved.find((r) => r.latitude && r.longitude) || approved[0];
+  if (sampleApproved) {
+    const { count: menuCount } = await countRows(db, "menu_items", (q) =>
+      q.eq("restaurant_id", sampleApproved.restaurant_id).eq("available", true)
+    );
+    checks.push(mk(
+      "rest_menu_items",
+      "restaurant_system",
+      "Menu items available",
+      (menuCount ?? 0) > 0 ? "pass" : "fail",
+      "critical",
+      `${menuCount} items at approved restaurant ${sampleApproved.restaurant_id}`
+    ));
+  } else if (approvedCount > 0) {
+    checks.push(mk(
+      "rest_menu_items",
+      "restaurant_system",
+      "Menu items available",
+      "warn",
+      "high",
+      "Approved restaurants found but could not sample menu"
+    ));
   }
 
   const onboardingExists = await tableExists(db, "restaurant_onboarding");
