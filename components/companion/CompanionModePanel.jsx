@@ -19,6 +19,10 @@ function providerLabel(id) {
   return PROVIDERS.find((p) => p.id === id)?.label || id;
 }
 
+function oauthFallbackState(provider) {
+  return `local:${provider}:${crypto.randomUUID()}`;
+}
+
 export default function CompanionModePanel({ role = "driver" }) {
   const {
     settings,
@@ -28,7 +32,6 @@ export default function CompanionModePanel({ role = "driver" }) {
     reload,
     connectProvider,
     connectAmbient,
-    confirmConnection,
     disconnect,
     updateSettings,
   } = useCompanionContext();
@@ -86,7 +89,7 @@ export default function CompanionModePanel({ role = "driver" }) {
 
       const clientUrl = buildClientMusicOAuthUrl(
         provider,
-        res?.state || `local:${provider}:${Date.now()}`,
+        res?.state || oauthFallbackState(provider),
       );
       if (clientUrl) {
         beginOAuthRedirect(clientUrl, label);
