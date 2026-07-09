@@ -33,6 +33,7 @@ import { handlePickupPhotoRequest } from "../_shared/pickupPhotosHandler.ts";
 import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
 import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geocodeAdmin.ts";
+import { handleLaunchAuditRequest } from "../_shared/launchAuditHandler.ts";
 import { normalizeRole } from "../_shared/complianceAuthz.ts";
 import { filterPublicRestaurants, isTestRestaurantName } from "../_shared/restaurants.ts";
 import { finalizePublicRestaurantList } from "../_shared/restaurantListing.ts";
@@ -172,6 +173,9 @@ Deno.serve(async (req) => {
 
     const geocodeResult = await handleGeocodeAdminRequest(db, complianceCtx);
     if (geocodeResult !== null) return json(geocodeResult);
+
+    const launchAuditResult = await handleLaunchAuditRequest(db, complianceCtx);
+    if (launchAuditResult !== null) return json(launchAuditResult);
 
     const dreamlandResult = await handleDreamlandRequest(db, {
       path,

@@ -23,6 +23,7 @@ import { handlePickupPhotoRequest } from "../pickupPhotos/handler";
 import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { handleStripeAdminRequest } from "./stripeAdmin";
 import { handleGeocodeAdminRequest } from "./geocodeAdmin";
+import { handleLaunchAuditRequest } from "./launchAuditHandler";
 import { geocodeOrderAddress } from "./geocodeAdmin";
 import { normalizeRole } from "../compliance/authz";
 import { isTestRestaurantName } from "../restaurants";
@@ -151,6 +152,9 @@ export async function handleApiRequest(
 
     const geocodeResult = await handleGeocodeAdminRequest(db, complianceCtx);
     if (geocodeResult !== null) return geocodeResult;
+
+    const launchAuditResult = await handleLaunchAuditRequest(db, complianceCtx);
+    if (launchAuditResult !== null) return launchAuditResult;
 
     const dreamlandResult = await handleDreamlandRequest(db, {
       path,
