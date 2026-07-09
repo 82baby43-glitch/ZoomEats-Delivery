@@ -72,6 +72,8 @@ export interface LaunchReadinessReport {
   };
   performance_metrics: Record<string, number | string | null>;
   deployment_checklist: string[];
+  first_100_orders_checklist?: string[];
+  production_launch_report?: string;
   executive_summary: string;
 }
 

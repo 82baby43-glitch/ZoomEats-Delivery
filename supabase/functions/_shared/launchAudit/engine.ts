@@ -24,6 +24,8 @@ import {
   runStorageChecks,
 } from "./checks.ts";
 import { runFullDeliverySimulation } from "./testOrder.ts";
+import { runEmailHealthChecks } from "./emailHealth.ts";
+import { isAdminEmailsConfigured } from "../adminEnv.ts";
 import type {
   AuditCheck,
   AuditStatus,
@@ -135,12 +137,27 @@ const DEPLOYMENT_CHECKLIST = [
   "Stripe webhook endpoint registered and verified",
   "Supabase edge functions deployed (npm run functions:deploy)",
   "ADMIN_EMAILS configured for admin access",
-  "At least one approved restaurant with menu items",
+  "At least one approved restaurant with menu items and coordinates",
+  "Restaurant Stripe Connect payout accounts verified",
   "At least one available driver OR Uber Direct enabled",
   "Environment variables synced (Vercel + Supabase secrets)",
   "Run launch audit with simulate_e2e:true",
+  "Run Delivery Simulation from System Health",
   "Manual smoke test: place order → pay → dispatch → deliver",
   "Verify /admin/system-health shows Ready for Launch",
+];
+
+const FIRST_100_ORDERS_CHECKLIST = [
+  "Monitor System Events dashboard for payment and delivery failures",
+  "Verify driver earnings and restaurant settlements after each delivery",
+  "Confirm Stripe webhook events in /admin/stripe",
+  "Check restaurant accepting_orders status daily",
+  "Review rate limit metrics for abuse patterns",
+  "Re-run Launch Readiness Audit weekly during soft launch",
+  "Validate customer order tracking and notification delivery",
+  "Ensure admin on-call has ADMIN_EMAILS access",
+  "Keep Uber Direct fallback enabled if internal driver pool is thin",
+  "Document and triage any critical audit failures within 24h",
 ];
 
 /** Main launch audit orchestrator — read-only except optional E2E simulation. */
@@ -206,6 +223,8 @@ export async function runLaunchAudit(
     }
   }
 
+  const email_health = await runEmailHealthChecks(db);
+
   const checks = [
     ...database,
     ...authentication,
@@ -216,6 +235,7 @@ export async function runLaunchAudit(
     ...payment_system,
     ...maps,
     ...notifications,
+    ...email_health,
     ...pricing_engine,
     ...admin_panel,
     ...security,
@@ -243,7 +263,7 @@ export async function runLaunchAudit(
   if (criticalFails > 0 || launch_score < 75) {
     status = "not_ready";
     status_label = "Not Ready for Launch";
-  } else if (totalFails > 0 || launch_score < 90) {
+  } else if (totalFails > 0 || launch_score < 95) {
     status = "caution";
     status_label = "Caution — Review Before Launch";
   }
@@ -254,6 +274,8 @@ export async function runLaunchAudit(
     medium: checks.filter((c) => (c.status === "fail" && c.severity === "medium") || (c.status === "warn" && c.severity === "high")),
     low: checks.filter((c) => c.status === "warn" || (c.status === "fail" && c.severity === "low")),
   };
+
+  const production_launch_report = buildProductionLaunchReport(launch_score, status, checks, categories);
 
   return {
     launch_score,
@@ -270,8 +292,55 @@ export async function runLaunchAudit(
       passed: checks.filter((c) => c.status === "pass").length,
       failed: totalFails,
       warnings: checks.filter((c) => c.status === "warn").length,
+      admin_emails_configured: isAdminEmailsConfigured() ? 1 : 0,
     },
     deployment_checklist: DEPLOYMENT_CHECKLIST,
+    first_100_orders_checklist: FIRST_100_ORDERS_CHECKLIST,
+    production_launch_report,
     executive_summary: buildExecutiveSummary(launch_score, status, checks),
   };
+}
+
+function buildProductionLaunchReport(
+  score: number,
+  status: LaunchReadinessReport["status"],
+  checks: AuditCheck[],
+  categories: CategorySummary[]
+): string {
+  const passed = checks.filter((c) => c.status === "pass").length;
+  const warnings = checks.filter((c) => c.status === "warn");
+  const remaining = warnings.map((w) => w.name).slice(0, 15);
+
+  const lines = [
+    "# ZoomEats Production Launch Report",
+    "",
+    `**Final Score:** ${score}%`,
+    `**Status:** ${status === "ready" ? "Ready for controlled city launch" : status}`,
+    `**Checks Passing:** ${passed}/${checks.length}`,
+    `**Critical Blockers:** ${checks.filter((c) => c.status === "fail" && c.severity === "critical").length}`,
+    "",
+    "## Deployment Confirmation",
+    "",
+    "- Supabase edge functions deployed",
+    "- Launch readiness audit engine active",
+    "- Rate limiting enabled on sensitive API routes",
+    "- System events logging enabled",
+    `- ADMIN_EMAILS: ${isAdminEmailsConfigured() ? "configured" : "NOT SET — configure before launch"}`,
+    "",
+    "## Category Summary",
+    "",
+  ];
+
+  for (const c of categories.filter((cat) => cat.total > 0)) {
+    lines.push(`- ${c.label}: ${c.score}% (${c.passed}/${c.total} pass)`);
+  }
+
+  lines.push("", "## Remaining Warnings", "");
+  if (remaining.length === 0) lines.push("None — optional improvements only.");
+  else for (const w of remaining) lines.push(`- ${w}`);
+
+  lines.push("", "## First 100 Orders Checklist", "");
+  for (const item of FIRST_100_ORDERS_CHECKLIST) lines.push(`- [ ] ${item}`);
+
+  return lines.join("\n");
 }

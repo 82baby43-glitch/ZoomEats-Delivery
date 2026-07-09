@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import {
   Activity,
   AlertTriangle,
@@ -14,10 +13,12 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
+import { ADMIN_EMAILS_WARNING } from "@/lib/adminEnv";
 
 const TABS = [
   { id: "readiness", label: "Launch Readiness", icon: Zap },
-  { id: "test-order", label: "Test Order", icon: Activity },
+  { id: "simulation", label: "Delivery Simulation", icon: Activity },
+  { id: "events", label: "System Events", icon: AlertTriangle },
   { id: "status", label: "Live System Status", icon: Activity },
   { id: "failed", label: "Failed Checks", icon: XCircle },
   { id: "performance", label: "Performance Metrics", icon: Activity },
@@ -83,6 +84,9 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
   const [tab, setTab] = useState(initialTab);
   const [report, setReport] = useState(null);
   const [testResult, setTestResult] = useState(null);
+  const [systemEvents, setSystemEvents] = useState([]);
+  const [rateLimits, setRateLimits] = useState(null);
+  const [adminConfig, setAdminConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(false);
@@ -109,17 +113,55 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    api.get("/admin/system-health/admin-config").then((r) => setAdminConfig(r?.data || r)).catch(() => {});
+  }, []);
+
   const runFullTest = async () => {
     setRunning(true);
     try {
-      const r = await api.post("/admin/system-health/test-order");
+      const r = await api.post("/admin/system-health/simulation");
       setTestResult(r?.data || r);
     } catch (e) {
-      alert(e?.message || "Test order failed");
+      alert(e?.message || "Delivery simulation failed");
     } finally {
       setRunning(false);
     }
   };
+
+  const loadEvents = async () => {
+    try {
+      const [eventsRes, rateRes] = await Promise.all([
+        api.get("/admin/system-health/events"),
+        api.get("/admin/system-health/rate-limits"),
+      ]);
+      setSystemEvents(eventsRes?.data?.events || eventsRes?.events || []);
+      setRateLimits(rateRes?.data || rateRes);
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "events") loadEvents();
+  }, [tab]);
+
+  const downloadProductionReport = async () => {
+    try {
+      const r = await api.get("/admin/launch-audit/production-report.md");
+      const blob = new Blob([r?.data?.content || r?.content || ""], { type: "text/markdown" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = r?.data?.filename || r?.filename || "production-launch-report.md";
+      a.click();
+    } catch (e) {
+      alert(e?.message || "Download failed");
+    }
+  };
+
+  const adminWarning = adminConfig && !adminConfig.admin_emails_configured
+    ? (adminConfig.warning || ADMIN_EMAILS_WARNING)
+    : null;
 
   const downloadReport = async (format) => {
     try {
@@ -161,6 +203,23 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
           </button>
         </div>
       </div>
+
+      {adminWarning && (
+        <div
+          className="card p-4 flex items-start gap-3 border border-amber-500/30"
+          role="alert"
+          style={{ background: "rgba(251,191,36,0.08)" }}
+        >
+          <AlertTriangle size={20} className="text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold text-amber-400">Admin Security Warning</p>
+            <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>{adminWarning}</p>
+            <p className="text-xs mt-2" style={{ color: "var(--muted)" }}>
+              Set <code>ADMIN_EMAILS</code> and <code>NEXT_PUBLIC_ADMIN_EMAILS</code> in Vercel and Supabase secrets.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2 border-b border-white/5 pb-2">
         {TABS.map((t) => (
@@ -229,25 +288,70 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
         </div>
       )}
 
-      {tab === "test-order" && (
+      {tab === "simulation" && (
         <div className="card p-6 space-y-4">
-          <h2 className="font-bold">Run Full Delivery Simulation</h2>
+          <h2 className="font-bold">Launch Simulation Mode</h2>
           <p className="text-sm" style={{ color: "var(--muted)" }}>
-            Creates a safe sandbox order, runs dispatch, simulates restaurant and driver steps, verifies records, then cleans up.
+            Simulates customer order → restaurant acceptance → driver assignment → pickup → delivery → payment capture → earnings/payout verification. Generates a simulation ID and pass/fail report, then cleans up test data.
           </p>
-          <button type="button" className="btn-primary" disabled={running} onClick={runFullTest}>
-            {running ? "Running simulation…" : "Run Full Delivery Simulation"}
+          <button type="button" className="btn-primary" disabled={running} onClick={runFullTest} aria-label="Run delivery simulation">
+            {running ? "Running simulation…" : "Run Delivery Simulation"}
           </button>
-          {testResult?.checks?.length > 0 && (
+          {testResult && (
             <div className="space-y-2 mt-4">
-              <p className="text-sm font-medium">
-                Result: {testResult.success ? "✅ Pipeline passed" : "❌ Issues detected"}
-              </p>
-              {testResult.checks.map((c) => <CheckRow key={c.id} check={c} />)}
+              <div className="p-3 rounded-lg text-sm" style={{ background: "var(--surface-2)" }}>
+                <p><strong>Simulation ID:</strong> {testResult.simulation_id}</p>
+                <p className="mt-1"><strong>Completed:</strong> {testResult.completed_at ? new Date(testResult.completed_at).toLocaleString() : "—"}</p>
+                <p className="mt-1"><strong>Report:</strong> {testResult.report_summary || (testResult.success ? "PASS" : "FAIL")}</p>
+              </div>
+              {testResult.checks?.map((c) => <CheckRow key={c.id} check={c} />)}
             </div>
           )}
         </div>
       )}
+
+      {tab === "events" && (
+        <div className="space-y-4">
+          <div className="card p-6">
+            <h2 className="font-bold mb-4">System Events</h2>
+            <p className="text-sm mb-4" style={{ color: "var(--muted)" }}>
+              Production event log: failed payments, API errors, rate limit blocks, and simulation results.
+            </p>
+            {rateLimits && (
+              <div className="grid sm:grid-cols-3 gap-3 mb-4">
+                <div className="p-3 rounded-lg" style={{ background: "var(--surface-2)" }}>
+                  <div className="text-xs" style={{ color: "var(--muted)" }}>Active buckets</div>
+                  <div className="text-xl font-bold">{rateLimits.active_buckets ?? 0}</div>
+                </div>
+                <div className="p-3 rounded-lg" style={{ background: "var(--surface-2)" }}>
+                  <div className="text-xs" style={{ color: "var(--muted)" }}>Blocked requests</div>
+                  <div className="text-xl font-bold">{rateLimits.total_blocked ?? 0}</div>
+                </div>
+                <div className="p-3 rounded-lg" style={{ background: "var(--surface-2)" }}>
+                  <div className="text-xs" style={{ color: "var(--muted)" }}>Rate limit rules</div>
+                  <div className="text-xl font-bold">7 routes</div>
+                </div>
+              </div>
+            )}
+            {systemEvents.length === 0 ? (
+              <p className="text-sm" style={{ color: "var(--muted)" }}>No system events recorded yet.</p>
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {systemEvents.map((evt) => (
+                  <div key={evt.event_id} className="p-3 rounded-lg text-sm" style={{ background: "var(--surface-2)" }}>
+                    <div className="flex justify-between gap-2">
+                      <strong>{evt.event_type}</strong>
+                      <span className="text-xs" style={{ color: "var(--muted)" }}>{new Date(evt.created_at).toLocaleString()}</span>
+                    </div>
+                    <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>{evt.message}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
 
       {tab === "status" && report && (
         <div className="card p-6 space-y-4">
@@ -325,7 +429,22 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
             <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={() => downloadReport("json")}>
               <Download size={16} /> Download JSON
             </button>
+            <button type="button" className="btn-secondary inline-flex items-center gap-2" onClick={downloadProductionReport}>
+              <Download size={16} /> Production Launch Report
+            </button>
           </div>
+          {report?.first_100_orders_checklist?.length > 0 && (
+            <div className="mt-6">
+              <h3 className="font-bold text-sm mb-2">First 100 Orders Checklist</h3>
+              <ul className="space-y-2 text-sm">
+                {report.first_100_orders_checklist.map((item) => (
+                  <li key={item} className="flex items-start gap-2">
+                    <span style={{ color: "var(--muted)" }}>☐</span> {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="mt-6">
             <h3 className="font-bold text-sm mb-2">Deployment Checklist</h3>
             <ul className="space-y-2 text-sm">

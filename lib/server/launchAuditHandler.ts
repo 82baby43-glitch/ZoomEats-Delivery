@@ -3,6 +3,9 @@ import { runLaunchAudit } from "../launchAudit/engine";
 import { reportToJson, reportToMarkdown } from "../launchAudit/report";
 import { runFullDeliverySimulation } from "../launchAudit/testOrder";
 import type { LaunchAuditOptions } from "../launchAudit/types";
+import { isAdminEmailsConfigured, ADMIN_EMAILS_WARNING } from "../adminEnv";
+import { getRateLimitMetrics } from "../rateLimiter";
+import { fetchSystemEvents, logSystemEvent } from "./systemEvents";
 
 function throwErr(message: string, status = 400): never {
   const e = new Error(message) as Error & { status?: number };
@@ -68,14 +71,43 @@ export async function handleLaunchAuditRequest(
     return { content: reportToJson(report), filename: `zoomeats-launch-readiness-${report.checked_at.slice(0, 10)}.json` };
   }
 
-  if (path === "/admin/system-health/test-order" && method === "POST") {
+  if (
+    (path === "/admin/system-health/test-order" ||
+      path === "/admin/launch-audit/test-order" ||
+      path === "/admin/system-health/simulation") &&
+    method === "POST"
+  ) {
     const result = await runFullDeliverySimulation(db);
+    await logSystemEvent(db, {
+      event_type: "simulation_complete",
+      severity: result.success ? "info" : "warn",
+      source: "launch_simulation",
+      message: result.report_summary,
+      metadata: { simulation_id: result.simulation_id, order_id: result.order_id },
+    });
     return result;
   }
 
-  if (path === "/admin/launch-audit/test-order" && method === "POST") {
-    const result = await runFullDeliverySimulation(db);
-    return result;
+  if (path === "/admin/system-health/events" && method === "GET") {
+    const limit = Number(params.limit || 100);
+    return fetchSystemEvents(db, limit);
+  }
+
+  if (path === "/admin/system-health/rate-limits" && method === "GET") {
+    return getRateLimitMetrics();
+  }
+
+  if (path === "/admin/system-health/admin-config" && method === "GET") {
+    return {
+      admin_emails_configured: isAdminEmailsConfigured(),
+      warning: isAdminEmailsConfigured() ? null : ADMIN_EMAILS_WARNING,
+    };
+  }
+
+  if (path === "/admin/launch-audit/production-report.md" && method === "GET") {
+    const report = cachedReport?.report ?? await runLaunchAudit(db, options);
+    const content = report.production_launch_report || reportToMarkdown(report);
+    return { content, filename: `zoomeats-production-launch-${report.checked_at.slice(0, 10)}.md` };
   }
 
   if (path === "/admin/system-health/status" && method === "GET") {
