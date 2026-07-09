@@ -5,46 +5,112 @@ import { Music, Pause, Play, SkipForward, Volume2, ChevronDown, ChevronUp } from
 import { useCompanionContext } from "./CompanionModeProvider";
 import { setBaseVolume } from "@/lib/companionMode/audioDucking";
 import {
+  hasLocalTracks,
+  pauseLocalMusic,
+  playLocalMusic,
+  setLocalMusicVolume,
+  skipLocalMusic,
+  subscribeLocalMusic,
+} from "@/lib/companionMode/localMusic";
+import {
   startCompanionPlayback,
   stopCompanionPlayback,
   setCompanionPlaybackVolume,
 } from "@/lib/companionMode/playback";
 
 export default function FloatingMusicPlayer({ className = "" }) {
-  const { settings, audio, updateSettings } = useCompanionContext();
+  const { settings, audio, updateSettings, localMusic } = useCompanionContext();
   const [collapsed, setCollapsed] = useState(false);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = useState(false);
+  const [localState, setLocalState] = useState(localMusic);
 
   const prefs = settings?.audio_preferences;
-  const effectiveVolume = audio.volume;
+  const isAmbient = settings?.music_connected && !settings?.music_provider;
+  const effectiveVolume = audio.ducked && prefs?.duckingEnabled
+    ? (prefs.duckVolume ?? 20)
+    : audio.volume;
+  const useDeviceMusic = isAmbient && hasLocalTracks();
+  const useSynth = settings?.music_connected && !isAmbient;
+
+  useEffect(() => subscribeLocalMusic(setLocalState), []);
+
+  useEffect(() => {
+    setPlaying(localState.playing);
+  }, [localState.playing]);
 
   useEffect(() => {
     if (!settings || !playing) {
+      pauseLocalMusic();
       stopCompanionPlayback();
       return;
     }
-    let cancelled = false;
-    startCompanionPlayback(effectiveVolume).then((ok) => {
-      if (!ok && !cancelled) setPlaying(false);
-    });
-    return () => {
-      cancelled = true;
+
+    if (useDeviceMusic) {
       stopCompanionPlayback();
-    };
-  }, [settings, playing, effectiveVolume]);
+      setLocalMusicVolume(effectiveVolume);
+      playLocalMusic().then((ok) => {
+        if (!ok) setPlaying(false);
+      });
+      return () => pauseLocalMusic();
+    }
+
+    if (useSynth) {
+      pauseLocalMusic();
+      let cancelled = false;
+      startCompanionPlayback(effectiveVolume).then((ok) => {
+        if (!ok && !cancelled) setPlaying(false);
+      });
+      return () => {
+        cancelled = true;
+        stopCompanionPlayback();
+      };
+    }
+
+    pauseLocalMusic();
+    stopCompanionPlayback();
+  }, [settings, playing, effectiveVolume, useDeviceMusic, useSynth]);
+
+  useEffect(() => {
+    if (!playing) return;
+    if (useDeviceMusic) setLocalMusicVolume(effectiveVolume);
+    else if (useSynth) setCompanionPlaybackVolume(effectiveVolume);
+  }, [effectiveVolume, playing, useDeviceMusic, useSynth]);
 
   if (!settings) return null;
 
-  const trackTitle = audio.ducked && audio.announcement ? "ZoomEats Alert" : "Companion Playlist";
-  const trackArtist = settings.music_provider
-    ? settings.music_provider.replace("_", " ")
-    : "ZoomEats Ambient";
+  const currentTrack = localState.currentTrack;
+  const trackTitle = audio.ducked && audio.announcement
+    ? "ZoomEats Alert"
+    : useDeviceMusic && currentTrack
+      ? currentTrack.name
+      : isAmbient
+        ? "Add music from your device"
+        : "Companion Playlist";
+  const trackArtist = useDeviceMusic
+    ? `Device · ${localState.tracks.length} track${localState.tracks.length === 1 ? "" : "s"}`
+    : settings.music_provider
+      ? settings.music_provider.replace("_", " ")
+      : "ZoomEats Ambient";
 
   const onVolume = async (v) => {
     await updateSettings({ musicVolume: v });
     setBaseVolume(v, { ...prefs, musicVolume: v });
-    setCompanionPlaybackVolume(v);
+    if (useDeviceMusic) setLocalMusicVolume(v);
+    else if (useSynth) setCompanionPlaybackVolume(v);
   };
+
+  const onTogglePlay = () => {
+    if (useDeviceMusic && !hasLocalTracks()) {
+      return;
+    }
+    setPlaying((p) => !p);
+  };
+
+  const onSkip = () => {
+    if (useDeviceMusic) skipLocalMusic(1);
+  };
+
+  const canPlay = !useDeviceMusic || hasLocalTracks();
 
   return (
     <div
@@ -70,18 +136,30 @@ export default function FloatingMusicPlayer({ className = "" }) {
               {audio.ducked && (
                 <div className="text-xs mt-1" style={{ color: "var(--primary)" }}>Volume lowered for alert</div>
               )}
+              {isAmbient && !hasLocalTracks() && (
+                <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>
+                  Add tracks in Device music above, then press play.
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2 mb-3">
               <button
                 type="button"
                 className="btn-secondary !p-2 min-w-[44px] min-h-[44px]"
-                onClick={() => setPlaying(!playing)}
+                onClick={onTogglePlay}
+                disabled={!canPlay}
                 aria-label={playing ? "Pause" : "Play"}
               >
                 {playing ? <Pause size={18} /> : <Play size={18} />}
               </button>
-              <button type="button" className="btn-ghost !p-2 min-w-[44px] min-h-[44px]" aria-label="Skip">
+              <button
+                type="button"
+                className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
+                aria-label="Skip"
+                disabled={!useDeviceMusic || localState.tracks.length < 2}
+                onClick={onSkip}
+              >
                 <SkipForward size={18} />
               </button>
               <div className="flex-1 flex items-center gap-2">

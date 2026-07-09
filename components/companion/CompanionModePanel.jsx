@@ -8,6 +8,7 @@ import {
   openMusicOAuth,
   startYouTubeMusicGoogleOAuth,
 } from "@/lib/companionMode/musicOAuth";
+import DeviceMusicLibrary from "./DeviceMusicLibrary";
 
 const PROVIDERS = [
   { id: "youtube_music", label: "YouTube Music", viaGoogle: true },
@@ -34,6 +35,7 @@ export default function CompanionModePanel({ role = "driver" }) {
     connectAmbient,
     disconnect,
     updateSettings,
+    localMusic,
   } = useCompanionContext();
   const [connecting, setConnecting] = useState(null);
   const [connectStatus, setConnectStatus] = useState(null);
@@ -125,7 +127,7 @@ export default function CompanionModePanel({ role = "driver" }) {
       await connectAmbient();
       setConnectStatus({
         type: "success",
-        message: "ZoomEats Ambient enabled. Press play on the floating player below.",
+        message: "ZoomEats Ambient enabled. Add music from your device below, then press play.",
       });
       await reload();
     } catch (e) {
@@ -210,7 +212,7 @@ export default function CompanionModePanel({ role = "driver" }) {
             disabled={connecting === "ambient"}
             onClick={handleAmbient}
           >
-            {connecting === "ambient" ? "Enabling…" : isAmbient ? "ZoomEats Ambient ✓" : "ZoomEats Ambient"}
+            {connecting === "ambient" ? "Enabling…" : isAmbient ? "Device Music ✓" : "Device Music"}
           </button>
           {settings?.music_connected && (
             <button type="button" className="btn-ghost text-sm" onClick={handleDisconnect}>Disconnect</button>
@@ -246,16 +248,20 @@ export default function CompanionModePanel({ role = "driver" }) {
           </div>
         )}
 
+        {isAmbient && (
+          <DeviceMusicLibrary library={localMusic} disabled={loading} />
+        )}
+
         {settings?.music_connected && (
           <p className="text-xs mb-3" style={{ color: "var(--primary)" }}>
-            Active: {isAmbient ? "ZoomEats Ambient" : providerLabel(settings.music_provider)} — open the floating player and press play.
+            Active: {isAmbient ? "Device Music" : providerLabel(settings.music_provider)} — open the floating player and press play.
           </p>
         )}
 
         {providers && (
           <p className="text-xs" style={{ color: "var(--muted)" }}>
             YouTube Music uses Google sign-in. If Google shows &quot;access_denied&quot;, your email must be added as a
-            Test user in Google Cloud Console, or use <strong>ZoomEats Ambient</strong> (no account needed).
+            Test user in Google Cloud Console, or use <strong>Device Music</strong> (no account needed).
           </p>
         )}
       </div>
