@@ -17,8 +17,7 @@ const startLogin = () => {
   signInWithGoogle().catch((e) => console.error("[auth] login failed:", e));
 };
 
-const HERO_IMG =
-  "https://images.pexels.com/photos/5732798/pexels-photo-5732798.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
+const HERO_IMG = "/images/hero-zoomeats.webp";
 
 export default function Landing() {
   const [restaurants, setRestaurants] = useState([]);
@@ -123,7 +122,11 @@ export default function Landing() {
               className="rounded-3xl overflow-hidden border"
               style={{ borderColor: "var(--border)" }}
             >
-              <img src={HERO_IMG} alt="" className="w-full h-[400px] object-cover" />
+              <img
+                src={HERO_IMG}
+                alt="Friends ordering ZoomEats delivery together at home"
+                className="w-full h-[400px] object-cover"
+              />
             </div>
           </motion.div>
         </div>
