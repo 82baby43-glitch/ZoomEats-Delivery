@@ -156,8 +156,14 @@ export default function DeliveryDashboard() {
             <Link href="/admin/founder-driver" className="btn-secondary text-sm">Open analytics</Link>
           </div>
         )}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link href="/driver/live-map" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="driver-live-map-link">
+            <MapPin size={16} /> Live Map Dashboard
+          </Link>
+        </div>
+
         {/* Online toggle banner */}
-        <div className="card p-5 flex items-center gap-4" data-testid="online-toggle-card">
+        <div className="card p-5 flex items-center gap-4 mt-4" data-testid="online-toggle-card">
           <div
             className="w-12 h-12 rounded-xl flex items-center justify-center"
             style={{ background: online ? "var(--primary)" : "var(--surface-2)", color: online ? "#0A0A0A" : "var(--muted)" }}

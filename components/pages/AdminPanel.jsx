@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { Download, Truck, CreditCard } from "lucide-react";
+import { Download, Truck, CreditCard, MapPin } from "lucide-react";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import PulseHeader, { MetricsTiles } from "@/components/admin/PulseHeader";
@@ -144,6 +144,9 @@ export default function AdminPanel() {
       <div className="max-w-7xl mx-auto px-6 md:px-12 py-12">
         <PulseHeader since={since} onRefresh={retryAll} />
         <div className="mt-4 flex flex-wrap gap-3">
+          <Link href="/admin/logistics" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-logistics-link">
+            <MapPin size={16} /> Live Logistics Map
+          </Link>
           <Link href="/admin/founder-driver" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-founder-driver-link">
             <Truck size={16} /> Founder Driver Mode
           </Link>

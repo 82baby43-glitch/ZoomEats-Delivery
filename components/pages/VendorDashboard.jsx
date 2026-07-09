@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import Link from "next/link";
 import { api, getApiErrorMessage, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import { useRealtimeRow } from "@/lib/useRealtime";
 import { useWebPush } from "@/lib/useWebPush";
 import { primeChime, playChime } from "@/lib/chime";
-import { Plus, Trash2, Wifi, Bell, BellOff } from "lucide-react";
+import { Plus, Trash2, Wifi, Bell, BellOff, MapPin } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatMoney, sanitizeOrders, sanitizeWallet, safeArray } from "@/lib/safeData";
 import { isPaymentConfirmed } from "@/lib/orderState";
@@ -175,6 +176,9 @@ export default function VendorDashboard() {
       <div className="max-w-6xl mx-auto px-6 md:px-12 py-12">
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="font-display text-4xl font-black tracking-tighter">{restaurant.name}</h1>
+          <Link href="/restaurant/live-map" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="restaurant-live-map-link">
+            <MapPin size={16} /> Live Map
+          </Link>
           <span
             className="inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-md"
             style={{ background: "var(--surface-2)", color: livePulse > 0 ? "var(--primary)" : "var(--muted)" }}

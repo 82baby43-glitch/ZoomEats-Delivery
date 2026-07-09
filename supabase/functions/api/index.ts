@@ -28,6 +28,7 @@ import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
 import { handleFounderDriverRequest } from "../_shared/founderDriverHandler.ts";
 import { canUseDriverApis } from "../_shared/founderDriverAuth.ts";
+import { handleLogisticsRequest } from "../_shared/logisticsHandler.ts";
 import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
 import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geocodeAdmin.ts";
@@ -189,6 +190,14 @@ Deno.serve(async (req) => {
       requireAuth,
     });
     if (founderResult !== null) return json(founderResult);
+
+    const logisticsResult = await handleLogisticsRequest(db, {
+      path,
+      method,
+      requireAuth,
+      requireRole,
+    });
+    if (logisticsResult !== null) return json(logisticsResult);
 
     // ---- Auth ----
     if (path === "/auth/me" && method === "GET") {
