@@ -32,6 +32,16 @@ import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geoco
 import { normalizeRole } from "../_shared/complianceAuthz.ts";
 import { filterPublicRestaurants, isTestRestaurantName } from "../_shared/restaurants.ts";
 import { finalizePublicRestaurantList } from "../_shared/restaurantListing.ts";
+import {
+  assertPricingIntegrity,
+  calculateOrderPricing,
+} from "../_shared/pricing/index.ts";
+import {
+  buildDriverOfferForOrder,
+  estimateDistanceForOrder,
+  handlePricingRequest,
+  toPublicPricing,
+} from "../_shared/pricingHandler.ts";
 
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
 
@@ -160,6 +170,9 @@ Deno.serve(async (req) => {
 
     const geocodeResult = await handleGeocodeAdminRequest(db, complianceCtx);
     if (geocodeResult !== null) return json(geocodeResult);
+
+    const pricingResult = await handlePricingRequest(db, complianceCtx);
+    if (pricingResult !== null) return json(pricingResult);
 
     const dreamlandResult = await handleDreamlandRequest(db, {
       path,
@@ -305,11 +318,32 @@ Deno.serve(async (req) => {
         const qty = Math.max(1, Math.min(Number(line.quantity), 99));
         return { item_id: m.item_id, name: m.name, price: m.price, quantity: qty, image_url: m.image_url || "" };
       });
-      const subtotal = Math.round(repriced.reduce((s, it) => s + it.price * it.quantity, 0) * 100) / 100;
-      const delivery_fee = 2.99;
-      const total = Math.round((subtotal + delivery_fee) * 100) / 100;
       const deliveryAddress = String(body.address || "").trim();
       const geo = deliveryAddress ? await geocodeOrderAddress(deliveryAddress, u.name as string) : null;
+      const distance = await estimateDistanceForOrder(db, {
+        restaurantId: rest.restaurant_id,
+        customerLat: geo?.latitude ?? null,
+        customerLng: geo?.longitude ?? null,
+      });
+      const tipAmount = body.tip_amount != null ? Math.max(0, Number(body.tip_amount)) : 0;
+      const pricing = await calculateOrderPricing(db, {
+        restaurantId: rest.restaurant_id,
+        customerId: String(u.user_id),
+        cartItems: repriced,
+        conditions: {
+          distanceMiles: distance.distanceMiles,
+          restaurantPrepMinutes: distance.prepMinutes,
+          estimatedTravelMinutes: Math.max(
+            10,
+            Math.round(distance.distanceMiles * 3 + distance.prepMinutes * 0.3)
+          ),
+          waitMinutes: Math.max(0, distance.prepMinutes - 10),
+          tipAmount,
+          promoCode: body.promo_code ? String(body.promo_code) : null,
+          weatherActive: body.weather_active === true,
+          demandLevel: (body.demand_level as "low" | "normal" | "high" | "peak") || "normal",
+        },
+      });
       const order = {
         order_id: uid("ord"),
         customer_id: u.user_id,
@@ -317,9 +351,9 @@ Deno.serve(async (req) => {
         restaurant_id: rest.restaurant_id,
         restaurant_name: rest.name,
         items: repriced,
-        subtotal,
-        delivery_fee,
-        total,
+        subtotal: pricing.subtotal,
+        delivery_fee: pricing.deliveryFee,
+        total: pricing.customerTotal,
         address: deliveryAddress,
         customer_lat: geo?.latitude ?? null,
         customer_lng: geo?.longitude ?? null,
@@ -331,7 +365,7 @@ Deno.serve(async (req) => {
       };
       const { data, error: insertError } = await db.from("orders").insert(order).select().single();
       if (insertError) return err(insertError.message, 500);
-      return json(data);
+      return json({ ...data, pricing: toPublicPricing(pricing) });
     }
     if (path === "/orders/my" && method === "GET") {
       const u = requireAuth();
@@ -375,9 +409,23 @@ Deno.serve(async (req) => {
 
     // ---- Delivery ----
     if (path === "/delivery/available" && method === "GET") {
-      requireRole("delivery");
+      const u = requireRole("delivery");
       const { data } = await db.from("orders").select("*").eq("status", "ready").is("delivery_partner_id", null).order("created_at", { ascending: false });
-      return json(data || []);
+      const { data: driver } = await db
+        .from("drivers")
+        .select("driver_id")
+        .eq("user_id", u.user_id)
+        .maybeSingle();
+      const enriched = [];
+      for (const o of data || []) {
+        try {
+          const offer = await buildDriverOfferForOrder(db, o, driver?.driver_id || null);
+          enriched.push({ ...o, driver_offer: offer });
+        } catch {
+          enriched.push(o);
+        }
+      }
+      return json(enriched);
     }
     if (path === "/delivery/my" && method === "GET") {
       const u = requireRole("delivery");
@@ -540,6 +588,52 @@ Deno.serve(async (req) => {
       if (!o) return err("Order not found", 404);
       if (o.payment_status === "paid") return err("Already paid");
 
+      // Recompute pricing server-side — reject manipulated totals before Stripe
+      const orderItems = (Array.isArray(o.items) ? o.items : []) as Array<{
+        item_id: string;
+        price: number;
+        quantity: number;
+        name?: string;
+      }>;
+      const checkoutDistance = await estimateDistanceForOrder(db, {
+        restaurantId: o.restaurant_id,
+        customerLat: o.customer_lat,
+        customerLng: o.customer_lng,
+      });
+      const verifiedPricing = await calculateOrderPricing(db, {
+        restaurantId: o.restaurant_id,
+        customerId: o.customer_id,
+        driverId: o.driver_id,
+        cartItems: orderItems.length
+          ? orderItems
+          : [{ item_id: "subtotal", price: Number(o.subtotal) || 0, quantity: 1 }],
+        conditions: {
+          distanceMiles: checkoutDistance.distanceMiles,
+          restaurantPrepMinutes: checkoutDistance.prepMinutes,
+          estimatedTravelMinutes: Math.max(
+            10,
+            Math.round(checkoutDistance.distanceMiles * 3 + checkoutDistance.prepMinutes * 0.3)
+          ),
+        },
+      });
+      const integrity = assertPricingIntegrity(verifiedPricing, Number(o.total));
+      if (!integrity.ok) {
+        await db
+          .from("orders")
+          .update({
+            subtotal: verifiedPricing.subtotal,
+            delivery_fee: verifiedPricing.deliveryFee,
+            total: verifiedPricing.customerTotal,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("order_id", order_id)
+          .neq("payment_status", "paid");
+        o.total = verifiedPricing.customerTotal;
+        o.subtotal = verifiedPricing.subtotal;
+        o.delivery_fee = verifiedPricing.deliveryFee;
+      }
+      const chargeTotal = verifiedPricing.customerTotal;
+
       structuredLog(LOG_EVENTS.CHECKOUT_STARTED, { orderId: order_id, userId: u.user_id });
 
       if (o.stripe_session_id) {
@@ -579,7 +673,7 @@ Deno.serve(async (req) => {
           session_id,
           order_id,
           user_id: u.user_id,
-          amount: o.total,
+          amount: chargeTotal,
           currency: "usd",
           payment_status: "initiated",
           created_at: now,
@@ -597,7 +691,7 @@ Deno.serve(async (req) => {
             mode: "payment",
             "line_items[0][price_data][currency]": "usd",
             "line_items[0][price_data][product_data][name]": `ZoomEats Order ${order_id}`,
-            "line_items[0][price_data][unit_amount]": String(Math.round(o.total * 100)),
+            "line_items[0][price_data][unit_amount]": String(Math.round(chargeTotal * 100)),
             "line_items[0][quantity]": "1",
             success_url: `${origin_url}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${origin_url}/cart`,
@@ -617,7 +711,7 @@ Deno.serve(async (req) => {
         session_id: session.id,
         order_id,
         user_id: u.user_id,
-        amount: o.total,
+        amount: chargeTotal,
         currency: "usd",
         payment_status: "initiated",
         created_at: now,

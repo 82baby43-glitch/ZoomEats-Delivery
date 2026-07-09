@@ -153,6 +153,9 @@ export default function AdminPanel() {
           <Link href="/admin/stripe" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-stripe-link">
             <CreditCard size={16} /> Stripe
           </Link>
+          <Link href="/admin/pricing" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-pricing-link">
+            Pricing Engine
+          </Link>
           <GeocodeRestaurantsButton />
           <Link
             href="/admin/import-restaurants"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
@@ -13,11 +13,56 @@ export default function Cart() {
   const { user } = useAuth();
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
+  const [tip, setTip] = useState("");
+  const [promoCode, setPromoCode] = useState("");
+  const [quote, setQuote] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [quoting, setQuoting] = useState(false);
   const [err, setErr] = useState("");
   const router = useRouter();
-  const deliveryFee = 2.99;
-  const total = subtotal + deliveryFee;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadQuote() {
+      if (!cart.restaurant || cart.items.length === 0) {
+        setQuote(null);
+        return;
+      }
+      setQuoting(true);
+      try {
+        const res = await api.post("/pricing/quote", {
+          restaurant_id: cart.restaurant.restaurant_id,
+          items: cart.items.map((it) => ({
+            item_id: it.item_id,
+            quantity: it.quantity,
+          })),
+          tip_amount: tip === "" ? 0 : Number(tip) || 0,
+          promo_code: promoCode || null,
+        });
+        if (!cancelled) setQuote(res?.data || null);
+      } catch {
+        if (!cancelled) {
+          // Fallback preview if quote endpoint unavailable — engine still prices at order create
+          setQuote({
+            subtotal,
+            delivery_fee: 2.99,
+            service_fee: 0,
+            tax: 0,
+            discounts: 0,
+            tip_amount: tip === "" ? 0 : Number(tip) || 0,
+            customer_total: Math.round((subtotal + 2.99 + (Number(tip) || 0)) * 100) / 100,
+          });
+        }
+      } finally {
+        if (!cancelled) setQuoting(false);
+      }
+    }
+    const t = setTimeout(loadQuote, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [cart.restaurant, cart.items, subtotal, tip, promoCode]);
 
   const placeOrder = async () => {
     setErr("");
@@ -34,6 +79,8 @@ export default function Cart() {
         items: cart.items,
         address,
         notes,
+        tip_amount: tip === "" ? 0 : Number(tip) || 0,
+        promo_code: promoCode || null,
       });
       const order = orderRes?.data;
       if (!order?.order_id) throw new Error("Could not create order — please try again");
@@ -49,6 +96,17 @@ export default function Cart() {
       setLoading(false);
     }
   };
+
+  const deliveryFee = quote?.delivery_fee ?? 2.99;
+  const serviceFee = quote?.service_fee ?? 0;
+  const tax = quote?.tax ?? 0;
+  const discounts = quote?.discounts ?? 0;
+  const smallOrderFee = quote?.small_order_fee ?? 0;
+  const distanceFee = quote?.distance_fee ?? 0;
+  const surgeFee = quote?.surge_fee ?? 0;
+  const weatherFee = quote?.weather_fee ?? 0;
+  const tipAmount = quote?.tip_amount ?? (tip === "" ? 0 : Number(tip) || 0);
+  const total = quote?.customer_total ?? subtotal + deliveryFee + tipAmount;
 
   return (
     <div>
@@ -117,11 +175,42 @@ export default function Cart() {
                   data-testid="checkout-notes"
                 />
               </div>
-              <div className="border-t pt-4 space-y-2 text-sm" style={{ borderColor: "var(--border)" }}>
-                <div className="flex justify-between"><span>Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>Delivery</span><span>${deliveryFee.toFixed(2)}</span></div>
+              <div>
+                <label className="label-eyebrow">Tip for driver</label>
+                <input
+                  className="input-field mt-2"
+                  type="number"
+                  min="0"
+                  step="0.50"
+                  value={tip}
+                  onChange={(e) => setTip(e.target.value)}
+                  placeholder="0.00"
+                  data-testid="checkout-tip"
+                />
+              </div>
+              <div>
+                <label className="label-eyebrow">Promo code</label>
+                <input
+                  className="input-field mt-2"
+                  value={promoCode}
+                  onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                  placeholder="SAVE10"
+                  data-testid="checkout-promo"
+                />
+              </div>
+              <div className="border-t pt-4 space-y-2 text-sm" style={{ borderColor: "var(--border)" }} data-testid="pricing-breakdown">
+                <div className="flex justify-between"><span>Subtotal</span><span>${Number(quote?.subtotal ?? subtotal).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Delivery</span><span>${Number(deliveryFee).toFixed(2)}</span></div>
+                {serviceFee > 0 && <div className="flex justify-between"><span>Service fee</span><span>${Number(serviceFee).toFixed(2)}</span></div>}
+                {smallOrderFee > 0 && <div className="flex justify-between"><span>Small order fee</span><span>${Number(smallOrderFee).toFixed(2)}</span></div>}
+                {distanceFee > 0 && <div className="flex justify-between"><span>Distance fee</span><span>${Number(distanceFee).toFixed(2)}</span></div>}
+                {surgeFee > 0 && <div className="flex justify-between"><span>Surge</span><span>${Number(surgeFee).toFixed(2)}</span></div>}
+                {weatherFee > 0 && <div className="flex justify-between"><span>Weather</span><span>${Number(weatherFee).toFixed(2)}</span></div>}
+                {tax > 0 && <div className="flex justify-between"><span>Tax</span><span>${Number(tax).toFixed(2)}</span></div>}
+                {discounts > 0 && <div className="flex justify-between"><span>Discounts</span><span>-${Number(discounts).toFixed(2)}</span></div>}
+                {tipAmount > 0 && <div className="flex justify-between"><span>Driver tip</span><span>${Number(tipAmount).toFixed(2)}</span></div>}
                 <div className="flex justify-between font-display font-bold text-lg pt-2 border-t" style={{ borderColor: "var(--border)" }}>
-                  <span>Total</span><span>${total.toFixed(2)}</span>
+                  <span>Total{quoting ? "…" : ""}</span><span>${Number(total).toFixed(2)}</span>
                 </div>
               </div>
               {err && <div className="text-sm" style={{ color: "var(--primary)" }}>{err}</div>}
