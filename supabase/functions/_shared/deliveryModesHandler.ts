@@ -418,7 +418,7 @@ export async function isDriverEligibleForOrder(
     .maybeSingle();
   if (!modeDef) return true;
 
-  const { isModeEligibleForOrder } = await import("../deliveryModes/eligibility");
+  const { isModeEligibleForOrder } = await import("./deliveryModes/eligibility.ts");
   const req = deriveOrderRequirements(order);
 
   // Compute distance if missing
@@ -429,7 +429,7 @@ export async function isDriverEligibleForOrder(
       .eq("restaurant_id", order.restaurant_id)
       .maybeSingle();
     if (rest?.latitude && order.customer_lat) {
-      const { haversineKm } = await import("../dispatch/routing/geo");
+      const { haversineKm } = await import("./routing/geo.ts");
       req.delivery_distance_km = haversineKm(
         { lat: Number(rest.latitude), lng: Number(rest.longitude) },
         { lat: Number(order.customer_lat), lng: Number(order.customer_lng) }

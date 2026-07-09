@@ -1,13 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { computeRouteEta } from "./eta-engine";
-import { isNearRouteCorridor, haversineKm } from "./geo";
-import { insertAndReoptimize, sequenceActiveOrders } from "./sequence-engine";
-import type { ActiveOrderRef } from "./types";
-import { ROUTING_CONFIG } from "./types";
-import type { RoutingDbAdapter } from "./uber-routing-ai";
-import { resolveRouteConflict } from "./uber-routing-ai";
-import { deriveOrderRequirements, isModeEligibleForOrder } from "../deliveryModes/eligibility.ts";
-import type { DeliveryModeDefinition } from "../deliveryModes/types.ts";
+import { computeRouteEta } from "./eta-engine.ts";
+import { isNearRouteCorridor, haversineKm } from "./geo.ts";
+import { insertAndReoptimize, sequenceActiveOrders } from "./sequence-engine.ts";
+import type { ActiveOrderRef } from "./types.ts";
+import { ROUTING_CONFIG } from "./types.ts";
+import type { RoutingDbAdapter } from "./uber-routing-ai.ts";
+import { resolveRouteConflict } from "./uber-routing-ai.ts";
+import { isModeEligibleForOrder } from "../deliveryModes/eligibility.ts";
+import type { DeliveryModeDefinition, OrderDeliveryRequirements } from "../deliveryModes/types.ts";
 
 export type DriverRoutingMode = "init" | "insert";
 

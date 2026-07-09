@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { haversineKm } from "../dispatch/routing/geo";
-import { etaMinutesBetween } from "../dispatch/routing/eta-engine";
+import { haversineKm } from "../routing/geo.ts";
+import { etaMinutesBetween } from "../routing/eta-engine.ts";
 import type {
   AdminLogisticsView,
   DeliveryQueueItem,
@@ -14,8 +14,8 @@ import type {
   RestaurantLogisticsView,
   RestaurantPerformancePanel,
   RoutePolyline,
-} from "./types";
-import { buildDispatchExplain } from "./dispatchExplain";
+} from "./types.ts";
+import { buildDispatchExplain } from "./dispatchExplain.ts";
 import { MODE_MAP_ICONS } from "../deliveryModes/constants.ts";
 
 const ACTIVE_ORDER_STATUSES = [

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ActiveOrderRef, DriverRouteState } from "./types";
-import type { RoutingDbAdapter } from "./uber-routing-ai";
-import { haversineKm } from "./geo";
+import type { ActiveOrderRef, DriverRouteState } from "./types.ts";
+import type { RoutingDbAdapter } from "./uber-routing-ai.ts";
+import { haversineKm } from "./geo.ts";
 
 /** Supabase persistence adapter for routing state (used by API + edge). */
 export function createRoutingDbAdapter(db: SupabaseClient): RoutingDbAdapter {
