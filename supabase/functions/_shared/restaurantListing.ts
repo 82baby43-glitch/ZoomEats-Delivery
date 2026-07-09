@@ -1,4 +1,4 @@
-import { filterPublicRestaurants } from "../restaurants.ts";
+import { filterPublicRestaurants } from "./restaurants.ts";
 import { isRestaurantOpenNow } from "./osmOpeningHours.ts";
 
 export function finalizePublicRestaurantList<
