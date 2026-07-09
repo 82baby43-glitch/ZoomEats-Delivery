@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   buildDuckingPayload,
+  connectAmbientPlayback,
   connectMusicProvider,
   disconnectMusicProvider,
   ensureCompanionSettings,
@@ -79,22 +80,47 @@ export async function handleCompanionRequest(
   if (path === "/companion/music/connect" && method === "POST") {
     if (!role) throwErr("Companion Mode requires driver or restaurant role", 403);
     const provider = String(body.provider || "") as MusicProvider;
+    if (body.mode === "ambient") {
+      const settings = await connectAmbientPlayback(db, userId, role);
+      return {
+        ok: true,
+        settings,
+        mode: "ambient",
+        message: "ZoomEats Ambient playback enabled (no external account required)",
+      };
+    }
+
     if (!SUPPORTED_PROVIDERS.includes(provider)) throwErr("Invalid music provider");
 
     const redirectUri = String(body.redirect_uri || "").trim();
     const state = `${userId}:${provider}:${Date.now()}`;
     const authUrl = redirectUri ? buildMusicOAuthUrl(provider, redirectUri, state) : null;
 
-    // OAuth complete, or no OAuth URL configured — connect immediately in one step.
-    if (body.confirmed === true || !authUrl) {
+    if (body.confirmed === true) {
       const settings = await connectMusicProvider(db, userId, role, provider);
       return {
         ok: true,
         settings,
-        auto_connected: !authUrl,
-        message: authUrl
-          ? "Music provider connected (status only — tokens remain on device)"
-          : "Music provider linked for ambient companion playback (OAuth not configured on server)",
+        message: "Music provider connected — token stored on device only",
+      };
+    }
+
+    if (provider === "youtube_music" && !authUrl) {
+      return {
+        provider,
+        use_supabase_google_oauth: true,
+        message: "Redirect to Google to authorize YouTube Music access",
+      };
+    }
+
+    if (!authUrl) {
+      return {
+        provider,
+        oauth_required: true,
+        oauth_available: false,
+        message: provider === "spotify"
+          ? "Spotify OAuth is not configured. Use YouTube Music (Google sign-in) or ZoomEats Ambient."
+          : "Use ZoomEats Ambient for built-in playback, or connect YouTube Music with Google.",
       };
     }
 

@@ -7,10 +7,29 @@ import CompanionModePanel from "@/components/companion/CompanionModePanel";
 import FloatingMusicPlayer from "@/components/companion/FloatingMusicPlayer";
 import DriverSafetyMode from "@/components/companion/DriverSafetyMode";
 import { useCompanionContext } from "@/components/companion/CompanionModeProvider";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { finishPendingMusicOAuth } from "@/lib/companionMode/musicOAuth";
 
 function DriverCompanionInner() {
   const { settings, confirmConnection, reload } = useCompanionContext();
+  const [oauthMessage, setOauthMessage] = useState(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("music_oauth") !== "youtube_music") return;
+
+    (async () => {
+      const ok = await finishPendingMusicOAuth("youtube_music");
+      if (ok) {
+        await confirmConnection("youtube_music");
+        await reload();
+        setOauthMessage("YouTube Music connected via Google.");
+      } else {
+        setOauthMessage("Google sign-in did not return a music token. Try again and allow YouTube access.");
+      }
+      window.history.replaceState({}, "", "/driver/companion");
+    })();
+  }, [confirmConnection, reload]);
 
   useEffect(() => {
     const onMessage = async (e) => {
@@ -33,6 +52,11 @@ function DriverCompanionInner() {
         onArrivedRestaurant={() => {}}
         onDelivered={() => {}}
       />
+      {oauthMessage && (
+        <div className="card p-3 mb-4 text-sm" style={{ color: "var(--primary)" }}>
+          {oauthMessage}
+        </div>
+      )}
       <CompanionModePanel role="driver" />
       <FloatingMusicPlayer />
     </>

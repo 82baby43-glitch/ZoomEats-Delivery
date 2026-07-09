@@ -15,8 +15,12 @@ if (!token) {
 const redirectUrls = [
   `${PRODUCTION}/auth/callback`,
   `${PRODUCTION}/`,
+  `${PRODUCTION}/driver/companion`,
+  `${PRODUCTION}/companion/oauth/callback`,
   "http://localhost:3000/auth/callback",
   "http://localhost:3000/",
+  "http://localhost:3000/driver/companion",
+  "http://localhost:3000/companion/oauth/callback",
   // Vercel preview deployments (team + branch URLs)
   "https://*.vercel.app/auth/callback",
   "https://*-*-*.vercel.app/auth/callback",

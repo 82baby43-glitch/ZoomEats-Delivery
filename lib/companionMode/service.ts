@@ -51,6 +51,27 @@ export async function ensureCompanionSettings(
   return { ...data, audio_preferences: normalizePreferences(data.audio_preferences) } as CompanionSettings;
 }
 
+export async function connectAmbientPlayback(
+  db: SupabaseClient,
+  userId: string,
+  role: CompanionRole
+): Promise<CompanionSettings> {
+  await ensureCompanionSettings(db, userId, role);
+  const { data, error } = await db
+    .from("companion_settings")
+    .update({
+      music_provider: null,
+      music_connected: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .select("*")
+    .single();
+
+  if (error) throw new Error(error.message);
+  return { ...data, audio_preferences: normalizePreferences(data.audio_preferences) } as CompanionSettings;
+}
+
 export async function connectMusicProvider(
   db: SupabaseClient,
   userId: string,
