@@ -10,6 +10,7 @@ import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { formatMoney } from "@/lib/safeData";
 import { MapPin, Navigation, DollarSign, Radio } from "lucide-react";
 import DriverSafetyPanel from "@/components/logistics/DriverSafetyPanel";
+import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
 
 const STATUS_LABELS = {
   offline: "Offline",
@@ -129,15 +130,18 @@ export default function DriverLiveMapDashboard() {
                   <p className="text-sm" style={{ color: "var(--muted)" }}>No active deliveries</p>
                 )}
                 {(data?.queue || []).map((q) => (
-                  <div key={q.order_id} className="rounded-xl border p-3 text-sm" style={{ borderColor: "var(--border)" }} data-testid={`queue-${q.order_id}`}>
+                  <div key={q.order_id} className="rounded-xl border p-3 text-sm space-y-2" style={{ borderColor: "var(--border)" }} data-testid={`queue-${q.order_id}`}>
                     <div className="font-bold">{q.restaurant_name}</div>
                     <div style={{ color: "var(--muted)" }}>{q.customer_name} · {q.distance_km} km</div>
-                    <div className="flex flex-wrap gap-1 mt-2">
+                    <div className="flex flex-wrap gap-1">
                       <span className="badge">Pay ~${formatMoney(q.estimated_pay)}</span>
                       <span className="badge">Tip ~${formatMoney(q.estimated_tip)}</span>
                       <span className="badge">ETA {q.eta_min}m</span>
                       <span className="badge">{q.prep_status}</span>
                     </div>
+                    {["assigned_internal", "ready", "preparing"].includes(q.status) && (
+                      <PickupPhotoInstructions orderId={q.order_id} compact />
+                    )}
                   </div>
                 ))}
               </div>

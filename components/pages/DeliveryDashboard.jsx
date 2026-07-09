@@ -7,6 +7,7 @@ import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import { MapPin, Power, Truck } from "lucide-react";
 import { formatMoney, sanitizeOrders, sanitizeWallet } from "@/lib/safeData";
+import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
 import { logClientError } from "@/lib/clientErrorLog";
 import { ErrorState } from "@/components/ui/PageStates";
 import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
@@ -279,23 +280,30 @@ export default function DeliveryDashboard() {
             </h2>
             <div className="space-y-3">
               {dispatchOrders.map((o) => (
-                <div key={o.order_id} className="card p-5 flex items-center justify-between" style={{ borderColor: "var(--primary)" }} data-testid={`dispatched-${o.order_id}`}>
-                  <div>
-                    <div className="font-bold">{o.restaurant_name ?? "Unknown Restaurant"}</div>
-                    <div className="text-sm flex items-center gap-1" style={{ color: "var(--muted)" }}>
-                      <MapPin size={12} /> {o.address || "—"}
+                <div key={o.order_id} className="card p-5 space-y-4" style={{ borderColor: "var(--primary)" }} data-testid={`dispatched-${o.order_id}`}>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="font-bold">{o.restaurant_name ?? "Unknown Restaurant"}</div>
+                      <div className="text-sm flex items-center gap-1" style={{ color: "var(--muted)" }}>
+                        <MapPin size={12} /> {o.address || "—"}
+                      </div>
+                      <span className="badge mt-2">{o.status ?? "unknown"}</span>
                     </div>
-                    <span className="badge mt-2">{o.status ?? "unknown"}</span>
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      {o.status === "assigned_internal" && (
+                        <button className="btn-primary !py-2" onClick={() => action(o.order_id, "accept", true)} data-testid={`pickup-${o.order_id}`}>
+                          Pickup
+                        </button>
+                      )}
+                      {o.status === "picked_up" && (
+                        <button className="btn-primary !py-2" onClick={() => action(o.order_id, "deliver", true)} data-testid={`deliver-${o.order_id}`}>
+                          Mark delivered
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  {o.status === "assigned_internal" && (
-                    <button className="btn-primary !py-2" onClick={() => action(o.order_id, "accept", true)} data-testid={`pickup-${o.order_id}`}>
-                      Pickup
-                    </button>
-                  )}
-                  {o.status === "picked_up" && (
-                    <button className="btn-primary !py-2" onClick={() => action(o.order_id, "deliver", true)} data-testid={`deliver-${o.order_id}`}>
-                      Mark delivered
-                    </button>
+                  {(o.status === "assigned_internal" || o.status === "ready") && (
+                    <PickupPhotoInstructions orderId={o.order_id} compact />
                   )}
                 </div>
               ))}

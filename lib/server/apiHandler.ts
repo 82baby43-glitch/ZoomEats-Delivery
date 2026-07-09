@@ -19,6 +19,7 @@ import { handleDreamlandRequest } from "./dreamlandHandler";
 import { handleFounderDriverRequest } from "../founderDriver/handler";
 import { canUseDriverApis } from "../founderDriver/auth";
 import { handleLogisticsRequest } from "./logisticsHandler";
+import { handlePickupPhotoRequest } from "../pickupPhotos/handler";
 import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { handleStripeAdminRequest } from "./stripeAdmin";
 import { handleGeocodeAdminRequest } from "./geocodeAdmin";
@@ -178,6 +179,16 @@ export async function handleApiRequest(
       requireRole,
     });
     if (logisticsResult !== null) return logisticsResult;
+
+    const pickupPhotoResult = await handlePickupPhotoRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (pickupPhotoResult !== null) return pickupPhotoResult;
 
     // ---- Auth ----
     if (path === "/auth/me" && method === "GET") {

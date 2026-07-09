@@ -6,7 +6,8 @@ import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { setFounderDriverModeActive, setShadowDispatchActive } from "@/lib/founderDriver/session";
-import { Truck, MapPin, BarChart3, MessageSquare, Star } from "lucide-react";
+import { Truck, MapPin, BarChart3, MessageSquare, Star, Camera } from "lucide-react";
+import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -49,6 +50,7 @@ export default function FounderDriverDashboard() {
   const [dispatchInsight, setDispatchInsight] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [pickupGallery, setPickupGallery] = useState([]);
   const [msg, setMsg] = useState("");
 
   const [pickupForm, setPickupForm] = useState({
@@ -83,6 +85,17 @@ export default function FounderDriverDashboard() {
     priority: "high",
   });
 
+  const loadPickupGallery = useCallback(async (restaurantId) => {
+    try {
+      const res = await api.get("/founder-driver/pickup-photos", {
+        params: restaurantId ? { restaurant_id: restaurantId } : {},
+      });
+      setPickupGallery(Array.isArray(res?.data?.photos) ? res.data.photos : res?.photos || []);
+    } catch {
+      setPickupGallery([]);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -103,13 +116,14 @@ export default function FounderDriverDashboard() {
         setPickupForm((f) => ({ ...f, order_id: st.data.current_delivery.order_id }));
         setJournalForm((f) => ({ ...f, order_id: st.data.current_delivery.order_id }));
       }
+      await loadPickupGallery();
     } catch (e) {
       console.warn(e);
       setError(true);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadPickupGallery]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -295,8 +309,20 @@ export default function FounderDriverDashboard() {
         )}
 
         {tab === "restaurant" && (
-          <div className="card p-6 space-y-4">
-            <h2 className="font-display text-xl font-bold">Restaurant Intelligence</h2>
+          <div className="space-y-4">
+            <div className="card p-6 space-y-4">
+              <h2 className="font-display text-xl font-bold flex items-center gap-2"><Camera size={18} /> Pickup Photo Instructions</h2>
+              <input className="input-field" placeholder="Order ID" value={pickupForm.order_id} onChange={(e) => setPickupForm({ ...pickupForm, order_id: e.target.value })} />
+              {pickupForm.order_id && (
+                <PickupPhotoInstructions
+                  orderId={pickupForm.order_id}
+                  instructionsPath="/founder-driver/pickup-instructions"
+                  allowGuideEdit
+                />
+              )}
+            </div>
+            <div className="card p-6 space-y-4">
+              <h2 className="font-display text-xl font-bold">Restaurant Intelligence</h2>
             <input className="input-field" placeholder="Order ID" value={pickupForm.order_id} onChange={(e) => setPickupForm({ ...pickupForm, order_id: e.target.value })} />
             <input className="input-field" type="number" placeholder="Wait minutes" value={pickupForm.wait_minutes} onChange={(e) => setPickupForm({ ...pickupForm, wait_minutes: e.target.value })} />
             <StarRow label="Employee interaction" value={pickupForm.employee_interaction_rating} onChange={(v) => setPickupForm({ ...pickupForm, employee_interaction_rating: v })} />
@@ -317,6 +343,18 @@ export default function FounderDriverDashboard() {
             </select>
             <textarea className="input-field" rows={3} placeholder="Special notes" value={pickupForm.special_notes} onChange={(e) => setPickupForm({ ...pickupForm, special_notes: e.target.value })} />
             <button type="button" className="btn-primary" onClick={submitPickup} data-testid="founder-pickup-log-submit">Log pickup intelligence</button>
+            </div>
+            <div className="card p-6">
+              <h3 className="font-bold mb-3">Recent pickup photos (network)</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {pickupGallery.slice(0, 12).map((p) => (
+                  <a key={p.photo_id} href={p.url || "#"} target="_blank" rel="noreferrer" className="block rounded-lg overflow-hidden border aspect-square" style={{ borderColor: "var(--border)" }}>
+                    {p.url ? <img src={p.url} alt={p.photo_type} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs">{p.photo_type}</div>}
+                  </a>
+                ))}
+                {!pickupGallery.length && <p className="text-sm col-span-full" style={{ color: "var(--muted)" }}>No pickup photos yet — capture them from driver testing.</p>}
+              </div>
+            </div>
           </div>
         )}
 
