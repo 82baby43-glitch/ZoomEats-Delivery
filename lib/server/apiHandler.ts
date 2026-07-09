@@ -24,6 +24,8 @@ import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { handleStripeAdminRequest } from "./stripeAdmin";
 import { handleGeocodeAdminRequest } from "./geocodeAdmin";
 import { handleLaunchAuditRequest } from "./launchAuditHandler";
+import { handleFinancialAdminRequest } from "./financialAdminHandler";
+import { recordOrderFinancials } from "../financial/engine";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "./restaurantAdminHandler";
 import { syncRestaurantLaunchState } from "../restaurant/readiness";
 import { getAdminEmails } from "../adminEnv";
@@ -172,6 +174,9 @@ export async function handleApiRequest(
 
     const launchAuditResult = await handleLaunchAuditRequest(db, complianceCtx);
     if (launchAuditResult !== null) return launchAuditResult;
+
+    const financialResult = await handleFinancialAdminRequest(db, complianceCtx);
+    if (financialResult !== null) return financialResult;
 
     const restaurantAdminResult = await handleRestaurantAdminRequest(db, {
       path,
@@ -446,6 +451,11 @@ export async function handleApiRequest(
       } else {
         if (o.delivery_partner_id !== u.user_id) throwErr("Not your delivery", 403);
         await db.from("orders").update({ status: "delivered" }).eq("order_id", oid);
+        try {
+          await recordOrderFinancials(db, oid);
+        } catch (e) {
+          console.warn(JSON.stringify({ financial_ledger_skipped: String(e), order_id: oid }));
+        }
       }
       return { ok: true };
     }
@@ -530,6 +540,11 @@ export async function handleApiRequest(
         await db.from("deliveries").update({ status: "delivered" }).eq("order_id", oid);
         const workload = Math.max(0, Number(d.workload || 1) - 1);
         await db.from("drivers").update({ workload, last_seen: new Date().toISOString() }).eq("driver_id", d.driver_id);
+        try {
+          await recordOrderFinancials(db, oid);
+        } catch (e) {
+          console.warn(JSON.stringify({ financial_ledger_skipped: String(e), order_id: oid }));
+        }
       }
       return { ok: true, status: phase === "pickup" ? "picked_up" : "delivered" };
     }

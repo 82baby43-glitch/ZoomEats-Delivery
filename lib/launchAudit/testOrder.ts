@@ -4,6 +4,7 @@ import { evaluateRestaurantReadiness } from "../restaurant/readiness";
 import { findSimulationRestaurant } from "../restaurant/stripeConnect";
 import { resolveSimulationCustomerId } from "./simulationCustomer";
 import { getSupabasePublicUrl } from "../supabaseEnv";
+import { recordOrderFinancials } from "../financial/engine";
 
 function mk(
   id: string,
@@ -177,33 +178,55 @@ export async function runFullDeliverySimulation(db: SupabaseClient): Promise<Ful
     `status=${finalOrder?.status}, payment=${finalOrder?.payment_status}, driver=${finalOrder?.driver_id || "none"}`
   ));
 
-  const earningsExists = await db.from("driver_earnings").select("earning_id", { count: "exact", head: true }).limit(1);
+  const financialResult = await recordOrderFinancials(db, testOrderId);
+  const { data: driverEarning } = await db
+    .from("driver_earnings")
+    .select("id,final_driver_pay")
+    .eq("order_id", testOrderId)
+    .maybeSingle();
   checks.push(mk(
     `${prefix}_earnings`,
     "Driver earnings calculation",
-    !earningsExists.error ? "pass" : "warn",
+    financialResult.ok && driverEarning?.id && Number(driverEarning.final_driver_pay) > 0 ? "pass" : "fail",
     "medium",
-    !earningsExists.error ? "driver_earnings table ready" : "table unavailable"
+    financialResult.ok && driverEarning?.id
+      ? `driver pay $${Number(driverEarning.final_driver_pay).toFixed(2)}`
+      : financialResult.error || "calculation failed"
   ));
 
-  const settlementsExists = await db.from("restaurant_settlements").select("settlement_id", { count: "exact", head: true }).limit(1);
+  const { data: settlement } = await db
+    .from("restaurant_settlements")
+    .select("id,net_payout,commission_amount")
+    .eq("order_id", testOrderId)
+    .maybeSingle();
   checks.push(mk(
     `${prefix}_payout`,
     "Restaurant payout calculation",
-    !settlementsExists.error ? "pass" : "warn",
+    financialResult.ok && settlement?.id && Number(settlement.net_payout) > 0 ? "pass" : "fail",
     "medium",
-    !settlementsExists.error ? "restaurant_settlements table ready" : "table unavailable"
+    financialResult.ok && settlement?.id
+      ? `restaurant payout $${Number(settlement.net_payout).toFixed(2)} · commission $${Number(settlement.commission_amount).toFixed(2)}`
+      : financialResult.error || "calculation failed"
   ));
 
-  const platformRev = await db.from("platform_revenue").select("revenue_id", { count: "exact", head: true }).limit(1);
+  const { data: platformRow } = await db
+    .from("platform_revenue")
+    .select("id,commission_revenue,net_profit")
+    .eq("order_id", testOrderId)
+    .maybeSingle();
   checks.push(mk(
     `${prefix}_commission`,
     "Platform commission",
-    !platformRev.error ? "pass" : "warn",
+    financialResult.ok && platformRow?.id ? "pass" : "fail",
     "low",
-    !platformRev.error ? "platform_revenue table ready" : "table unavailable"
+    financialResult.ok && platformRow?.id
+      ? `commission $${Number(platformRow.commission_revenue).toFixed(2)} · net $${Number(platformRow.net_profit).toFixed(2)}`
+      : financialResult.error || "calculation failed"
   ));
 
+  await db.from("driver_earnings").delete().eq("order_id", testOrderId);
+  await db.from("restaurant_settlements").delete().eq("order_id", testOrderId);
+  await db.from("platform_revenue").delete().eq("order_id", testOrderId);
   await db.from("deliveries").delete().eq("order_id", testOrderId);
   await db.from("orders").delete().eq("order_id", testOrderId);
   checks.push(mk(`${prefix}_cleanup`, "Cleanup simulation data", "pass", "low", "Removed test data"));
