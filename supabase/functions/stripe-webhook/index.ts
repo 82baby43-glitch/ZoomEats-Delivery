@@ -2,6 +2,7 @@
 import Stripe from "npm:stripe@16.11.0";
 import { getServiceDb, isEventProcessed, markEventProcessed } from "../_shared/stripeIdempotency.ts";
 import { getStripeApiKey, getStripeWebhookSecret } from "../_shared/stripeEnv.ts";
+import { settlePaidOrderFinancials } from "../_shared/pricingSettle.ts";
 
 const HANDLED_EVENTS = new Set([
   "checkout.session.completed",
@@ -105,6 +106,7 @@ async function markOrderPaid(
 
   if (existing.payment_status === "paid") {
     console.log(JSON.stringify({ skipped: "already_paid", order_id: opts.orderId }));
+    await settlePaidOrderFinancials(db, opts.orderId);
     return;
   }
 
@@ -150,6 +152,8 @@ async function markOrderPaid(
     amountPaid: opts.amountPaid ?? null,
     currency: opts.currency ?? null,
   });
+
+  await settlePaidOrderFinancials(db, opts.orderId);
 
   console.log(JSON.stringify({ updated: true, order_id: opts.orderId, session_id: sessionId }));
 }

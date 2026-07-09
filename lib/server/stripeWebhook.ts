@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isEventProcessed, markEventProcessed } from "./stripeIdempotency";
+import { settlePaidOrderFinancials } from "./pricingSettle";
 
 export type StripeEvent = {
   id: string;
@@ -88,6 +89,8 @@ async function markOrderPaid(
       .eq("session_id", sessionId)
       .neq("payment_status", "paid");
   }
+
+  await settlePaidOrderFinancials(db, opts.orderId);
 }
 
 async function markOrderFailed(db: SupabaseClient, orderId: string) {

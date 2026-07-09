@@ -286,17 +286,45 @@ export default function DeliveryDashboard() {
             </div>
           ) : (
             <div className="space-y-3">
-              {available.map((o) => (
-                <div key={o.order_id} className="card p-5 flex items-center justify-between" data-testid={`avail-${o.order_id}`}>
-                  <div>
+              {available.map((o) => {
+                const offer = o.driver_offer;
+                return (
+                <div key={o.order_id} className="card p-5 flex items-center justify-between gap-4" data-testid={`avail-${o.order_id}`}>
+                  <div className="flex-1">
                     <div className="font-bold">{o.restaurant_name ?? "Unknown Restaurant"}</div>
-                    <div className="text-sm" style={{ color: "var(--muted)" }}>To: {o.address || "—"} · ${formatMoney(o.total)}</div>
+                    <div className="text-sm" style={{ color: "var(--muted)" }}>To: {o.address || "—"}</div>
+                    {offer ? (
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-sm" data-testid={`offer-${o.order_id}`}>
+                        <div>
+                          <div className="label-eyebrow">Guaranteed</div>
+                          <div className="font-display font-bold text-lg">${formatMoney(offer.final_driver_pay ?? offer.guaranteed_earnings)}</div>
+                        </div>
+                        <div>
+                          <div className="label-eyebrow">Est. time</div>
+                          <div className="font-bold">{offer.estimated_delivery_minutes} min</div>
+                        </div>
+                        <div>
+                          <div className="label-eyebrow">Distance</div>
+                          <div className="font-bold">{Number(offer.customer_distance_miles || 0).toFixed(1)} mi</div>
+                        </div>
+                        {(offer.bonus_total > 0 || offer.tip_estimate > 0) && (
+                          <div className="col-span-3 text-xs" style={{ color: "var(--muted)" }}>
+                            {offer.bonus_total > 0 ? `Bonuses $${formatMoney(offer.bonus_total)}` : ""}
+                            {offer.bonus_total > 0 && offer.tip_estimate > 0 ? " · " : ""}
+                            {offer.tip_estimate > 0 ? `Tip est. $${formatMoney(offer.tip_estimate)}` : ""}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-sm mt-1" style={{ color: "var(--muted)" }}>Order ${formatMoney(o.total)}</div>
+                    )}
                   </div>
-                  <button className="btn-primary !py-2" onClick={() => action(o.order_id, "accept")} data-testid={`accept-${o.order_id}`}>
+                  <button className="btn-primary !py-2 shrink-0" onClick={() => action(o.order_id, "accept")} data-testid={`accept-${o.order_id}`}>
                     Accept pickup
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

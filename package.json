@@ -10,6 +10,7 @@
     "check:supabase": "node scripts/check-supabase.mjs",
     "db:migrate": "node scripts/apply-rls-migration.mjs",
     "db:validate-pricing": "node scripts/validate-pricing-engine.mjs",
+    "test:pricing": "npx --yes tsx tests/pricing/PricingEngine.test.ts",
     "auth:google": "node scripts/configure-google-auth.mjs",
     "functions:deploy": "supabase functions deploy api && supabase functions deploy stripe-webhook --no-verify-jwt && supabase functions deploy dispatch-order --no-verify-jwt && supabase functions deploy routing-engine --no-verify-jwt && supabase functions deploy reconcile-payments --no-verify-jwt",
     "stripe:supabase": "node scripts/setup-stripe-supabase.mjs",
