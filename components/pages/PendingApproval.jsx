@@ -33,8 +33,18 @@ export default function PendingApproval() {
         {approval === "rejected" && (
           <p className="mt-2 text-sm text-red-400">Your application was not approved.</p>
         )}
-        {!status?.agreement_complete && (
-          <Link href="/agreements" className="btn-primary inline-block mt-8">Complete agreements</Link>
+        {!status?.onboarding_complete && (
+          <Link
+            href={user?.role === "vendor" ? "/restaurant/onboarding" : "/driver/onboarding"}
+            className="btn-primary inline-block mt-8"
+          >
+            Continue onboarding
+          </Link>
+        )}
+        {status?.onboarding_complete && !status?.agreement_complete && (
+          <Link href={user?.role === "vendor" ? "/restaurant/onboarding?step=4" : "/driver/onboarding?step=4"} className="btn-primary inline-block mt-8">
+            Complete legal agreements
+          </Link>
         )}
         <Link href="/onboarding" className="block mt-4 text-sm hover:underline" style={{ color: "var(--muted)" }}>
           Switch mode

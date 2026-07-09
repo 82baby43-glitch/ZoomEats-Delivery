@@ -88,6 +88,9 @@ export default function ApprovalsTab({ onChanged, onReview }) {
                     <span className={`badge ${agreementsDone ? "text-green-400" : "text-amber-400"}`}>
                       Agreements: {agreementsDone ? "complete" : "incomplete"}
                     </span>
+                    {item.review?.approval_status && (
+                      <span className="badge">Review: {item.review.approval_status}</span>
+                    )}
                     {item.restaurant?.name && (
                       <span className="badge">Store: {item.restaurant.name}</span>
                     )}

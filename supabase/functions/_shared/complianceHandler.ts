@@ -2,11 +2,20 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   AGREEMENT_VERSION,
   agreementsForRole,
+  agreementDocumentText,
   DRIVER_AGREEMENTS,
   RESTAURANT_AGREEMENTS,
 } from "./complianceAgreements.ts";
 import { computeComplianceStatus, normalizeRole, VALID_ROLES } from "./complianceAuthz.ts";
+import { DRIVER_REQUIRED_DOCS, RESTAURANT_REQUIRED_DOCS } from "./onboarding.ts";
+import { generateSignedAgreementPdf } from "./signedPdf.ts";
 import { encryptTaxPayload, maskTaxId } from "./taxCrypto.ts";
+import {
+  createAccountLink,
+  createConnectAccount,
+  getConnectAccountStatus,
+  markDemoConnectComplete,
+} from "./stripeConnect.ts";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -114,6 +123,18 @@ export async function writeAuditLog(
   });
 }
 
+async function loadOnboardingProgress(db: SupabaseClient, userId: string, role: string) {
+  const onboardingType = role === "delivery" ? "driver" : role === "vendor" ? "restaurant" : null;
+  if (!onboardingType) return null;
+  const { data } = await db
+    .from("onboarding_progress")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("onboarding_type", onboardingType)
+    .maybeSingle();
+  return data;
+}
+
 async function loadComplianceContext(db: SupabaseClient, user: Record<string, unknown>) {
   const role = normalizeRole(String(user.role || "customer"));
   const userId = String(user.user_id);
@@ -127,20 +148,25 @@ async function loadComplianceContext(db: SupabaseClient, user: Record<string, un
 
   let driver = null;
   let restaurant = null;
+  let driverOnboarding = null;
+  let restaurantOnboarding = null;
+  const onboarding = await loadOnboardingProgress(db, userId, role);
 
   if (role === "delivery") {
-    const { data } = await db.from("drivers").select("*").eq("user_id", userId).maybeSingle();
-    driver = data;
+    const [{ data: d }, { data: ob }] = await Promise.all([
+      db.from("drivers").select("*").eq("user_id", userId).maybeSingle(),
+      db.from("driver_onboarding").select("*").eq("user_id", userId).maybeSingle(),
+    ]);
+    driver = d;
+    driverOnboarding = ob;
   }
   if (role === "vendor") {
-    const { data } = await db
-      .from("restaurants")
-      .select("*")
-      .eq("owner_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    restaurant = data;
+    const [{ data: r }, { data: ob }] = await Promise.all([
+      db.from("restaurants").select("*").eq("owner_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      db.from("restaurant_onboarding").select("*").eq("user_id", userId).maybeSingle(),
+    ]);
+    restaurant = r;
+    restaurantOnboarding = ob;
   }
 
   return computeComplianceStatus({
@@ -149,7 +175,112 @@ async function loadComplianceContext(db: SupabaseClient, user: Record<string, un
     driver,
     restaurant,
     acceptedTypes,
+    onboarding,
+    driverOnboarding,
+    restaurantOnboarding,
   });
+}
+
+async function syncDocumentsComplete(db: SupabaseClient, userId: string, entityType: "driver" | "restaurant") {
+  if (entityType === "driver") {
+    const { data: docs } = await db.from("driver_documents").select("document_type,status").eq("user_id", userId);
+    const uploaded = new Set((docs || []).filter((d) => d.status !== "uploading").map((d) => d.document_type));
+    const complete = DRIVER_REQUIRED_DOCS.every((t) => uploaded.has(t));
+    await db.from("drivers").update({ documents_complete: complete }).eq("user_id", userId);
+    await db.from("onboarding_progress").upsert({
+      user_id: userId,
+      onboarding_type: "driver",
+      documents_complete: complete,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id,onboarding_type" });
+    return complete;
+  }
+
+  const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", userId).maybeSingle();
+  if (!rest?.restaurant_id) return false;
+  const { data: docs } = await db.from("restaurant_documents").select("document_type,status").eq("restaurant_id", rest.restaurant_id);
+  const uploaded = new Set((docs || []).filter((d) => d.status !== "uploading").map((d) => d.document_type));
+  const complete = RESTAURANT_REQUIRED_DOCS.every((t) => uploaded.has(t));
+  await db.from("onboarding_progress").upsert({
+    user_id: userId,
+    onboarding_type: "restaurant",
+    documents_complete: complete,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "user_id,onboarding_type" });
+  return complete;
+}
+
+async function storeSignedDocument(
+  db: SupabaseClient,
+  opts: {
+    user: Record<string, unknown>;
+    role: string;
+    agreementType: string;
+    title: string;
+    body: string;
+    signature: string;
+    typedName: string;
+    version: string;
+    signedAt: string;
+  }
+) {
+  const pdfBytes = generateSignedAgreementPdf({
+    title: opts.title,
+    body: opts.body,
+    signerName: opts.typedName,
+    signature: opts.signature.startsWith("data:") ? opts.typedName : opts.signature,
+    agreementVersion: opts.version,
+    signedAt: opts.signedAt,
+    role: opts.role,
+  });
+
+  const userId = String(opts.user.user_id);
+  const storagePath = `${userId}/signed-agreements/${opts.agreementType}_v${opts.version}_${Date.now()}.pdf`;
+
+  const { error: uploadErr } = await db.storage
+    .from("compliance-documents")
+    .upload(storagePath, pdfBytes, { contentType: "application/pdf", upsert: true });
+  if (uploadErr) throwErr(uploadErr.message, 500);
+
+  const { data: signedUrlData } = await db.storage.from("compliance-documents").createSignedUrl(storagePath, 60 * 60 * 24 * 365);
+  const documentUrl = signedUrlData?.signedUrl || storagePath;
+  const documentId = uid("doc");
+
+  if (opts.role === "delivery") {
+    await db.from("driver_documents").insert({
+      document_id: documentId,
+      user_id: userId,
+      document_type: opts.agreementType,
+      file_key: storagePath,
+      storage_path: storagePath,
+      file_name: `${opts.agreementType}.pdf`,
+      content_type: "application/pdf",
+      document_url: documentUrl,
+      signature: opts.signature.startsWith("data:") ? opts.typedName : opts.signature,
+      signed_at: opts.signedAt,
+      agreement_version: opts.version,
+      status: "signed",
+    });
+  } else if (opts.role === "vendor") {
+    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", userId).maybeSingle();
+    if (!rest?.restaurant_id) throwErr("Create your restaurant profile first");
+    await db.from("restaurant_documents").insert({
+      document_id: documentId,
+      restaurant_id: rest.restaurant_id,
+      document_type: opts.agreementType,
+      file_key: storagePath,
+      storage_path: storagePath,
+      file_name: `${opts.agreementType}.pdf`,
+      content_type: "application/pdf",
+      document_url: documentUrl,
+      signature: opts.signature.startsWith("data:") ? opts.typedName : opts.signature,
+      signed_at: opts.signedAt,
+      agreement_version: opts.version,
+      status: "signed",
+    });
+  }
+
+  return { document_id: documentId, document_url: documentUrl, storage_path: storagePath };
 }
 
 function parseClientMeta(body: Record<string, unknown>) {
@@ -194,6 +325,7 @@ export async function handleComplianceRequest(
     const byType = new Map((accepted || []).map((a) => [a.agreement_type, a]));
     return defs.map((d) => ({
       ...d,
+      fullText: agreementDocumentText(d),
       accepted: Boolean(byType.get(d.type)),
       acceptance: byType.get(d.type) || null,
     }));
@@ -274,6 +406,85 @@ export async function handleComplianceRequest(
     return { results, compliance: status };
   }
 
+  if (path === "/agreements/sign-document" && method === "POST") {
+    const u = requireAuth();
+    const role = normalizeRole(String(u.role));
+    if (!["delivery", "vendor"].includes(role)) throwErr("Agreements not required for this role");
+
+    const agreementType = String(body.agreement_type || "");
+    const defs = agreementsForRole(role);
+    const def = defs.find((d) => d.type === agreementType);
+    if (!def) throwErr("Unknown agreement type");
+
+    const typedName = String(body.typed_name || "").trim();
+    const signature = String(body.signature || typedName).trim();
+    const consent = Boolean(body.consent_checkbox);
+    const version = String(body.agreement_version || AGREEMENT_VERSION);
+    if (def.kind === "signature" && !typedName) throwErr("Typed legal name required");
+    if (!consent) throwErr("Consent checkbox required");
+    if (!body.scroll_completed) throwErr("Please scroll through the entire document before signing");
+
+    const signedAt = String(body.signed_at || new Date().toISOString());
+    const meta = parseClientMeta(body);
+    const acceptanceId = uid("agr");
+    const row = {
+      acceptance_id: acceptanceId,
+      user_id: u.user_id,
+      role_context: role,
+      agreement_type: agreementType,
+      agreement_version: version,
+      signature,
+      typed_name: typedName || null,
+      consent_checkbox: consent,
+      accepted_at: signedAt,
+      metadata: { scroll_completed: true, document_kind: "signed_pdf" },
+      ...meta,
+    };
+
+    const { error } = await db.from("agreement_acceptances").upsert(row, {
+      onConflict: "user_id,agreement_type,agreement_version",
+    });
+    if (error) throwErr(error.message, 500);
+
+    const doc = await storeSignedDocument(db, {
+      user: u,
+      role,
+      agreementType,
+      title: def.title,
+      body: agreementDocumentText(def),
+      signature,
+      typedName,
+      version,
+      signedAt,
+    });
+
+    await syncAgreementComplete(db, u, role);
+    const onboardingType = role === "delivery" ? "driver" : "restaurant";
+    const { data: progress } = await db.from("onboarding_progress").select("completed_steps").eq("user_id", u.user_id).eq("onboarding_type", onboardingType).maybeSingle();
+    const steps = Array.isArray(progress?.completed_steps) ? progress.completed_steps : [];
+    if (!steps.includes("legal")) steps.push("legal");
+    await db.from("onboarding_progress").upsert({
+      user_id: u.user_id,
+      onboarding_type: onboardingType,
+      completed_steps: steps,
+      agreements_complete: true,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id,onboarding_type" });
+
+    await writeAuditLog(db, {
+      event_type: "agreement_signed_document",
+      user_id: String(u.user_id),
+      entity_type: "agreement",
+      entity_id: acceptanceId,
+      message: `Signed ${agreementType} with PDF archive`,
+      metadata: { agreement_type: agreementType, version, document_id: doc.document_id },
+      ip_address: meta.ip_address ?? undefined,
+      user_agent: meta.user_agent ?? undefined,
+    });
+
+    return { acceptance_id: acceptanceId, agreement_type: agreementType, document: doc };
+  }
+
   if (path === "/auth/role" && method === "POST") {
     const u = requireAuth();
     const role = normalizeRole(String(body.role || ""));
@@ -319,6 +530,21 @@ export async function handleComplianceRequest(
           agreement_complete: false,
         }).eq("user_id", u.user_id);
       }
+      await db.from("driver_onboarding").upsert({
+        user_id: u.user_id,
+        current_step: 1,
+        status: "incomplete",
+        email: u.email,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+      await db.from("onboarding_progress").upsert({
+        user_id: u.user_id,
+        onboarding_type: "driver",
+        completed_steps: [],
+        current_step: 1,
+        approval_status: "incomplete",
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id,onboarding_type" });
       await db.from("compliance_reviews").insert({
         review_id: uid("rev"),
         user_id: u.user_id,
@@ -330,6 +556,21 @@ export async function handleComplianceRequest(
     }
 
     if (role === "vendor") {
+      await db.from("restaurant_onboarding").upsert({
+        user_id: u.user_id,
+        current_step: 1,
+        status: "incomplete",
+        email: u.email,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+      await db.from("onboarding_progress").upsert({
+        user_id: u.user_id,
+        onboarding_type: "restaurant",
+        completed_steps: [],
+        current_step: 1,
+        approval_status: "incomplete",
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id,onboarding_type" });
       await db.from("compliance_reviews").insert({
         review_id: uid("rev"),
         user_id: u.user_id,
@@ -444,27 +685,36 @@ export async function handleComplianceRequest(
 
   if (path === "/admin/compliance/dashboard" && method === "GET") {
     requireRole("admin");
-    const [{ data: pendingUsers }, { data: acceptances }, { data: driverDocs }, { data: bgChecks }] = await Promise.all([
+    const [{ data: pendingUsers }, { data: acceptances }, { data: driverDocs }, { data: restDocs }, { data: bgChecks }, { data: onboardingProgress }] = await Promise.all([
       db.from("users").select("user_id,role,approval_status,agreement_complete").in("role", ["delivery", "vendor"]).in("approval_status", ["pending", "review", "verification", "documents_missing"]),
       db.from("agreement_acceptances").select("acceptance_id"),
-      db.from("driver_documents").select("document_id,status,expires_at,document_type"),
+      db.from("driver_documents").select("document_id,status,expires_at,document_type,signed_at"),
+      db.from("restaurant_documents").select("document_id,status,expires_at,document_type,signed_at"),
       db.from("background_checks").select("check_id,status"),
+      db.from("onboarding_progress").select("user_id,onboarding_type,approval_status,documents_complete,stripe_connect_complete,agreements_complete"),
     ]);
-    const expiredDocs = (driverDocs || []).filter((d) => d.expires_at && new Date(d.expires_at) < new Date());
+    const expiredDocs = [...(driverDocs || []), ...(restDocs || [])].filter((d) => d.expires_at && new Date(d.expires_at) < new Date());
     const pendingBg = (bgChecks || []).filter((b) => b.status === "pending");
     const missingAgreements = (pendingUsers || []).filter((u) => !u.agreement_complete);
+    const missingDocs = (onboardingProgress || []).filter((p) => !p.documents_complete);
+    const signedAgreements = [...(driverDocs || []), ...(restDocs || [])].filter((d) => d.status === "signed" || d.signed_at);
     const totalPartners = (pendingUsers || []).length;
     const compliant = totalPartners === 0 ? 100 : Math.round(((totalPartners - missingAgreements.length) / Math.max(totalPartners, 1)) * 100);
     return {
       stats: {
         pending_approvals: totalPartners,
+        pending_driver_applications: (pendingUsers || []).filter((u) => u.role === "delivery").length,
+        pending_restaurant_applications: (pendingUsers || []).filter((u) => u.role === "vendor").length,
         missing_agreements: missingAgreements.length,
+        missing_documents: missingDocs.length,
+        signed_agreements: signedAgreements.length,
         expired_documents: expiredDocs.length,
         pending_background_checks: pendingBg.length,
         total_signatures: acceptances?.length || 0,
         compliance_percentage: compliant,
       },
       pending_users: pendingUsers || [],
+      onboarding_progress: onboardingProgress || [],
     };
   }
 
@@ -476,16 +726,15 @@ export async function handleComplianceRequest(
     if (!user) throwErr("User not found", 404);
 
     const role = normalizeRole(String(user.role));
-    const [{ data: agreements }, { data: driverDocs }, { data: restDocs }, { data: onboarding }, { data: restOnboarding }, { data: tax }, { data: bg }] = await Promise.all([
+    const [{ data: agreements }, { data: driverDocs }, { data: restDocs }, { data: onboarding }, { data: restOnboarding }, { data: tax }, { data: bg }, { data: progress }] = await Promise.all([
       db.from("agreement_acceptances").select("*").eq("user_id", userId).order("accepted_at", { ascending: false }),
       db.from("driver_documents").select("*").eq("user_id", userId).order("uploaded_at", { ascending: false }),
-      role === "vendor"
-        ? db.from("restaurant_documents").select("*").order("uploaded_at", { ascending: false })
-        : Promise.resolve({ data: [] }),
+      db.from("restaurant_documents").select("*").order("uploaded_at", { ascending: false }),
       role === "delivery" ? db.from("driver_onboarding").select("*").eq("user_id", userId).maybeSingle() : Promise.resolve({ data: null }),
       role === "vendor" ? db.from("restaurant_onboarding").select("*").eq("user_id", userId).maybeSingle() : Promise.resolve({ data: null }),
       db.from("tax_information").select("tax_id,legal_name,business_name,tax_classification,last_four,w9_signed_at,created_at,updated_at").eq("user_id", userId).maybeSingle(),
       db.from("background_checks").select("*").eq("user_id", userId).order("initiated_at", { ascending: false }).limit(1).maybeSingle(),
+      db.from("onboarding_progress").select("*").eq("user_id", userId).maybeSingle(),
     ]);
 
     const catalog = agreementsForRole(role);
@@ -607,9 +856,7 @@ export async function handleComplianceRequest(
     const table = entityType === "restaurant" ? "restaurant_documents" : "driver_documents";
     const expiresAt = body.expires_at || null;
     await db.from(table).update({ status: "pending_review", expires_at: expiresAt }).eq("document_id", documentId);
-    if (entityType === "driver") {
-      await db.from("drivers").update({ documents_complete: false }).eq("user_id", u.user_id);
-    }
+    await syncDocumentsComplete(db, String(u.user_id), entityType === "restaurant" ? "restaurant" : "driver");
     return { ok: true, document_id: documentId };
   }
 
@@ -634,14 +881,192 @@ export async function handleComplianceRequest(
   if (path === "/onboarding/driver" && method === "POST") {
     const u = requireRole("delivery", "driver");
     const step = Number(body.step || 1);
-    const allowed = ["legal_name", "date_of_birth", "address_line1", "address_line2", "city", "state", "zip", "phone",
-      "license_number", "license_expiration", "vehicle_make", "vehicle_model", "vehicle_year", "vehicle_color", "vehicle_plate", "status"];
+    const allowed = [
+      "legal_name", "date_of_birth", "address_line1", "address_line2", "city", "state", "zip", "phone", "email",
+      "emergency_contact_name", "emergency_contact_phone", "emergency_contact_relationship",
+      "license_number", "license_state", "license_expiration",
+      "vehicle_make", "vehicle_model", "vehicle_year", "vehicle_color", "vehicle_plate",
+      "insurance_provider", "insurance_policy_number", "insurance_expiration",
+      "status",
+    ];
     const payload: Record<string, unknown> = { user_id: u.user_id, current_step: step, updated_at: new Date().toISOString() };
     for (const k of allowed) {
       if (body[k] !== undefined) payload[k] = body[k];
     }
     const { data } = await db.from("driver_onboarding").upsert(payload, { onConflict: "user_id" }).select().single();
     return data;
+  }
+
+  if (path === "/onboarding/restaurant" && method === "GET") {
+    const u = requireRole("vendor", "restaurant");
+    const { data } = await db.from("restaurant_onboarding").select("*").eq("user_id", u.user_id).maybeSingle();
+    return data || { user_id: u.user_id, current_step: 1, status: "incomplete" };
+  }
+
+  if (path === "/onboarding/restaurant" && method === "POST") {
+    const u = requireRole("vendor", "restaurant");
+    const step = Number(body.step || 1);
+    const allowed = [
+      "business_name", "owner_name", "business_address", "phone", "email", "cuisine", "hours",
+      "ein", "sales_tax_id", "owner_verified", "food_permit_required", "status",
+    ];
+    const payload: Record<string, unknown> = { user_id: u.user_id, current_step: step, updated_at: new Date().toISOString() };
+    for (const k of allowed) {
+      if (body[k] !== undefined) payload[k] = body[k];
+    }
+
+    let restaurantId = null;
+    const { data: existingRest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+    if (existingRest?.restaurant_id) {
+      restaurantId = existingRest.restaurant_id;
+    } else if (body.business_name) {
+      restaurantId = uid("rest");
+      await db.from("restaurants").insert({
+        restaurant_id: restaurantId,
+        owner_id: u.user_id,
+        name: String(body.business_name),
+        cuisine: body.cuisine || "General",
+        address: body.business_address || "",
+        approved: false,
+        approval_status: "pending",
+        agreement_complete: false,
+        active: false,
+      });
+    }
+    if (restaurantId) payload.restaurant_id = restaurantId;
+
+    const { data } = await db.from("restaurant_onboarding").upsert(payload, { onConflict: "user_id" }).select().single();
+    return data;
+  }
+
+  if (path === "/onboarding/progress" && method === "GET") {
+    const u = requireAuth();
+    const onboardingType = String(params.type || body.onboarding_type || "");
+    if (!onboardingType) throwErr("onboarding type required");
+    const { data } = await db.from("onboarding_progress").select("*").eq("user_id", u.user_id).eq("onboarding_type", onboardingType).maybeSingle();
+    return data || { user_id: u.user_id, onboarding_type: onboardingType, completed_steps: [], current_step: 1, approval_status: "incomplete" };
+  }
+
+  if (path === "/onboarding/progress" && method === "POST") {
+    const u = requireAuth();
+    const onboardingType = String(body.onboarding_type || "");
+    if (!onboardingType) throwErr("onboarding_type required");
+    const payload: Record<string, unknown> = {
+      user_id: u.user_id,
+      onboarding_type: onboardingType,
+      updated_at: new Date().toISOString(),
+    };
+    if (body.completed_steps !== undefined) payload.completed_steps = body.completed_steps;
+    if (body.current_step !== undefined) payload.current_step = body.current_step;
+    if (body.approval_status !== undefined) payload.approval_status = body.approval_status;
+    if (body.documents_complete !== undefined) payload.documents_complete = body.documents_complete;
+    if (body.stripe_connect_complete !== undefined) payload.stripe_connect_complete = body.stripe_connect_complete;
+    if (body.agreements_complete !== undefined) payload.agreements_complete = body.agreements_complete;
+
+    const { data } = await db.from("onboarding_progress").upsert(payload, { onConflict: "user_id,onboarding_type" }).select().single();
+
+    if (body.approval_status === "pending_review") {
+      const role = onboardingType === "driver" ? "delivery" : "vendor";
+      await db.from("users").update({ approval_status: "review" }).eq("user_id", u.user_id);
+      if (role === "delivery") {
+        await db.from("drivers").update({ approval_status: "review" }).eq("user_id", u.user_id);
+      }
+      if (role === "vendor") {
+        await db.from("restaurants").update({ approval_status: "review" }).eq("owner_id", u.user_id);
+      }
+      const { data: existingReview } = await db.from("compliance_reviews").select("review_id").eq("user_id", u.user_id).in("status", ["pending", "review"]).maybeSingle();
+      if (existingReview?.review_id) {
+        await db.from("compliance_reviews").update({
+          approval_status: "review",
+          status: "pending",
+          updated_at: new Date().toISOString(),
+        }).eq("review_id", existingReview.review_id);
+      } else {
+        await db.from("compliance_reviews").insert({
+          review_id: uid("rev"),
+          user_id: u.user_id,
+          entity_type: onboardingType === "driver" ? "driver" : "restaurant",
+          entity_id: String(u.user_id),
+          status: "pending",
+          approval_status: "review",
+        });
+      }
+    }
+
+    return data;
+  }
+
+  if (path === "/onboarding/stripe-connect" && method === "POST") {
+    const u = requireAuth();
+    const entityType = String(body.entity_type || "driver") as "driver" | "restaurant";
+    const table = entityType === "driver" ? "driver_onboarding" : "restaurant_onboarding";
+    const { data: onboarding } = await db.from(table).select("*").eq("user_id", u.user_id).maybeSingle();
+
+    let accountId = onboarding?.stripe_connect_id as string | undefined;
+    if (!accountId) {
+      const created = await createConnectAccount({
+        email: String(u.email || onboarding?.email || ""),
+        type: entityType,
+        userId: String(u.user_id),
+      });
+      accountId = created.account_id;
+      await db.from(table).upsert({
+        user_id: u.user_id,
+        stripe_connect_id: accountId,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+    }
+
+    const returnUrl = String(body.return_url || "");
+    const refreshUrl = returnUrl || "https://zoomeats.app/onboarding";
+    const onboardingUrl = await createAccountLink(accountId, returnUrl || refreshUrl, refreshUrl);
+
+    if (!onboardingUrl) {
+      const completedId = await markDemoConnectComplete(accountId);
+      await db.from(table).update({
+        stripe_connect_id: completedId,
+        stripe_connect_complete: true,
+        bank_verified: true,
+        updated_at: new Date().toISOString(),
+      }).eq("user_id", u.user_id);
+      await db.from("onboarding_progress").upsert({
+        user_id: u.user_id,
+        onboarding_type: entityType,
+        stripe_connect_complete: true,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id,onboarding_type" });
+      return { complete: true, demo_mode: true, account_id: completedId };
+    }
+
+    return { onboarding_url: onboardingUrl, account_id: accountId };
+  }
+
+  if (path === "/onboarding/stripe-connect/status" && method === "GET") {
+    const u = requireAuth();
+    const entityType = String(params.entity_type || "driver");
+    const table = entityType === "driver" ? "driver_onboarding" : "restaurant_onboarding";
+    const { data: onboarding } = await db.from(table).select("stripe_connect_id,stripe_connect_complete,bank_verified").eq("user_id", u.user_id).maybeSingle();
+
+    if (!onboarding?.stripe_connect_id) {
+      return { connected: false, complete: false, bank_verified: false, account_id: null, demo_mode: !Deno.env.get("STRIPE_API_KEY") && !Deno.env.get("STRIPE_SECRET_KEY") };
+    }
+
+    const status = await getConnectAccountStatus(String(onboarding.stripe_connect_id));
+    if (status.complete && !onboarding.stripe_connect_complete) {
+      await db.from(table).update({
+        stripe_connect_complete: true,
+        bank_verified: status.bank_verified,
+        updated_at: new Date().toISOString(),
+      }).eq("user_id", u.user_id);
+      await db.from("onboarding_progress").upsert({
+        user_id: u.user_id,
+        onboarding_type: entityType,
+        stripe_connect_complete: true,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id,onboarding_type" });
+    }
+
+    return status;
   }
 
   if (path === "/onboarding/driver/tax" && method === "POST") {

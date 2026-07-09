@@ -32,10 +32,10 @@ export default function AdminComplianceDashboard() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {[
             ["Pending", stats.pending_approvals],
-            ["Missing agreements", stats.missing_agreements],
-            ["Pending BG", stats.pending_background_checks],
-            ["Expired docs", stats.expired_documents],
-            ["Signatures", stats.total_signatures],
+            ["Drivers", stats.pending_driver_applications ?? "—"],
+            ["Restaurants", stats.pending_restaurant_applications ?? "—"],
+            ["Missing docs", stats.missing_documents ?? stats.expired_documents],
+            ["Signed agreements", stats.signed_agreements ?? stats.total_signatures],
             ["Compliance %", `${stats.compliance_percentage}%`],
           ].map(([label, val]) => (
             <div key={label} className="card p-4 text-center">

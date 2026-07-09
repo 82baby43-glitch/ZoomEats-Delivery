@@ -8,8 +8,8 @@ import { Utensils, Bike, ShoppingBag, Shield, Check } from "lucide-react";
 
 const BASE_ROLES = [
   { id: "customer", title: "Order food", icon: ShoppingBag, desc: "Discover local kitchens and get them delivered.", path: "/" },
-  { id: "vendor", title: "Run a kitchen", icon: Utensils, desc: "List your restaurant, manage menu and orders.", path: "/restaurant/dashboard" },
-  { id: "delivery", title: "Deliver orders", icon: Bike, desc: "Earn flexible income on your schedule.", path: "/driver/dashboard" },
+  { id: "vendor", title: "Run a kitchen", icon: Utensils, desc: "List your restaurant, manage menu and orders.", path: "/restaurant/onboarding" },
+  { id: "delivery", title: "Deliver orders", icon: Bike, desc: "Earn flexible income on your schedule.", path: "/driver/onboarding" },
 ];
 
 const ADMIN_ROLE = {
