@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
+import { isFounderDriverModeActive } from "@/lib/founderDriver/session";
+import Link from "next/link";
 import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import { MapPin, Power, Truck } from "lucide-react";
@@ -38,9 +40,17 @@ export default function DeliveryDashboard() {
   const { coords, err: geoErr } = useGeolocation(online);
   const lastSentRef = useRef(0);
 
+  const [founderMode, setFounderMode] = useState(false);
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       setOnline(localStorage.getItem("zoomeats_driver_online") === "1");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setFounderMode(isFounderDriverModeActive());
     }
   }, []);
 
@@ -137,6 +147,15 @@ export default function DeliveryDashboard() {
     <div>
       <Header />
       <div className="max-w-5xl mx-auto px-6 md:px-12 py-12">
+        {founderMode && (
+          <div className="card p-4 mb-6 flex flex-wrap items-center justify-between gap-3" style={{ borderColor: "var(--accent)" }} data-testid="founder-driver-banner">
+            <div>
+              <div className="label-eyebrow">Founder Driver Mode</div>
+              <p className="text-sm" style={{ color: "var(--muted)" }}>Analytics active — you operate as a real driver. Payments, GPS, and dispatch unchanged.</p>
+            </div>
+            <Link href="/admin/founder-driver" className="btn-secondary text-sm">Open analytics</Link>
+          </div>
+        )}
         {/* Online toggle banner */}
         <div className="card p-5 flex items-center gap-4" data-testid="online-toggle-card">
           <div

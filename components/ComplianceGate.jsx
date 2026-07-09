@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { roleMatches } from "@/lib/compliance/authz";
+import { hasFounderDriverPermission } from "@/lib/founderDriver/auth";
 
 const ERROR_MESSAGES = {
   session_expired: "Your session has expired. Please sign in again.",
@@ -89,29 +90,36 @@ export function ComplianceGate({
   if (!user) return null;
 
   if (roles && !roleMatches(user.role, roles)) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-center px-6">
-        <div>
-          <div className="font-display text-2xl font-bold">Unauthorized</div>
-          <p className="mt-2" style={{ color: "var(--muted)" }}>
-            This page requires a different role. Your role: {user.role}
-          </p>
+    const needsDriver = roles.some((r) => r === "delivery" || r === "driver");
+    const founderDriverOk = needsDriver && hasFounderDriverPermission(user);
+    if (!founderDriverOk) {
+      return (
+        <div className="min-h-screen flex items-center justify-center text-center px-6">
+          <div>
+            <div className="font-display text-2xl font-bold">Unauthorized</div>
+            <p className="mt-2" style={{ color: "var(--muted)" }}>
+              This page requires a different role. Your role: {user.role}
+            </p>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
   }
 
   if (requireCompliance && compliance && !compliance.can_access_dashboard && roles?.length) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-center px-6">
-        <div>
-          <div className="font-display text-2xl font-bold">{compliance.message || "Action required"}</div>
-          <p className="mt-2" style={{ color: "var(--muted)" }}>
-            {compliance.redirect_to ? `Redirecting to ${compliance.redirect_to}…` : "Please complete onboarding."}
-          </p>
+    const needsDriver = roles.some((r) => r === "delivery" || r === "driver");
+    if (!(needsDriver && hasFounderDriverPermission(user))) {
+      return (
+        <div className="min-h-screen flex items-center justify-center text-center px-6">
+          <div>
+            <div className="font-display text-2xl font-bold">{compliance.message || "Action required"}</div>
+            <p className="mt-2" style={{ color: "var(--muted)" }}>
+              {compliance.redirect_to ? `Redirecting to ${compliance.redirect_to}…` : "Please complete onboarding."}
+            </p>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
   }
 
   return (

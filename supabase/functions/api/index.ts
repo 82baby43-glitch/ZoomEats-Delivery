@@ -26,6 +26,8 @@ import {
 import { runOpenStreetMapImport } from "../_shared/openStreetMapImport.ts";
 import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
+import { handleFounderDriverRequest } from "../_shared/founderDriverHandler.ts";
+import { canUseDriverApis } from "../_shared/founderDriverAuth.ts";
 import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
 import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geocodeAdmin.ts";
@@ -138,6 +140,14 @@ Deno.serve(async (req) => {
     return u;
   };
 
+  const requireDriverOrFounder = () => {
+    const u = requireAuth();
+    if (!canUseDriverApis(u as { user_id: string; role?: string; founder_driver?: boolean })) {
+      throw { status: 403, message: "Requires delivery role or Founder Driver permission" };
+    }
+    return u;
+  };
+
   const complianceCtx = {
     path,
     method,
@@ -170,6 +180,15 @@ Deno.serve(async (req) => {
       requireAuth,
     });
     if (dreamlandResult !== null) return json(dreamlandResult);
+
+    const founderResult = await handleFounderDriverRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+    });
+    if (founderResult !== null) return json(founderResult);
 
     // ---- Auth ----
     if (path === "/auth/me" && method === "GET") {
@@ -402,7 +421,7 @@ Deno.serve(async (req) => {
 
     // ---- Driver ----
     if (path === "/driver/location" && method === "POST") {
-      const u = requireRole("delivery");
+      const u = requireDriverOrFounder();
       const { data: existing } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
       const now = new Date().toISOString();
       if (existing) {
@@ -436,14 +455,14 @@ Deno.serve(async (req) => {
       return json({ ok: true, driver_id: driver.driver_id, last_seen: now });
     }
     if (path === "/driver/availability" && method === "POST") {
-      const u = requireRole("delivery");
+      const u = requireDriverOrFounder();
       const { data: d } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
       if (!d) return json({ ok: true, available: body.available });
       await db.from("drivers").update({ availability: !!body.available, last_seen: new Date().toISOString() }).eq("driver_id", d.driver_id);
       return json({ ok: true, available: body.available });
     }
     if (path === "/driver/active" && method === "GET") {
-      const u = requireRole("delivery");
+      const u = requireDriverOrFounder();
       const { data: d } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
       if (!d) return json({ driver: null, orders: [], route: null });
       const { data: orders } = await db.from("orders").select("*").eq("driver_id", d.driver_id).in("status", ["assigned_internal", "picked_up"]).order("created_at", { ascending: false });
@@ -466,7 +485,7 @@ Deno.serve(async (req) => {
 
     const driverOrderMatch = path.match(/^\/driver\/orders\/([^/]+)\/(pickup|deliver)$/);
     if (driverOrderMatch && method === "POST") {
-      const u = requireRole("delivery");
+      const u = requireDriverOrFounder();
       const [, oid, phase] = driverOrderMatch;
       const { data: d } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
       if (!d) return err("Driver profile not found", 404);

@@ -16,6 +16,8 @@ import {
 } from "../dispatch/routing/uber-routing-ai";
 import { handleComplianceRequest } from "./complianceHandler";
 import { handleDreamlandRequest } from "./dreamlandHandler";
+import { handleFounderDriverRequest } from "../founderDriver/handler";
+import { canUseDriverApis } from "../founderDriver/auth";
 import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { handleStripeAdminRequest } from "./stripeAdmin";
 import { handleGeocodeAdminRequest } from "./geocodeAdmin";
@@ -117,6 +119,14 @@ export async function handleApiRequest(
     return u;
   };
 
+  const requireDriverOrFounder = () => {
+    const u = requireAuth();
+    if (!canUseDriverApis(u as { user_id: string; role?: string; founder_driver?: boolean })) {
+      throw { status: 403, message: "Requires delivery role or Founder Driver permission" };
+    }
+    return u;
+  };
+
   const complianceCtx = {
     path,
     method,
@@ -149,6 +159,15 @@ export async function handleApiRequest(
       requireAuth,
     });
     if (dreamlandResult !== null) return dreamlandResult;
+
+    const founderResult = await handleFounderDriverRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+    });
+    if (founderResult !== null) return founderResult;
 
     // ---- Auth ----
     if (path === "/auth/me" && method === "GET") {
@@ -379,9 +398,9 @@ export async function handleApiRequest(
       return { ok: true };
     }
 
-    // ---- Driver ----
+    // ---- Driver (founder admins with founder_driver may also use these endpoints) ----
     if (path === "/driver/location" && method === "POST") {
-      const u = requireRole("delivery");
+      const u = requireDriverOrFounder();
       const { data: existing } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
       const now = new Date().toISOString();
       if (existing) {
@@ -412,14 +431,14 @@ export async function handleApiRequest(
       return { ok: true, driver_id: driver.driver_id, last_seen: now };
     }
     if (path === "/driver/availability" && method === "POST") {
-      const u = requireRole("delivery");
+      const u = requireDriverOrFounder();
       const { data: d } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
       if (!d) return { ok: true, available: body.available };
       await db.from("drivers").update({ availability: !!body.available, last_seen: new Date().toISOString() }).eq("driver_id", d.driver_id);
       return { ok: true, available: body.available };
     }
     if (path === "/driver/active" && method === "GET") {
-      const u = requireRole("delivery");
+      const u = requireDriverOrFounder();
       const { data: d } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
       if (!d) return { driver: null, orders: [], route: null };
       const { data: orders } = await db.from("orders").select("*").eq("driver_id", d.driver_id).in("status", ["assigned_internal", "picked_up"]).order("created_at", { ascending: false });
@@ -437,6 +456,30 @@ export async function handleApiRequest(
             }
           : null,
       };
+    }
+
+    const driverOrderMatch = path.match(/^\/driver\/orders\/([^/]+)\/(pickup|deliver)$/);
+    if (driverOrderMatch && method === "POST") {
+      const u = requireDriverOrFounder();
+      const oid = driverOrderMatch[1];
+      const phase = driverOrderMatch[2];
+      const { data: d } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
+      if (!d) throwErr("No driver profile", 404);
+      const { data: o } = await db.from("orders").select("*").eq("order_id", oid).maybeSingle();
+      if (!o) throwErr("Not found", 404);
+      if (o.driver_id !== d.driver_id) throwErr("Not your dispatch", 403);
+      if (phase === "pickup") {
+        if (o.status !== "assigned_internal") throwErr(`Cannot pickup from status ${o.status}`);
+        await db.from("orders").update({ status: "picked_up", updated_at: new Date().toISOString() }).eq("order_id", oid);
+        await db.from("deliveries").update({ status: "picked_up" }).eq("order_id", oid);
+      } else {
+        if (o.status !== "picked_up") throwErr(`Cannot deliver from status ${o.status}`);
+        await db.from("orders").update({ status: "delivered", updated_at: new Date().toISOString() }).eq("order_id", oid);
+        await db.from("deliveries").update({ status: "delivered" }).eq("order_id", oid);
+        const workload = Math.max(0, Number(d.workload || 1) - 1);
+        await db.from("drivers").update({ workload, last_seen: new Date().toISOString() }).eq("driver_id", d.driver_id);
+      }
+      return { ok: true, status: phase === "pickup" ? "picked_up" : "delivered" };
     }
 
     // ---- Routing intelligence (layer on top of dispatch) ----

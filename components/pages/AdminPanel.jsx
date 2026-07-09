@@ -144,6 +144,9 @@ export default function AdminPanel() {
       <div className="max-w-7xl mx-auto px-6 md:px-12 py-12">
         <PulseHeader since={since} onRefresh={retryAll} />
         <div className="mt-4 flex flex-wrap gap-3">
+          <Link href="/admin/founder-driver" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-founder-driver-link">
+            <Truck size={16} /> Founder Driver Mode
+          </Link>
           <Link href="/admin/compliance" className="btn-primary inline-flex items-center gap-2 text-sm">
             Compliance Center
           </Link>
