@@ -173,6 +173,7 @@ export async function handleApiRequest(
     const logisticsResult = await handleLogisticsRequest(db, {
       path,
       method,
+      body,
       requireAuth,
       requireRole,
     });

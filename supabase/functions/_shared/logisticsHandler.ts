@@ -5,6 +5,7 @@ import {
   buildDriverLogisticsView,
   buildRestaurantLogisticsView,
 } from "./logistics/engine.ts";
+import { handleLogisticsSafetyRequest } from "./logisticsSafetyHandler.ts";
 
 function throwErr(message: string, status = 400): never {
   const e = new Error(message) as Error & { status?: number };
@@ -17,11 +18,21 @@ export async function handleLogisticsRequest(
   opts: {
     path: string;
     method: string;
+    body?: Record<string, unknown>;
     requireAuth: () => Record<string, unknown>;
     requireRole: (...roles: string[]) => Record<string, unknown>;
   }
 ): Promise<unknown | null> {
   const { path, method } = opts;
+
+  const safetyResult = await handleLogisticsSafetyRequest(db, {
+    path,
+    method,
+    body: opts.body ?? {},
+    requireAuth: opts.requireAuth,
+  });
+  if (safetyResult !== null) return safetyResult;
+
   if (!path.startsWith("/logistics")) return null;
   if (method !== "GET") throwErr("Method not allowed", 405);
 

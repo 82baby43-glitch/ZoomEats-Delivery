@@ -194,6 +194,7 @@ Deno.serve(async (req) => {
     const logisticsResult = await handleLogisticsRequest(db, {
       path,
       method,
+      body,
       requireAuth,
       requireRole,
     });

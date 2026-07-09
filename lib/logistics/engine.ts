@@ -5,7 +5,6 @@ import type {
   AdminLogisticsView,
   DeliveryQueueItem,
   DemandHotspot,
-  DispatchExplainPanel,
   DriverEarningsPanel,
   DriverLogisticsView,
   DriverMapStatus,
@@ -16,6 +15,7 @@ import type {
   RestaurantPerformancePanel,
   RoutePolyline,
 } from "./types";
+import { buildDispatchExplain } from "./dispatchExplain";
 
 const ACTIVE_ORDER_STATUSES = [
   "placed", "confirmed", "accepted", "preparing", "ready",
@@ -94,21 +94,6 @@ function buildRoutes(
     });
   }
   return routes;
-}
-
-function buildDispatchExplain(order: Record<string, unknown>): DispatchExplainPanel {
-  return {
-    order_id: String(order.order_id),
-    dispatch_score: 87,
-    restaurant_distance_pct: 34,
-    driver_distance_pct: 31,
-    predicted_wait_pct: 22,
-    traffic_pct: 8,
-    workload_pct: 5,
-    profitability: Number(order.total || 0) * 0.15,
-    confidence: 0.82,
-    reason: "Assigned based on proximity, predicted wait, and current workload",
-  };
 }
 
 function buildKitchenTimeline(status: string) {
@@ -235,6 +220,10 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
   const { data: demandOrders } = await db.from("orders").select("customer_lat,customer_lng,restaurant_name,created_at").gte("created_at", new Date(Date.now() - 3600000).toISOString()).limit(100);
   const hotspots = buildHotspots(demandOrders || [], []);
 
+  const dispatch = await Promise.all(
+    (orders || []).slice(0, 3).map((o) => buildDispatchExplain(db, o, o.driver_id as string | undefined))
+  );
+
   return {
     status,
     position,
@@ -247,7 +236,7 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
     hotspots,
     earnings,
     performance,
-    dispatch: (orders || []).slice(0, 3).map(buildDispatchExplain),
+    dispatch,
     updated_at: new Date().toISOString(),
   };
 }

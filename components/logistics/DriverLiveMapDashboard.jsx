@@ -8,7 +8,8 @@ import LogisticsMap from "@/components/maps/LogisticsMap";
 import { useLogisticsPoll, useLogisticsRealtime } from "@/lib/hooks/useLogisticsRealtime";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { formatMoney } from "@/lib/safeData";
-import { MapPin, Navigation, DollarSign, Shield, Radio } from "lucide-react";
+import { MapPin, Navigation, DollarSign, Radio } from "lucide-react";
+import DriverSafetyPanel from "@/components/logistics/DriverSafetyPanel";
 
 const STATUS_LABELS = {
   offline: "Offline",
@@ -155,13 +156,10 @@ export default function DriverLiveMapDashboard() {
               </div>
             )}
 
-            <div className="card p-4">
-              <h2 className="font-bold flex items-center gap-2 mb-2"><Shield size={16} /> Safety</h2>
-              <div className="flex flex-col gap-2">
-                <button type="button" className="btn-secondary text-xs w-full" data-testid="safety-support">Support chat</button>
-                <button type="button" className="btn-secondary text-xs w-full text-red-400 border-red-400/30" data-testid="safety-emergency">Emergency</button>
-              </div>
-            </div>
+            <DriverSafetyPanel
+              position={data?.position}
+              activeOrderId={data?.queue?.[0]?.order_id}
+            />
           </div>
         </div>
 

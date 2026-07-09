@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
+import { MapContainer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { CachedTileLayer } from "@/components/maps/CachedTileLayer";
+import { MapRotateControl, MarkerClusterLayer } from "@/components/maps/MapEnhancements";
 
 const TILES = {
   dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
@@ -96,10 +98,22 @@ export default function LogisticsMap({
   className = "",
   animateMarkers = true,
   showControls = true,
+  enableClustering = true,
   onThemeChange,
 }) {
   const containerRef = useRef(null);
   const [fs, setFs] = useState(false);
+  const [bearing, setBearing] = useState(0);
+
+  const driverMarkers = useMemo(
+    () => markers.filter((m) => m.type === "driver"),
+    [markers]
+  );
+  const clusterMarkers = useMemo(
+    () => markers.filter((m) => m.type !== "driver"),
+    [markers]
+  );
+
   const points = useMemo(
     () => markers.filter((m) => m.lat && m.lng).map((m) => [m.lat, m.lng]),
     [markers]
@@ -147,7 +161,7 @@ export default function LogisticsMap({
         </div>
       )}
       <MapContainer center={center} zoom={13} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
-        <TileLayer attribution='&copy; CARTO' url={TILES[theme]} />
+        <CachedTileLayer url={TILES[theme]} attribution="&copy; CARTO" />
         {routes.map((r) => (
           <Polyline
             key={r.id}
@@ -155,10 +169,17 @@ export default function LogisticsMap({
             pathOptions={{ color: r.color || "#C2533B", weight: 4, opacity: 0.85, dashArray: r.kind === "pickup" ? "8 6" : undefined }}
           />
         ))}
-        {markers.map((m) => (
-          <AnimatedMarker key={m.id} marker={m} animate={animateMarkers && m.type === "driver"} />
+        {enableClustering && clusterMarkers.length > 0 && (
+          <MarkerClusterLayer markers={clusterMarkers} pinIcon={pinIcon} hotspotCircle={hotspotCircle} />
+        )}
+        {!enableClustering && clusterMarkers.map((m) => (
+          <AnimatedMarker key={m.id} marker={m} animate={false} />
+        ))}
+        {driverMarkers.map((m) => (
+          <AnimatedMarker key={m.id} marker={m} animate={animateMarkers} />
         ))}
         <FitBounds points={points} />
+        {showControls && <MapRotateControl bearing={bearing} onBearingChange={setBearing} />}
       </MapContainer>
     </div>
   );
