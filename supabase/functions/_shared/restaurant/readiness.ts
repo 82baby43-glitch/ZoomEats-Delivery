@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { evaluateStripePayoutReadiness } from "./stripeConnect.ts";
 
-export type RestaurantLaunchStatus = "pending_location" | "pending_menu" | "ready";
+export type RestaurantLaunchStatus = "pending_location" | "pending_menu" | "pending_payout" | "ready";
 
 export interface RestaurantReadiness {
   restaurant_id: string;
@@ -10,6 +11,8 @@ export interface RestaurantReadiness {
   accepting_orders: boolean;
   has_coordinates: boolean;
   menu_item_count: number;
+  stripe_connected: boolean;
+  stripe_payout_ready: boolean;
   can_go_live: boolean;
   blockers: string[];
   checks: Array<{ label: string; ok: boolean; detail: string }>;
@@ -41,17 +44,20 @@ export async function evaluateRestaurantReadiness(
 
   const coords = hasValidCoords(rest);
   const menus = (menuCount ?? 0) > 0;
+  const stripe = await evaluateStripePayoutReadiness(db, restaurantId);
   const blockers: string[] = [];
 
   if (!coords) blockers.push("Missing map coordinates");
   if (!menus) blockers.push("No available menu items");
+  if (!stripe.ready) blockers.push(...stripe.blockers);
 
   let launch_status: RestaurantLaunchStatus = (rest.launch_status as RestaurantLaunchStatus) || "pending_menu";
   if (!coords) launch_status = "pending_location";
   else if (!menus) launch_status = "pending_menu";
+  else if (!stripe.ready) launch_status = "pending_payout";
   else launch_status = "ready";
 
-  const can_go_live = coords && menus;
+  const can_go_live = coords && menus && stripe.ready;
 
   return {
     restaurant_id: restaurantId,
@@ -61,12 +67,21 @@ export async function evaluateRestaurantReadiness(
     accepting_orders: !!rest.accepting_orders,
     has_coordinates: coords,
     menu_item_count: menuCount ?? 0,
+    stripe_connected: stripe.connected,
+    stripe_payout_ready: stripe.ready,
     can_go_live,
     blockers,
     checks: [
       { label: "Business information", ok: true, detail: "Restaurant record exists" },
       { label: "Map coordinates", ok: coords, detail: coords ? "Latitude and longitude set" : "Missing map coordinates" },
       { label: "Menu items", ok: menus, detail: menus ? `${menuCount} available items` : "No available menu items" },
+      {
+        label: "Stripe Connect payout",
+        ok: stripe.ready,
+        detail: stripe.ready
+          ? "Connected account with charges and payouts enabled"
+          : stripe.blockers.join("; ") || "Stripe payout setup incomplete",
+      },
     ],
   };
 }
@@ -74,6 +89,7 @@ export async function evaluateRestaurantReadiness(
 export function launchStatusLabel(status: RestaurantLaunchStatus): string {
   if (status === "pending_location") return "Pending Location";
   if (status === "pending_menu") return "Pending Menu Setup";
+  if (status === "pending_payout") return "Pending Stripe Payout";
   return "Ready";
 }
 

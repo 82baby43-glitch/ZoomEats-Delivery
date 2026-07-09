@@ -26,6 +26,9 @@ import { handleGeocodeAdminRequest } from "./geocodeAdmin";
 import { handleLaunchAuditRequest } from "./launchAuditHandler";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "./restaurantAdminHandler";
 import { syncRestaurantLaunchState } from "../restaurant/readiness";
+import { getAdminEmails } from "../adminEnv";
+import { checkRateLimit } from "../rateLimiter";
+import { logSystemEvent } from "./systemEvents";
 import { geocodeOrderAddress } from "./geocodeAdmin";
 import { normalizeRole } from "../compliance/authz";
 import { isTestRestaurantName } from "../restaurants";
@@ -78,8 +81,7 @@ export async function handleApiRequest(
 ) {
   const stripeKey = getStripeApiKey();
   const anthropicKey = process.env.ANTHROPIC_API_KEY || "";
-  const adminEmails = (process.env.ADMIN_EMAILS || process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
-    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const adminEmails = getAdminEmails();
 
   const path = opts.path || "/";
   const method = (opts.method || "GET").toUpperCase();
@@ -143,6 +145,19 @@ export async function handleApiRequest(
   };
 
   try {
+    const clientKey = String(user?.user_id || "anon");
+    const rate = checkRateLimit(clientKey, path, method);
+    if (!rate.allowed) {
+      await logSystemEvent(db, {
+        event_type: "rate_limit_blocked",
+        severity: "warn",
+        source: path,
+        message: `Rate limit exceeded on ${method} ${path}`,
+        metadata: { client_key: clientKey, retry_after: rate.retryAfterSec },
+      });
+      throwErr(`Rate limit exceeded. Retry in ${rate.retryAfterSec}s`, 429);
+    }
+
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return complianceResult;
 
@@ -813,7 +828,22 @@ export async function handleApiRequest(
     if (path === "/admin/restaurants" && method === "GET") {
       requireRole("admin");
       const { data } = await db.from("restaurants").select("*").order("created_at", { ascending: false });
-      return data || [];
+      const rests = data || [];
+      const restIds = rests.map((r) => r.restaurant_id);
+      const { data: onboardings } = restIds.length
+        ? await db.from("restaurant_onboarding").select("restaurant_id,stripe_connect_id,stripe_connect_complete").in("restaurant_id", restIds)
+        : { data: [] };
+      const obByRest = Object.fromEntries((onboardings || []).map((o) => [o.restaurant_id, o]));
+      return rests.map((r) => {
+        const ob = obByRest[r.restaurant_id];
+        const connected = !!(ob?.stripe_connect_id);
+        const payoutReady = connected && !!ob?.stripe_connect_complete;
+        return {
+          ...r,
+          stripe_connected: connected,
+          stripe_payout_ready: payoutReady,
+        };
+      });
     }
     const approveMatch = path.match(/^\/admin\/restaurants\/([^/]+)\/approve$/);
     if (approveMatch && method === "POST") {

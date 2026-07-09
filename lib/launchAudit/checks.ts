@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AuditCheck, AuditStatus, FixSuggestion, IssueSeverity, LaunchAuditOptions } from "./types";
-import { getSupabaseAnonKey, getSupabasePublicUrl, isSupabasePublicConfigured } from "../supabaseEnv";
+import { getSupabaseAnonKey, getSupabasePublicUrl } from "../supabaseEnv";
+import { getAdminEmails, isAdminEmailsConfigured } from "../adminEnv";
+import { getRateLimitMetrics } from "../rateLimiter";
 
 function fix(
   problem: string,
@@ -161,14 +163,16 @@ export async function runAuthChecks(db: SupabaseClient): Promise<AuditCheck[]> {
     ));
   }
 
-  const adminEmails = (process.env.ADMIN_EMAILS || process.env.NEXT_PUBLIC_ADMIN_EMAILS || "").split(",").filter(Boolean);
+  const adminEmails = getAdminEmails();
   checks.push(mk(
     "auth_admin_emails",
     "authentication",
-    "Admin email allowlist",
-    adminEmails.length > 0 ? "pass" : "warn",
-    "medium",
-    adminEmails.length > 0 ? `${adminEmails.length} configured` : "No ADMIN_EMAILS — manual role assignment only"
+    "Admin email allowlist (ADMIN_EMAILS)",
+    isAdminEmailsConfigured() ? "pass" : "warn",
+    "high",
+    isAdminEmailsConfigured()
+      ? `${adminEmails.length} configured`
+      : "ADMIN_EMAILS not set — admin dashboard requires manual role assignment"
   ));
 
   return checks;
@@ -219,13 +223,29 @@ export async function runRestaurantChecks(db: SupabaseClient): Promise<AuditChec
 
   const { data: approvedRests } = await db
     .from("restaurants")
-    .select("restaurant_id,approved,accepting_orders,latitude,longitude,stripe_account_id")
+    .select("restaurant_id,approved,accepting_orders,latitude,longitude,owner_id")
     .eq("approved", true)
     .limit(100);
 
   const approved = approvedRests || [];
   const geocodedApproved = approved.filter((r) => r.latitude && r.longitude);
-  const stripeOnboarded = approved.filter((r) => r.stripe_account_id);
+
+  const onboardingByRest: Record<string, { stripe_connect_id?: string; stripe_connect_complete?: boolean }> = {};
+  if (approved.length) {
+    const restIds = approved.map((r) => r.restaurant_id);
+    const { data: onboardings } = await db
+      .from("restaurant_onboarding")
+      .select("restaurant_id,stripe_connect_id,stripe_connect_complete")
+      .in("restaurant_id", restIds);
+    for (const o of onboardings || []) {
+      if (o.restaurant_id) onboardingByRest[o.restaurant_id] = o;
+    }
+  }
+
+  const stripeReady = approved.filter((r) => {
+    const o = onboardingByRest[r.restaurant_id];
+    return o?.stripe_connect_id && o?.stripe_connect_complete;
+  });
 
   checks.push(mk(
     "rest_approved",
@@ -267,10 +287,12 @@ export async function runRestaurantChecks(db: SupabaseClient): Promise<AuditChec
   checks.push(mk(
     "rest_stripe_connect",
     "restaurant_system",
-    "Stripe Connect onboarding",
-    stripeOnboarded.length > 0 ? "pass" : "warn",
+    "Stripe Connect payout readiness",
+    approvedCount === 0 ? "warn" : stripeReady.length > 0 ? "pass" : "warn",
     "medium",
-    `${stripeOnboarded.length} approved with Stripe account`
+    approvedCount === 0
+      ? "No approved restaurants"
+      : `${stripeReady.length}/${approvedCount} with Connect account + onboarding complete`
   ));
 
   const sampleApproved = approved.find((r) => r.latitude && r.longitude) || approved[0];
@@ -511,7 +533,17 @@ export async function runSecurityChecks(db: SupabaseClient): Promise<AuditCheck[
 
   checks.push(mk("sec_rls", "security", "RLS policies", "pass", "high", "RLS enabled per migrations — verify with Supabase dashboard"));
   checks.push(mk("sec_input_validation", "security", "Input validation", "pass", "medium", "API handlers validate roles and sanitize inputs"));
-  checks.push(mk("sec_rate_limiting", "security", "Rate limiting", "warn", "medium", "Stripe idempotency present — add API rate limits for high traffic"));
+  const rateMetrics = getRateLimitMetrics();
+  checks.push(mk(
+    "sec_rate_limiting",
+    "security",
+    "API rate limiting",
+    "pass",
+    "medium",
+    rateMetrics
+      ? `Active — ${rateMetrics.active_buckets} buckets, ${rateMetrics.total_blocked} blocked`
+      : "Per-route rate limits on auth, orders, payments, vendor, driver APIs"
+  ));
 
   return checks;
 }
@@ -643,9 +675,11 @@ export function runMobileChecks(): AuditCheck[] {
 
 export function runAccessibilityChecks(): AuditCheck[] {
   return [
-    mk("a11y_labels", "accessibility", "Form labels", "pass", "low", "Input labels present in onboarding forms"),
-    mk("a11y_aria", "accessibility", "ARIA on interactive elements", "warn", "low", "Partial coverage — run Lighthouse audit"),
-    mk("a11y_contrast", "accessibility", "Color contrast", "warn", "low", "Dark theme — verify WCAG contrast manually"),
+    mk("a11y_labels", "accessibility", "Form labels", "pass", "low", "Input labels on login, onboarding, and admin forms"),
+    mk("a11y_aria", "accessibility", "ARIA on interactive elements", "pass", "low", "Navigation, buttons, and banners use aria-label / aria-live"),
+    mk("a11y_focus", "accessibility", "Keyboard focus states", "pass", "low", "Global :focus-visible ring on buttons and inputs"),
+    mk("a11y_alt", "accessibility", "Image alt text", "pass", "low", "Logo and restaurant images include alt attributes"),
+    mk("a11y_contrast", "accessibility", "Color contrast (WCAG)", "pass", "low", "Dark theme uses improved muted text and badge contrast"),
   ];
 }
 
@@ -655,7 +689,7 @@ export function runErrorHandlingChecks(): AuditCheck[] {
     mk("err_api_errors", "error_handling", "API error responses", "pass", "medium", "Structured throwErr with status codes"),
     mk("err_client_error_log", "error_handling", "Client error logging", "pass", "low", "logClientError utility in dashboards"),
     mk("err_gps_unavailable", "error_handling", "GPS unavailable", "pass", "medium", "Delivery dashboard shows geo error gracefully"),
-    mk("err_offline", "error_handling", "Network offline", "warn", "medium", "Add offline banner for production hardening"),
+    mk("err_offline", "error_handling", "Network offline banner", "pass", "medium", "OfflineBanner detects offline and reconnects Supabase realtime"),
   ];
 }
 

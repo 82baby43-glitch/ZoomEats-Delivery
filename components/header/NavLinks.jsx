@@ -44,7 +44,7 @@ function AdminLink({ role }) {
 
 export default function NavLinks({ user }) {
   return (
-    <nav className="hidden md:flex items-center gap-6">
+    <nav className="hidden md:flex items-center gap-6" aria-label="Main navigation">
       <Link href="/" className="btn-ghost" data-testid="nav-home">Discover</Link>
       {user && <Link href="/orders" className="btn-ghost" data-testid="nav-orders">My Orders</Link>}
       {user?.role === "vendor" && (

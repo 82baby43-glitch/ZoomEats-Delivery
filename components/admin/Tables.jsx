@@ -51,8 +51,15 @@ export function RestaurantsList({ restaurants, onApprove, onEditLocation }) {
     if (!r.approved) return "Pending approval";
     if (r.launch_status === "pending_location") return "Pending Location";
     if (r.launch_status === "pending_menu") return "Pending Menu Setup";
+    if (r.launch_status === "pending_payout") return "Pending Stripe Payout";
     if (r.accepting_orders) return "Active";
     return r.launch_status === "ready" ? "Ready" : "Approved";
+  };
+
+  const stripeLabel = (r) => {
+    if (r.stripe_payout_ready) return { text: "YES", cls: "badge-success" };
+    if (r.stripe_connected) return { text: "PARTIAL", cls: "badge-warn" };
+    return { text: "NO", cls: "badge-error" };
   };
 
   return (
@@ -60,7 +67,7 @@ export function RestaurantsList({ restaurants, onApprove, onEditLocation }) {
       {rows.map((r) => (
         <div key={r.restaurant_id || r.name} className="card p-4 flex items-center gap-4" data-testid={`admin-rest-${r.restaurant_id}`}>
           {r.image_url ? (
-            <img src={r.image_url} alt="" className="w-16 h-16 rounded-xl object-cover" />
+            <img src={r.image_url} alt={r.name || "Restaurant"} className="w-16 h-16 rounded-xl object-cover" />
           ) : (
             <div className="w-16 h-16 rounded-xl" style={{ background: "var(--surface-2)" }} />
           )}
@@ -77,6 +84,10 @@ export function RestaurantsList({ restaurants, onApprove, onEditLocation }) {
             <div className="text-sm" style={{ color: "var(--muted)" }}>
               {r.cuisine || "—"} · {r.address || "—"}
               {r.latitude && r.longitude ? ` · 📍 ${Number(r.latitude).toFixed(4)}, ${Number(r.longitude).toFixed(4)}` : " · No coordinates"}
+            </div>
+            <div className="text-xs mt-1 flex items-center gap-2 flex-wrap">
+              <span>Stripe Connected:</span>
+              <span className={`badge text-[10px] ${stripeLabel(r).cls}`}>{stripeLabel(r).text}</span>
             </div>
           </div>
           <div className="flex flex-col gap-2 shrink-0">

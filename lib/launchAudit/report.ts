@@ -52,6 +52,17 @@ export function reportToMarkdown(report: LaunchReadinessReport): string {
     lines.push(`- [ ] ${item}`);
   }
 
+  if (report.first_100_orders_checklist?.length) {
+    lines.push("", "## First 100 Orders Checklist", "");
+    for (const item of report.first_100_orders_checklist) {
+      lines.push(`- [ ] ${item}`);
+    }
+  }
+
+  if (report.production_launch_report) {
+    lines.push("", "---", "", report.production_launch_report);
+  }
+
   lines.push("", "## All Checks", "");
   for (const c of report.checks) {
     const icon = c.status === "pass" ? "✅" : c.status === "fail" ? "❌" : c.status === "warn" ? "⚠️" : "⏭️";

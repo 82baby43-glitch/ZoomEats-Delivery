@@ -39,6 +39,9 @@ import { syncRestaurantLaunchState } from "../_shared/restaurant/readiness.ts";
 import { normalizeRole } from "../_shared/complianceAuthz.ts";
 import { filterPublicRestaurants, isTestRestaurantName } from "../_shared/restaurants.ts";
 import { finalizePublicRestaurantList } from "../_shared/restaurantListing.ts";
+import { getAdminEmails } from "../_shared/adminEnv.ts";
+import { checkRateLimit } from "../_shared/rateLimiter.ts";
+import { logSystemEvent } from "../_shared/systemEvents.ts";
 
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void };
 
@@ -85,10 +88,7 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const stripeKey = getStripeApiKey();
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
-  const adminEmails = (Deno.env.get("ADMIN_EMAILS") || "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
+  const adminEmails = getAdminEmails();
 
   const db = createClient(supabaseUrl, serviceKey);
 
@@ -164,6 +164,19 @@ Deno.serve(async (req) => {
   };
 
   try {
+    const clientKey = String(user?.user_id || "anon");
+    const rate = checkRateLimit(clientKey, path, method);
+    if (!rate.allowed) {
+      await logSystemEvent(db, {
+        event_type: "rate_limit_blocked",
+        severity: "warn",
+        source: path,
+        message: `Rate limit exceeded on ${method} ${path}`,
+        metadata: { client_key: clientKey, retry_after: rate.retryAfterSec },
+      });
+      return err(`Rate limit exceeded. Retry in ${rate.retryAfterSec}s`, 429);
+    }
+
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return json(complianceResult);
 
@@ -845,7 +858,18 @@ Deno.serve(async (req) => {
     if (path === "/admin/restaurants" && method === "GET") {
       requireRole("admin");
       const { data } = await db.from("restaurants").select("*").order("created_at", { ascending: false });
-      return json(data || []);
+      const rests = data || [];
+      const restIds = rests.map((r) => r.restaurant_id);
+      const { data: onboardings } = restIds.length
+        ? await db.from("restaurant_onboarding").select("restaurant_id,stripe_connect_id,stripe_connect_complete").in("restaurant_id", restIds)
+        : { data: [] };
+      const obByRest = Object.fromEntries((onboardings || []).map((o) => [o.restaurant_id, o]));
+      return json(rests.map((r) => {
+        const ob = obByRest[r.restaurant_id];
+        const connected = !!(ob?.stripe_connect_id);
+        const payoutReady = connected && !!ob?.stripe_connect_complete;
+        return { ...r, stripe_connected: connected, stripe_payout_ready: payoutReady };
+      }));
     }
     const approveMatch = path.match(/^\/admin\/restaurants\/([^/]+)\/approve$/);
     if (approveMatch && method === "POST") {
