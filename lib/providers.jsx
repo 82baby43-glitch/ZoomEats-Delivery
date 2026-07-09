@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/lib/auth";
 import { CartProvider } from "@/lib/cart";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import SupabaseConfigBanner from "@/components/SupabaseConfigBanner";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,6 +22,7 @@ export function Providers({ children }) {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <CartProvider>
+          <SupabaseConfigBanner />
           <ErrorBoundary>{children}</ErrorBoundary>
         </CartProvider>
       </AuthProvider>

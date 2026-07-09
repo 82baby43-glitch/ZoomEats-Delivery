@@ -17,6 +17,7 @@ import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 
 const TABS = [
   { id: "readiness", label: "Launch Readiness", icon: Zap },
+  { id: "test-order", label: "Test Order", icon: Activity },
   { id: "status", label: "Live System Status", icon: Activity },
   { id: "failed", label: "Failed Checks", icon: XCircle },
   { id: "performance", label: "Performance Metrics", icon: Activity },
@@ -81,6 +82,7 @@ function CheckRow({ check }) {
 export default function SystemHealthDashboard({ initialTab = "readiness" }) {
   const [tab, setTab] = useState(initialTab);
   const [report, setReport] = useState(null);
+  const [testResult, setTestResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(false);
@@ -106,6 +108,18 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const runFullTest = async () => {
+    setRunning(true);
+    try {
+      const r = await api.post("/admin/system-health/test-order");
+      setTestResult(r?.data || r);
+    } catch (e) {
+      alert(e?.message || "Test order failed");
+    } finally {
+      setRunning(false);
+    }
+  };
 
   const downloadReport = async (format) => {
     try {
@@ -212,6 +226,26 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {tab === "test-order" && (
+        <div className="card p-6 space-y-4">
+          <h2 className="font-bold">Run Full Delivery Simulation</h2>
+          <p className="text-sm" style={{ color: "var(--muted)" }}>
+            Creates a safe sandbox order, runs dispatch, simulates restaurant and driver steps, verifies records, then cleans up.
+          </p>
+          <button type="button" className="btn-primary" disabled={running} onClick={runFullTest}>
+            {running ? "Running simulation…" : "Run Full Delivery Simulation"}
+          </button>
+          {testResult?.checks?.length > 0 && (
+            <div className="space-y-2 mt-4">
+              <p className="text-sm font-medium">
+                Result: {testResult.success ? "✅ Pipeline passed" : "❌ Issues detected"}
+              </p>
+              {testResult.checks.map((c) => <CheckRow key={c.id} check={c} />)}
+            </div>
+          )}
         </div>
       )}
 

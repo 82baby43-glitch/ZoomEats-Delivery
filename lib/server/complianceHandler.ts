@@ -7,6 +7,7 @@ import {
 } from "../compliance/agreements";
 import { computeComplianceStatus, normalizeRole, VALID_ROLES } from "../compliance/authz";
 import { encryptTaxPayload, maskTaxId } from "../compliance/taxCrypto";
+import { syncRestaurantLaunchState } from "../restaurant/readiness";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -55,11 +56,15 @@ async function applyUserApproval(
   }
 
   if (role === "vendor") {
+    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", userId).maybeSingle();
     await db.from("restaurants").update({
       approval_status: approvalStatus,
       approved: approvalStatus === "approved",
       active: approvalStatus === "approved",
     }).eq("owner_id", userId);
+    if (approvalStatus === "approved" && rest?.restaurant_id) {
+      await syncRestaurantLaunchState(db, rest.restaurant_id);
+    }
   }
 
   await db.from("compliance_reviews").update({

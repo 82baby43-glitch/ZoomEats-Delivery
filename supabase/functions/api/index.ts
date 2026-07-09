@@ -34,6 +34,8 @@ import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
 import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geocodeAdmin.ts";
 import { handleLaunchAuditRequest } from "../_shared/launchAuditHandler.ts";
+import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "../_shared/restaurantAdminHandler.ts";
+import { syncRestaurantLaunchState } from "../_shared/restaurant/readiness.ts";
 import { normalizeRole } from "../_shared/complianceAuthz.ts";
 import { filterPublicRestaurants, isTestRestaurantName } from "../_shared/restaurants.ts";
 import { finalizePublicRestaurantList } from "../_shared/restaurantListing.ts";
@@ -177,6 +179,14 @@ Deno.serve(async (req) => {
     const launchAuditResult = await handleLaunchAuditRequest(db, complianceCtx);
     if (launchAuditResult !== null) return json(launchAuditResult);
 
+    const restaurantAdminResult = await handleRestaurantAdminRequest(db, {
+      path,
+      method,
+      body,
+      requireRole,
+    });
+    if (restaurantAdminResult !== null) return json(restaurantAdminResult);
+
     const dreamlandResult = await handleDreamlandRequest(db, {
       path,
       method,
@@ -303,6 +313,7 @@ Deno.serve(async (req) => {
         available: true,
       };
       const { data } = await db.from("menu_items").insert(item).select().single();
+      await syncRestaurantLaunchState(db, rest.restaurant_id);
       return json(data);
     }
     const delMenuMatch = path.match(/^\/vendor\/menu-items\/([^/]+)$/);
@@ -311,6 +322,7 @@ Deno.serve(async (req) => {
       const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).limit(1).maybeSingle();
       if (!rest) return err("No restaurant", 404);
       await db.from("menu_items").delete().eq("item_id", delMenuMatch[1]).eq("restaurant_id", rest.restaurant_id);
+      await syncRestaurantLaunchState(db, rest.restaurant_id);
       return json({ ok: true });
     }
     if (path === "/vendor/orders" && method === "GET") {
@@ -838,24 +850,7 @@ Deno.serve(async (req) => {
     const approveMatch = path.match(/^\/admin\/restaurants\/([^/]+)\/approve$/);
     if (approveMatch && method === "POST") {
       const admin = requireRole("admin");
-      const restaurantId = approveMatch[1];
-      const { data: rest } = await db.from("restaurants").select("owner_id").eq("restaurant_id", restaurantId).maybeSingle();
-      await db.from("restaurants").update({
-        approved: true,
-        approval_status: "approved",
-        active: true,
-      }).eq("restaurant_id", restaurantId);
-      if (rest?.owner_id) {
-        await db.from("users").update({ approval_status: "approved", active: true }).eq("user_id", rest.owner_id);
-        await db.from("compliance_reviews").update({
-          status: "approved",
-          approval_status: "approved",
-          reviewed_by: admin.user_id,
-          reviewed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }).eq("user_id", rest.owner_id).in("status", ["pending"]);
-      }
-      return json({ ok: true });
+      return json(await approveRestaurantWithReadiness(db, admin, approveMatch[1]));
     }
     if (path === "/admin/orders" && method === "GET") {
       requireRole("admin");
