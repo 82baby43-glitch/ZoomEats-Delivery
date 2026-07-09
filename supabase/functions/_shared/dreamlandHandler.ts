@@ -11,6 +11,7 @@ import {
   memoryBlob,
   persistRecommendations,
 } from "./dreamlandRecommend.ts";
+import { loadLastWin } from "./dreamlandLastWin.ts";
 import type { Mood } from "./dreamlandEmotions.ts";
 
 function uid(prefix: string) {
@@ -343,7 +344,10 @@ export async function handleDreamlandRequest(
   if (route === "/dreamland/home" && method === "GET") {
     const u = opts.requireAuth();
     const userId = String(u.user_id);
-    const { recommendations, ctx } = await generateRecommendations(db, { userId, limit: 20 });
+    const [{ recommendations, ctx }, last_win] = await Promise.all([
+      generateRecommendations(db, { userId, limit: 20 }),
+      loadLastWin(db, userId),
+    ]);
     const collections = buildCollections(recommendations, ctx);
     const sections = buildHomeSections(recommendations, ctx, collections);
     return {
@@ -353,6 +357,7 @@ export async function handleDreamlandRequest(
       sections,
       collections,
       top_picks: recommendations.slice(0, 6),
+      last_win,
     };
   }
 

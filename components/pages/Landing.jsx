@@ -9,6 +9,7 @@ import { signInWithGoogle } from "@/lib/auth";
 import Header from "@/components/Header";
 import { Search, Star, Clock, Sparkles } from "lucide-react";
 import Chatbot from "@/components/Chatbot";
+import DreamlandHome from "@/components/dreamland/DreamlandHome";
 import { sanitizeRestaurants } from "@/lib/safeData";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { logClientError } from "@/lib/clientErrorLog";
@@ -128,6 +129,12 @@ export default function Landing() {
           </motion.div>
         </div>
       </section>
+
+      {user && (
+        <section className="max-w-7xl mx-auto px-6 md:px-12 pb-12">
+          <DreamlandHome />
+        </section>
+      )}
 
       <section className="max-w-7xl mx-auto px-6 md:px-12 pb-24">
         <div className="flex items-end justify-between mb-8 gap-4 flex-wrap">

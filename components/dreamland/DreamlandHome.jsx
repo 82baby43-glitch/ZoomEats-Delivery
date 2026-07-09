@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import DreamlandRecCard from "./DreamlandRecCard";
+import MoodQuickReorder from "./MoodQuickReorder";
 import { LoadingSkeleton } from "@/components/ui/PageStates";
 
 const MOOD_CHIPS = [
@@ -94,6 +95,8 @@ export default function DreamlandHome({ onOpenChat }) {
           </button>
         </div>
       </div>
+
+      {data?.last_win && <MoodQuickReorder lastWin={data.last_win} />}
 
       {data?.top_picks?.length > 0 && (
         <section>
