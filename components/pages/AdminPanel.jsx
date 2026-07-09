@@ -150,6 +150,9 @@ export default function AdminPanel() {
           <Link href="/admin/founder-driver" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-founder-driver-link">
             <Truck size={16} /> Founder Driver Mode
           </Link>
+          <Link href="/admin/fleet" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-fleet-link">
+            <Truck size={16} /> Fleet & Delivery Modes
+          </Link>
           <Link href="/admin/compliance" className="btn-primary inline-flex items-center gap-2 text-sm">
             Compliance Center
           </Link>

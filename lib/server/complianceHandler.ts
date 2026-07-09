@@ -7,6 +7,7 @@ import {
 } from "../compliance/agreements";
 import { computeComplianceStatus, normalizeRole, VALID_ROLES } from "../compliance/authz";
 import { encryptTaxPayload, maskTaxId } from "../compliance/taxCrypto";
+import { buildDriverFleetProfile } from "./deliveryModesHandler";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -510,9 +511,12 @@ export async function handleComplianceRequest(
       ? await db.from("drivers").select("*").eq("user_id", userId).maybeSingle()
       : { data: null };
 
+    const fleet = role === "delivery" ? await buildDriverFleetProfile(db, userId) : null;
+
   return {
       user,
       driver,
+      fleet,
       agreements: agreementDetails,
       signatures: agreements || [],
       documents: {

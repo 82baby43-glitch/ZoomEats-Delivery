@@ -127,6 +127,7 @@ export type DriverLogisticsView = {
   speed_kmh: number;
   remaining_distance_km: number;
   eta_min: number;
+  active_delivery_mode?: string;
   markers: LogisticsMarker[];
   routes: RoutePolyline[];
   queue: DeliveryQueueItem[];

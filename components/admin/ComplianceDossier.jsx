@@ -103,6 +103,35 @@ export default function ComplianceDossier({ userId, onClose, onAction }) {
               </div>
             </section>
 
+            {data.user?.role === "delivery" && data.fleet && (
+              <section className="mt-6">
+                <h3 className="font-bold">Delivery Modes & Vehicles</h3>
+                <div className="mt-3 p-3 rounded-lg text-sm space-y-2" style={{ background: "var(--surface-2)" }}>
+                  <p>Active mode: <strong>{data.fleet.active_delivery_mode || "—"}</strong></p>
+                  <div>
+                    <p className="font-medium mb-1">Approved methods:</p>
+                    {(data.fleet.approved_modes || []).length === 0 ? (
+                      <p style={{ color: "var(--muted)" }}>None registered</p>
+                    ) : (
+                      <ul className="space-y-1">
+                        {(data.fleet.approved_modes || []).map((m) => (
+                          <li key={m.mode_key}>✓ {m.mode_key} — {m.approval_status}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  {(data.fleet.vehicles || []).length > 0 && (
+                    <div>
+                      <p className="font-medium mb-1">Vehicles:</p>
+                      {(data.fleet.vehicles || []).map((v) => (
+                        <p key={v.vehicle_id}>{v.year} {v.make} {v.model} · {v.license_plate} {v.is_active && "(active)"}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
             {data.user?.role === "delivery" && (
               <section className="mt-6">
                 <h3 className="font-bold flex items-center gap-2"><Shield size={18} /> Background Check</h3>

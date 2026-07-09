@@ -6,6 +6,8 @@ import type { ActiveOrderRef } from "./types";
 import { ROUTING_CONFIG } from "./types";
 import type { RoutingDbAdapter } from "./uber-routing-ai";
 import { resolveRouteConflict } from "./uber-routing-ai";
+import { isModeEligibleForOrder } from "../../deliveryModes/eligibility";
+import type { DeliveryModeDefinition, OrderDeliveryRequirements } from "../../deliveryModes/types";
 
 export type DriverRoutingMode = "init" | "insert";
 
@@ -27,6 +29,30 @@ function etaVariance(stops: number): number {
   return Math.max(0, (stops - 2) * 2.5);
 }
 
+async function loadModeDefinitions(db: SupabaseClient): Promise<Map<string, DeliveryModeDefinition>> {
+  const { data } = await db.from("delivery_mode_definitions").select("*").eq("active", true);
+  return new Map((data || []).map((d) => [d.mode_key, d as DeliveryModeDefinition]));
+}
+
+function driverFitsOrder(
+  driver: Record<string, unknown>,
+  order: ActiveOrderRef,
+  modeDefs: Map<string, DeliveryModeDefinition>
+): boolean {
+  const modeKey = (driver.active_delivery_mode as string) || "car";
+  const modeDef = modeDefs.get(modeKey);
+  if (!modeDef) return true;
+  const req = {
+    estimated_weight_lbs: order.estimated_weight_lbs,
+    bag_count: order.bag_count,
+    large_drink_count: order.large_drink_count,
+    delivery_distance_km: order.delivery_distance_km ?? (order.pickup && order.dropoff ? haversineKm(order.pickup, order.dropoff) : undefined),
+    required_vehicle_class: order.required_vehicle_class as OrderDeliveryRequirements["required_vehicle_class"],
+    special_handling: order.special_handling,
+  };
+  return isModeEligibleForOrder(modeDef, req).eligible;
+}
+
 /** Score available drivers — prefers route insertion when it improves stack efficiency. */
 export async function buildDriverProposals(
   db: SupabaseClient,
@@ -42,9 +68,12 @@ export async function buildDriverProposals(
 
   if (!drivers?.length) return [];
 
+  const modeDefs = await loadModeDefinitions(db);
   const proposals: DriverProposal[] = [];
 
   for (const driver of drivers) {
+    if (!driverFitsOrder(driver, order, modeDefs)) continue;
+
     const driverId = driver.driver_id as string;
     const start = {
       lat: Number(driver.latitude) || 0,

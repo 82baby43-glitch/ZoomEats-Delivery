@@ -231,8 +231,16 @@ Deno.serve(async (req) => {
       .select("*")
       .eq("availability", true)
       .order("workload", { ascending: true })
-      .limit(1);
-    driver = drivers?.[0] ?? null;
+      .limit(12);
+
+    const { isDriverEligibleForOrder } = await import("../_shared/deliveryModesHandler.ts");
+    for (const d of drivers || []) {
+      const eligible = await isDriverEligibleForOrder(db, d, order as Record<string, unknown>);
+      if (eligible) {
+        driver = d;
+        break;
+      }
+    }
   }
 
   if (!driver) {
@@ -262,6 +270,7 @@ Deno.serve(async (req) => {
       status: "assigned_internal",
       delivery_type: "internal",
       tracking_id: trackingId,
+      assigned_delivery_mode: driver.active_delivery_mode || "car",
       updated_at: new Date().toISOString(),
     })
     .eq("order_id", orderId)

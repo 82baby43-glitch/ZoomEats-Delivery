@@ -16,6 +16,7 @@ import type {
   RoutePolyline,
 } from "./types.ts";
 import { buildDispatchExplain } from "./dispatchExplain.ts";
+import { MODE_MAP_ICONS } from "../deliveryModes/constants.ts";
 
 const ACTIVE_ORDER_STATUSES = [
   "placed", "confirmed", "accepted", "preparing", "ready",
@@ -207,7 +208,17 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
   };
 
   const markers: LogisticsMarker[] = [];
-  if (position) markers.push({ id: "driver", type: "driver", lat: position.lat, lng: position.lng, label: "You" });
+  const activeMode = (driver?.active_delivery_mode as string) || "car";
+  if (position) {
+    markers.push({
+      id: "driver",
+      type: "driver",
+      lat: position.lat,
+      lng: position.lng,
+      label: "You",
+      meta: { delivery_mode: activeMode, icon: MODE_MAP_ICONS[activeMode] || "🚗" },
+    });
+  }
   for (const q of queue) {
     if (q.restaurant_lat && q.restaurant_lng) {
       markers.push({ id: `r-${q.order_id}`, type: "restaurant", lat: q.restaurant_lat, lng: q.restaurant_lng, label: q.restaurant_name });
@@ -230,6 +241,7 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
     speed_kmh: 0,
     remaining_distance_km: Math.round(remainingKm * 10) / 10,
     eta_min: Math.round(etaMin),
+    active_delivery_mode: activeMode,
     markers,
     routes: buildRoutes(position, orders || []),
     queue,
@@ -267,12 +279,21 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
     let driverLat: number | undefined;
     let driverLng: number | undefined;
     let driverName = "Unassigned";
+    let driverMode = "car";
     if (o.driver_id) {
-      const { data: drv } = await db.from("drivers").select("latitude,longitude,user_id").eq("driver_id", o.driver_id).maybeSingle();
+      const { data: drv } = await db.from("drivers").select("latitude,longitude,user_id,active_delivery_mode").eq("driver_id", o.driver_id).maybeSingle();
       if (drv?.latitude) {
         driverLat = Number(drv.latitude);
         driverLng = Number(drv.longitude);
-        markers.push({ id: `d-${o.order_id}`, type: "driver", lat: driverLat, lng: driverLng!, label: "Driver" });
+        driverMode = (drv.active_delivery_mode as string) || "car";
+        markers.push({
+          id: `d-${o.order_id}`,
+          type: "driver",
+          lat: driverLat,
+          lng: driverLng!,
+          label: "Driver",
+          meta: { delivery_mode: driverMode, icon: MODE_MAP_ICONS[driverMode] || "🚗" },
+        });
       }
       if (drv?.user_id) {
         const { data: u } = await db.from("users").select("name").eq("user_id", drv.user_id).maybeSingle();
@@ -304,7 +325,7 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
       driver_lat: driverLat,
       driver_lng: driverLng,
       driver_rating: 4.7,
-      vehicle_type: "Car",
+      vehicle_type: driverMode,
       timeline: buildKitchenTimeline(String(o.status)),
       customer_lat: Number(o.customer_lat) || undefined,
       customer_lng: Number(o.customer_lng) || undefined,
@@ -382,7 +403,7 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
 
 export async function buildAdminLogisticsView(db: SupabaseClient): Promise<AdminLogisticsView> {
   const [{ data: drivers }, { data: orders }, { data: restaurants }] = await Promise.all([
-    db.from("drivers").select("driver_id,latitude,longitude,availability,workload").eq("availability", true),
+    db.from("drivers").select("driver_id,latitude,longitude,availability,workload,active_delivery_mode").eq("availability", true),
     db.from("orders").select("order_id,status,customer_lat,customer_lng,restaurant_id").in("status", ACTIVE_ORDER_STATUSES),
     db.from("restaurants").select("restaurant_id,name,latitude,longitude,accepting_orders").eq("accepting_orders", true).limit(50),
   ]);
@@ -390,7 +411,15 @@ export async function buildAdminLogisticsView(db: SupabaseClient): Promise<Admin
   const markers: LogisticsMarker[] = [];
   for (const d of drivers || []) {
     if (d.latitude && d.longitude) {
-      markers.push({ id: d.driver_id, type: "driver", lat: Number(d.latitude), lng: Number(d.longitude), label: "Driver" });
+      const mode = (d.active_delivery_mode as string) || "car";
+      markers.push({
+        id: d.driver_id,
+        type: "driver",
+        lat: Number(d.latitude),
+        lng: Number(d.longitude),
+        label: "Driver",
+        meta: { delivery_mode: mode, icon: MODE_MAP_ICONS[mode] || "🚗" },
+      });
     }
   }
   for (const r of restaurants || []) {

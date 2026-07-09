@@ -29,6 +29,7 @@ import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
 import { handleFounderDriverRequest } from "../_shared/founderDriverHandler.ts";
 import { canUseDriverApis } from "../_shared/founderDriverAuth.ts";
 import { handleLogisticsRequest } from "../_shared/logisticsHandler.ts";
+import { handleDeliveryModesRequest } from "../_shared/deliveryModesHandler.ts";
 import { handlePickupPhotoRequest } from "../_shared/pickupPhotosHandler.ts";
 import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
@@ -200,6 +201,16 @@ Deno.serve(async (req) => {
       requireRole,
     });
     if (logisticsResult !== null) return json(logisticsResult);
+
+    const deliveryModesResult = await handleDeliveryModesRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (deliveryModesResult !== null) return json(deliveryModesResult);
 
     const pickupPhotoResult = await handlePickupPhotoRequest(db, {
       path,
