@@ -1,4 +1,4 @@
-import { MENU_ENHANCE_PRESET } from "./config";
+import { MENU_ENHANCE_PRESET } from "./config.ts";
 
 const SEGMENT_URL = "https://sdk.photoroom.com/v1/segment";
 
