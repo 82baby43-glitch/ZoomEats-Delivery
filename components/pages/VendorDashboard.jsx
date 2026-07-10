@@ -17,6 +17,7 @@ import KitchenCompanion from "@/components/companion/KitchenCompanion";
 import FloatingMusicPlayer from "@/components/companion/FloatingMusicPlayer";
 import { useCompanionRealtime } from "@/lib/hooks/useCompanionRealtime";
 import { useCompanionMode } from "@/lib/hooks/useCompanionMode";
+import VendorCommunityProfile from "@/components/vendor/VendorCommunityProfile";
 import { useAuth } from "@/lib/auth";
 
 const STATUS_NEXT = {
@@ -255,7 +256,7 @@ function VendorDashboardInner() {
         </div>
         <p className="mt-2" style={{ color: "var(--muted)" }}>Vendor dashboard</p>
         <div className="flex gap-2 mt-6 border-b" style={{ borderColor: "var(--border)" }}>
-          {["orders", "companion", "menu", "profile"].map((t) => (
+          {["orders", "companion", "menu", "community", "profile"].map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -351,6 +352,8 @@ function VendorDashboardInner() {
             </div>
           </div>
         )}
+
+        {tab === "community" && <VendorCommunityProfile />}
 
         {tab === "profile" && (
           <div className="card p-6 mt-6 space-y-4 max-w-2xl">

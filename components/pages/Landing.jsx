@@ -9,6 +9,8 @@ import { signInWithGoogle } from "@/lib/auth";
 import Header from "@/components/Header";
 import { Search, Star, Clock, Sparkles } from "lucide-react";
 import Chatbot from "@/components/Chatbot";
+import LocalPartnerSpotlight from "@/components/spotlight/LocalPartnerSpotlight";
+import SpotlightNotificationPrefs from "@/components/spotlight/SpotlightNotificationPrefs";
 import { sanitizeRestaurants } from "@/lib/safeData";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { logClientError } from "@/lib/clientErrorLog";
@@ -132,6 +134,8 @@ export default function Landing() {
         </div>
       </section>
 
+      <LocalPartnerSpotlight limit={4} />
+
       <section className="max-w-7xl mx-auto px-6 md:px-12 pb-24">
         <div className="flex items-end justify-between mb-8 gap-4 flex-wrap">
           <div>
@@ -215,6 +219,7 @@ export default function Landing() {
       </section>
 
       {user && <Chatbot />}
+      {user && <SpotlightNotificationPrefs />}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { api, safeGet } from "@/lib/api";
 import { useCart } from "@/lib/cart";
@@ -21,6 +21,8 @@ export default function RestaurantDetail() {
   const { addItem } = useCart();
   const { user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const spotlightRef = searchParams?.get("spotlight");
 
   const load = useCallback(async () => {
     if (!rid) return;
@@ -48,6 +50,15 @@ export default function RestaurantDetail() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!spotlightRef || !data?.restaurant) return;
+    api.post("/spotlight/analytics", {
+      event_type: "restaurant_page_click",
+      spotlight_id: spotlightRef,
+      restaurant_id: data.restaurant.restaurant_id,
+    }).catch(() => {});
+  }, [spotlightRef, data?.restaurant]);
 
   const groupedMenu = useMemo(() => {
     if (!data?.menu) return [];
