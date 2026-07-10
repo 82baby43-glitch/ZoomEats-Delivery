@@ -1,8 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, Navigation, Smartphone } from "lucide-react";
+import { Bell, ExternalLink, Navigation, Smartphone } from "lucide-react";
 import { buildExternalNavLinks } from "@/lib/logistics/externalNavigation";
+import {
+  isExternalNavReturnPingEnabled,
+  setExternalNavReturnPingEnabled,
+} from "@/lib/logistics/externalNavPreferences";
 import { useExternalNavHandoff } from "@/lib/hooks/useExternalNavHandoff";
 
 function isAppleDevice() {
@@ -12,16 +16,24 @@ function isAppleDevice() {
 
 export default function ExternalNavigationButtons({ destination, origin, orderId }) {
   const [showAppleMaps, setShowAppleMaps] = useState(false);
+  const [returnPingEnabled, setReturnPingEnabled] = useState(false);
   const { handoffActive, returned, openNavigation, dismissHandoff, isMobile } = useExternalNavHandoff(orderId);
 
   useEffect(() => {
     setShowAppleMaps(isAppleDevice());
+    setReturnPingEnabled(isExternalNavReturnPingEnabled());
   }, []);
 
   const links = useMemo(
     () => buildExternalNavLinks(destination, origin, { includeApple: showAppleMaps }),
     [destination, origin, showAppleMaps]
   );
+
+  const toggleReturnPing = () => {
+    const next = !returnPingEnabled;
+    setReturnPingEnabled(next);
+    setExternalNavReturnPingEnabled(next);
+  };
 
   if (!links.length) return null;
 
@@ -49,6 +61,29 @@ export default function ExternalNavigationButtons({ destination, origin, orderId
         </div>
       )}
 
+      {isMobile && (
+        <label
+          className="flex items-start gap-2 text-sm cursor-pointer card p-3"
+          style={{ background: "var(--surface-2)" }}
+          data-testid="external-nav-return-ping-toggle"
+        >
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={returnPingEnabled}
+            onChange={toggleReturnPing}
+          />
+          <span>
+            <span className="font-bold flex items-center gap-1">
+              <Bell size={14} /> Remind me to return to ZoomEats
+            </span>
+            <span className="block text-xs mt-1" style={{ color: "var(--muted)" }}>
+              Optional. Off by default. Customer tracking works either way.
+            </span>
+          </span>
+        </label>
+      )}
+
       <div className="flex flex-col gap-2">
         {links.map((link, index) => (
           <button
@@ -71,7 +106,9 @@ export default function ExternalNavigationButtons({ destination, origin, orderId
       </div>
       <p className="text-xs" style={{ color: "var(--muted)" }}>
         {isMobile
-          ? "Opens your maps app for voice guidance. ZoomEats keeps tracking in the background — you'll get a notification to tap back when navigation starts."
+          ? returnPingEnabled
+            ? "Opens your maps app for voice guidance. ZoomEats keeps tracking in the background and can notify you to tap back."
+            : "Opens your maps app for voice guidance. ZoomEats keeps tracking in the background while you drive."
           : "Opens your preferred maps app for voice-guided driving directions. ZoomEats keeps tracking your delivery in the background."}
       </p>
     </div>
