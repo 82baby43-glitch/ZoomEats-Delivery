@@ -6,6 +6,10 @@ import { useRealtimeRow } from "@/lib/useRealtime";
 
 const CACHE_PREFIX = "zoomeats_logistics_cache_";
 
+/**
+ * Targeted realtime refresh for logistics dashboards.
+ * Uses filtered postgres_changes only — no duplicate broad subscriptions.
+ */
 export function useLogisticsRealtime({ role, restaurantId, driverId, onRefresh }) {
   const [paused, setPaused] = useState(false);
   const stableRefresh = useCallback(() => {
@@ -19,24 +23,18 @@ export function useLogisticsRealtime({ role, restaurantId, driverId, onRefresh }
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
-  useRealtimeRow("orders", "restaurant_id", role === "restaurant" ? restaurantId : null, stableRefresh);
-  useRealtimeRow("drivers", "driver_id", role === "driver" ? driverId : null, stableRefresh);
-
-  useEffect(() => {
-    if (!supabase || paused) return;
-    const channel = supabase
-      .channel(`logistics-${role}-${restaurantId || driverId || "all"}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, stableRefresh)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "drivers" }, stableRefresh)
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [role, restaurantId, driverId, stableRefresh, paused]);
-
-  useEffect(() => {
-    if (paused) return undefined;
-    const t = setInterval(stableRefresh, 8000);
-    return () => clearInterval(t);
-  }, [stableRefresh, paused]);
+  useRealtimeRow(
+    "orders",
+    "restaurant_id",
+    role === "restaurant" ? restaurantId : null,
+    stableRefresh
+  );
+  useRealtimeRow(
+    "drivers",
+    "driver_id",
+    role === "driver" ? driverId : null,
+    stableRefresh
+  );
 }
 
 export function cacheLogisticsSnapshot(key: string, data: unknown) {
@@ -59,7 +57,7 @@ export function readLogisticsCache(key: string, maxAgeMs = 300000) {
   }
 }
 
-export function useLogisticsPoll(fetchFn, cacheKey, intervalMs = 8000) {
+export function useLogisticsPoll(fetchFn, cacheKey, intervalMs = 12000) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -95,6 +93,7 @@ export function useLogisticsPoll(fetchFn, cacheKey, intervalMs = 8000) {
       if (!document.hidden) load();
     };
     document.addEventListener("visibilitychange", onVis);
+    pausedRef.current = document.hidden;
     const t = setInterval(load, intervalMs);
     return () => {
       clearInterval(t);

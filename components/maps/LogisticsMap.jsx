@@ -34,6 +34,21 @@ const ICONS = {
   hotspot: pinIcon("#D49A36", "H"),
 };
 
+function driverCarIcon(headingDeg = 0) {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36' viewBox='0 0 36 36' style='transform:rotate(${headingDeg}deg)'>
+    <circle cx='18' cy='18' r='16' fill='#FBBF24' fill-opacity='0.25' stroke='#FBBF24' stroke-width='2'/>
+  <path d='M10 14h16l2 6v8h-4v-2h-8v2H8v-8l2-6z' fill='#0A0A0A' stroke='#FBBF24' stroke-width='1.2'/>
+  <circle cx='13' cy='22' r='2' fill='#FBBF24'/><circle cx='23' cy='22' r='2' fill='#FBBF24'/>
+  </svg>`;
+  return new L.DivIcon({
+    html: svg,
+    className: "driver-heading-marker",
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    popupAnchor: [0, -18],
+  });
+}
+
 function hotspotCircle(level) {
   const color = level === "high" ? "#C2533B" : level === "medium" ? "#D49A36" : "#43614B";
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='20' cy='20' r='18' fill='${color}' fill-opacity='0.35' stroke='${color}' stroke-width='2'/></svg>`;
@@ -70,7 +85,9 @@ function AnimatedMarker({ marker, animate }) {
 
   const icon = marker.type === "hotspot"
     ? hotspotCircle(String(marker.meta?.level || "medium"))
-    : ICONS[marker.type] || ICONS.driver;
+    : marker.type === "driver" && marker.meta?.heading_deg != null
+      ? driverCarIcon(Number(marker.meta.heading_deg))
+      : ICONS[marker.type] || ICONS.driver;
 
   return (
     <Marker position={[pos.lat, pos.lng]} icon={icon}>

@@ -4,8 +4,9 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { safeGet } from "@/lib/api";
 import { useRealtimeRow } from "@/lib/useRealtime";
+import { useDeliveryRealtime } from "@/lib/hooks/useDeliveryRealtime";
 import Header from "@/components/Header";
-import LiveMap from "@/components/LiveMap";
+import CustomerLiveMapDashboard from "@/components/logistics/CustomerLiveMapDashboard";
 import { CheckCircle2, Circle, ExternalLink, MapPin, Truck, Clock, Wifi } from "lucide-react";
 import { formatMoney, safeNumber, safeOrderId, sanitizeOrder } from "@/lib/safeData";
 import { PAYMENT_STATE_LABEL, resolvePaymentState } from "@/lib/orderState";
@@ -71,9 +72,48 @@ export default function OrderDetail() {
   useRealtimeRow("orders", "order_id", oid, onChange);
   useRealtimeRow("deliveries", "order_id", oid, onChange);
   useRealtimeRow("drivers", "driver_id", data?.driver?.driver_id, onChange);
+  useRealtimeRow("driver_route_states", "driver_id", data?.driver?.driver_id, onChange);
+
+  const onDeliveryEvent = useCallback((event, payload) => {
+    setPulse((p) => p + 1);
+    if (event === "driver_location_updated" && payload?.latitude != null) {
+      setData((prev) => {
+        if (!prev) return prev;
+        const lat = Number(payload.latitude);
+        const lng = Number(payload.longitude);
+        const nextDriver = prev.driver
+          ? { ...prev.driver, latitude: lat, longitude: lng }
+          : prev.driver;
+        const nextLogistics = prev.logistics
+          ? {
+              ...prev.logistics,
+              markers: (prev.logistics.markers || []).map((m) =>
+                m.type === "driver"
+                  ? {
+                      ...m,
+                      lat,
+                      lng,
+                      meta: {
+                        ...m.meta,
+                        heading_deg: payload.heading ?? m.meta?.heading_deg,
+                        speed_kmh: payload.speed != null ? Math.round(Number(payload.speed) * 3.6 * 10) / 10 : m.meta?.speed_kmh,
+                      },
+                    }
+                  : m
+              ),
+            }
+          : prev.logistics;
+        return { ...prev, driver: nextDriver, logistics: nextLogistics, driver_location: payload };
+      });
+    } else {
+      load();
+    }
+  }, [load]);
+
+  useDeliveryRealtime(oid, onDeliveryEvent);
 
   useEffect(() => {
-    const t = setInterval(load, 8000);
+    const t = setInterval(load, 15000);
     return () => clearInterval(t);
   }, [load]);
 
@@ -165,11 +205,13 @@ export default function OrderDetail() {
           </div>
         )}
 
-        {(data.restaurant?.latitude || data.customer?.latitude || data.driver?.latitude) && (
-          <div className="mt-6">
-            <LiveMap restaurant={data.restaurant} customer={data.customer} driver={data.driver} />
+        {data.logistics ? (
+          <CustomerLiveMapDashboard logistics={data.logistics} />
+        ) : (data.restaurant?.latitude || data.customer?.latitude || data.driver?.latitude) ? (
+          <div className="mt-6 text-sm" style={{ color: "var(--muted)" }}>
+            Live map will appear when your driver is assigned.
           </div>
-        )}
+        ) : null}
 
         <div className="card p-6 mt-6">
           <h3 className="font-display text-xl font-bold mb-4">Status</h3>

@@ -15,7 +15,10 @@ export type LogisticsMarker = {
   lat: number;
   lng: number;
   label?: string;
-  meta?: Record<string, unknown>;
+  meta?: Record<string, unknown> & {
+    heading_deg?: number;
+    speed_kmh?: number;
+  };
 };
 
 export type RoutePolyline = {
@@ -103,11 +106,30 @@ export type RestaurantActiveOrder = {
   delay_warning?: string;
   driver_lat?: number;
   driver_lng?: number;
+  driver_distance_feet?: number;
   driver_rating?: number;
   vehicle_type?: string;
+  approach_alert?: {
+    phase: "arriving_soon" | "arrived";
+    message: string;
+    distance_feet: number;
+  } | null;
   timeline: Array<{ step: string; at?: string; done: boolean }>;
   customer_lat?: number;
   customer_lng?: number;
+};
+
+export type RestaurantDriverApproachAlert = {
+  order_id: string;
+  phase: "arriving_soon" | "arrived";
+  message: string;
+  distance_feet: number;
+  driver_name: string;
+  vehicle_type: string;
+  driver_lat: number;
+  driver_lng: number;
+  eta_pickup_min?: number;
+  severity: "info" | "success";
 };
 
 export type RestaurantPerformancePanel = {
@@ -122,8 +144,10 @@ export type RestaurantPerformancePanel = {
 };
 
 export type DriverLogisticsView = {
+  driver_id?: string;
   status: DriverMapStatus;
   position: { lat: number; lng: number } | null;
+  heading_deg?: number;
   speed_kmh: number;
   remaining_distance_km: number;
   eta_min: number;
@@ -142,6 +166,7 @@ export type RestaurantLogisticsView = {
   markers: LogisticsMarker[];
   routes: RoutePolyline[];
   active_orders: RestaurantActiveOrder[];
+  approach_alerts: RestaurantDriverApproachAlert[];
   arrivals: Array<{ order_id: string; message: string; severity: "info" | "warning" | "success" }>;
   performance: RestaurantPerformancePanel;
   heatmap_zones: DemandHotspot[];

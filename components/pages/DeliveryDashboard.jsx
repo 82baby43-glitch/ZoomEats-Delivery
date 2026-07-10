@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { isFounderDriverModeActive } from "@/lib/founderDriver/session";
 import Link from "next/link";
 import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
@@ -18,23 +18,7 @@ import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions
 import { logClientError } from "@/lib/clientErrorLog";
 import { ErrorState } from "@/components/ui/PageStates";
 import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
-
-const HEARTBEAT_MS = 3000;
-
-function useGeolocation(active) {
-  const [coords, setCoords] = useState(null);
-  const [err, setErr] = useState(null);
-  useEffect(() => {
-    if (!active || !navigator.geolocation) return;
-    const id = navigator.geolocation.watchPosition(
-      (pos) => { setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setErr(null); },
-      (e) => setErr(e.message || "Location unavailable"),
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
-    );
-    return () => navigator.geolocation.clearWatch(id);
-  }, [active]);
-  return { coords, err };
-}
+import { useDriverGpsTracking } from "@/lib/hooks/useDriverGpsTracking";
 
 export default function DeliveryDashboard() {
   return (
@@ -52,8 +36,15 @@ function DeliveryDashboardInner() {
   const [wallet, setWallet] = useState({ available: 0.0, pending: 0.0 });
   const [payoutAmt, setPayoutAmt] = useState(0.0);
   const [loadError, setLoadError] = useState(false);
-  const { coords, err: geoErr } = useGeolocation(online);
-  const lastSentRef = useRef(0);
+  const dispatchOrders = activeDispatch?.orders ?? [];
+  const activeOrder = dispatchOrders[0] ?? mine.find((o) =>
+    ["assigned_internal", "picked_up", "out_for_delivery", "ready"].includes(o.status)
+  );
+  const { coords, geoError } = useDriverGpsTracking({
+    enabled: online,
+    activeOrderId: activeOrder?.order_id,
+    activeOrderStatus: activeOrder?.status,
+  });
 
   const [founderMode, setFounderMode] = useState(false);
   const { user } = useAuth();
@@ -134,23 +125,7 @@ function DeliveryDashboardInner() {
     }
   };
 
-  // GPS heartbeat — every HEARTBEAT_MS while online + coords
-  useEffect(() => {
-    if (!online || !coords) return;
-    const send = async () => {
-      const now = Date.now();
-      if (now - lastSentRef.current < HEARTBEAT_MS - 500) return;
-      lastSentRef.current = now;
-      try {
-        await api.post("/driver/location", { latitude: coords.lat, longitude: coords.lng });
-      } catch (e) {
-        console.warn("[delivery] heartbeat failed:", e);
-      }
-    };
-    send();
-    const t = setInterval(send, HEARTBEAT_MS);
-    return () => clearInterval(t);
-  }, [online, coords]);
+  // GPS tracking intervals handled by useDriverGpsTracking (30–60s online, 5–10s active delivery)
 
   const action = async (oid, act, internal = false) => {
     if (!oid) return;
@@ -167,7 +142,6 @@ function DeliveryDashboardInner() {
     }
   };
 
-  const dispatchOrders = activeDispatch?.orders ?? [];
   const route = activeDispatch?.route;
   const routeStops = route?.remaining_stops ?? [];
 
@@ -187,6 +161,9 @@ function DeliveryDashboardInner() {
         <div className="mt-4 flex flex-wrap gap-2">
           <Link href="/driver/live-map" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="driver-live-map-link">
             <MapPin size={16} /> Live Map Dashboard
+          </Link>
+          <Link href="/driver/navigate" className="btn-secondary inline-flex items-center gap-2 text-sm" data-testid="driver-navigation-link">
+            <Navigation size={16} /> Navigation
           </Link>
           <CompanionModeButton href="/driver/companion" label="Companion Mode" />
         </div>
@@ -223,7 +200,7 @@ function DeliveryDashboardInner() {
                   ? <>📍 {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)} · heartbeat every {HEARTBEAT_MS/1000}s</>
                   : "Waiting for GPS…"
                 : "Tap the button to start receiving dispatches"}
-              {geoErr && <span style={{ color: "var(--primary)" }}> · {geoErr}</span>}
+              {geoError && <span style={{ color: "var(--primary)" }}> · {geoError}</span>}
             </div>
           </div>
           <button

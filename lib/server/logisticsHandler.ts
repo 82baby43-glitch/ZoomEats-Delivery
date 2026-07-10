@@ -5,6 +5,7 @@ import {
   buildDriverLogisticsView,
   buildRestaurantLogisticsView,
 } from "../logistics/engine";
+import { buildDriverNavigationView } from "../logistics/driver-navigation";
 import { handleLogisticsSafetyRequest } from "../logistics/safetyHandler";
 
 function throwErr(message: string, status = 400): never {
@@ -19,6 +20,7 @@ export async function handleLogisticsRequest(
     path: string;
     method: string;
     body?: Record<string, unknown>;
+    params?: Record<string, string>;
     requireAuth: () => Record<string, unknown>;
     requireRole: (...roles: string[]) => Record<string, unknown>;
   }
@@ -42,6 +44,18 @@ export async function handleLogisticsRequest(
       throwErr("Delivery or founder driver access required", 403);
     }
     return buildDriverLogisticsView(db, String(u.user_id));
+  }
+
+  const navMatch = path.match(/^\/logistics\/driver\/navigation(?:\/([^/]+))?$/);
+  if (navMatch && method === "GET") {
+    const u = opts.requireAuth();
+    if (!canUseDriverApis(u as { user_id: string; role?: string; founder_driver?: boolean })) {
+      throwErr("Delivery or founder driver access required", 403);
+    }
+    const orderId = navMatch[1] || opts.params?.order_id;
+    const view = await buildDriverNavigationView(db, String(u.user_id), orderId);
+    if (!view) throwErr("No active delivery for navigation", 404);
+    return view;
   }
 
   if (path === "/logistics/restaurant") {

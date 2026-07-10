@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import LogisticsMap from "@/components/maps/LogisticsMap";
 import { useLogisticsPoll, useLogisticsRealtime } from "@/lib/hooks/useLogisticsRealtime";
+import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { formatMoney } from "@/lib/safeData";
 import { MapPin, Navigation, DollarSign, Radio } from "lucide-react";
@@ -25,13 +26,15 @@ const STATUS_LABELS = {
 export default function DriverLiveMapDashboard() {
   const [theme, setTheme] = useState("dark");
   const fetchDriver = useCallback(() => api.get("/logistics/driver"), []);
-  const { data, loading, error, reload } = useLogisticsPoll(fetchDriver, "driver");
+  const { data, loading, error, reload } = useLogisticsPoll(fetchDriver, "driver", 12000);
 
   useLogisticsRealtime({
     role: "driver",
-    driverId: data?.position ? "active" : null,
+    driverId: data?.driver_id ?? null,
     onRefresh: reload,
   });
+
+  useRoutingRealtime(data?.driver_id, reload);
 
   if (loading && !data) {
     return (
@@ -78,7 +81,12 @@ export default function DriverLiveMapDashboard() {
               {data?.remaining_distance_km ? ` · ${data.remaining_distance_km} km left` : ""}
             </p>
           </div>
-          <Link href="/driver/dashboard" className="btn-secondary text-sm">Classic dashboard</Link>
+          <div className="flex gap-2">
+            <Link href="/driver/navigate" className="btn-primary text-sm flex items-center gap-1" data-testid="driver-nav-link">
+              <Navigation size={14} /> Navigation
+            </Link>
+            <Link href="/driver/dashboard" className="btn-secondary text-sm">Classic dashboard</Link>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -139,6 +147,9 @@ export default function DriverLiveMapDashboard() {
                       <span className="badge">ETA {q.eta_min}m</span>
                       <span className="badge">{q.prep_status}</span>
                     </div>
+                    <Link href={`/driver/navigate/${q.order_id}`} className="btn-primary text-xs !py-1.5 inline-flex items-center gap-1">
+                      <Navigation size={12} /> Navigate
+                    </Link>
                     {["assigned_internal", "ready", "preparing"].includes(q.status) && (
                       <PickupPhotoInstructions orderId={q.order_id} compact />
                     )}
