@@ -41,6 +41,7 @@ import {
   getLatestDriverLocation,
   recordDriverLocation,
 } from "../_shared/logistics/driver-location-service.ts";
+import { recordCompletedDeliveryRoute } from "../_shared/logistics/delivery-route-recorder.ts";
 import { handlePickupPhotoRequest } from "../_shared/pickupPhotosHandler.ts";
 import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
@@ -520,6 +521,12 @@ Deno.serve(async (req) => {
         if (o.delivery_partner_id !== u.user_id) return err("Not your delivery", 403);
         await db.from("orders").update({ status: "delivered" }).eq("order_id", oid);
         try {
+          const { data: drv } = await db.from("drivers").select("driver_id").eq("user_id", u.user_id).maybeSingle();
+          await recordCompletedDeliveryRoute(db, oid, drv?.driver_id ?? o.driver_id);
+        } catch (e) {
+          console.warn(JSON.stringify({ delivery_route_skipped: String(e), order_id: oid }));
+        }
+        try {
           await recordOrderFinancials(db, oid);
         } catch (e) {
           console.warn(JSON.stringify({ financial_ledger_skipped: String(e), order_id: oid }));
@@ -658,6 +665,11 @@ Deno.serve(async (req) => {
           await broadcastDeliveryCompleted(oid, d.driver_id, runtime);
         } catch (e) {
           console.warn(JSON.stringify({ delivery_completed_broadcast_skipped: String(e) }));
+        }
+        try {
+          await recordCompletedDeliveryRoute(db, oid, d.driver_id);
+        } catch (e) {
+          console.warn(JSON.stringify({ delivery_route_skipped: String(e), order_id: oid }));
         }
         try {
           await recordOrderFinancials(db, oid);

@@ -31,6 +31,7 @@ import {
   getLatestDriverLocation,
   recordDriverLocation,
 } from "../logistics/driver-location-service";
+import { recordCompletedDeliveryRoute } from "../logistics/delivery-route-recorder";
 import { handlePickupPhotoRequest } from "../pickupPhotos/handler";
 import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { handleStripeAdminRequest } from "./stripeAdmin";
@@ -501,6 +502,12 @@ export async function handleApiRequest(
         if (o.delivery_partner_id !== u.user_id) throwErr("Not your delivery", 403);
         await db.from("orders").update({ status: "delivered" }).eq("order_id", oid);
         try {
+          const { data: drv } = await db.from("drivers").select("driver_id").eq("user_id", u.user_id).maybeSingle();
+          await recordCompletedDeliveryRoute(db, oid, drv?.driver_id ?? o.driver_id);
+        } catch (e) {
+          console.warn(JSON.stringify({ delivery_route_skipped: String(e), order_id: oid }));
+        }
+        try {
           await recordOrderFinancials(db, oid);
         } catch (e) {
           console.warn(JSON.stringify({ financial_ledger_skipped: String(e), order_id: oid }));
@@ -636,6 +643,11 @@ export async function handleApiRequest(
           });
         } catch (e) {
           console.warn(JSON.stringify({ delivery_completed_broadcast_skipped: String(e) }));
+        }
+        try {
+          await recordCompletedDeliveryRoute(db, oid, d.driver_id);
+        } catch (e) {
+          console.warn(JSON.stringify({ delivery_route_skipped: String(e), order_id: oid }));
         }
         try {
           await recordOrderFinancials(db, oid);
