@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Bell } from "lucide-react";
 
-export default function SpotlightNotificationPrefs() {
+export default function SpotlightNotificationPrefs({ inline = false }) {
   const { user } = useAuth();
   const [enabled, setEnabled] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -32,7 +32,11 @@ export default function SpotlightNotificationPrefs() {
 
   return (
     <div
-      className="fixed bottom-28 right-6 z-40 card p-3 max-w-xs shadow-lg"
+      className={
+        inline
+          ? "card p-3 max-w-xs shadow-lg ml-auto"
+          : "fixed bottom-28 right-6 z-40 card p-3 max-w-xs shadow-lg"
+      }
       data-testid="spotlight-notification-prefs"
     >
       <label className="flex items-start gap-2 text-sm cursor-pointer">

@@ -218,8 +218,16 @@ export default function Landing() {
         )}
       </section>
 
+      <footer className="max-w-7xl mx-auto px-6 md:px-12 pb-10 pt-4">
+        <div className="flex flex-wrap items-end justify-between gap-6">
+          <p className="text-xs" style={{ color: "var(--muted)" }}>
+            ZoomEats L.L.C.
+          </p>
+          {user && <SpotlightNotificationPrefs inline />}
+        </div>
+      </footer>
+
       {user && <Chatbot />}
-      {user && <SpotlightNotificationPrefs />}
     </div>
   );
 }
