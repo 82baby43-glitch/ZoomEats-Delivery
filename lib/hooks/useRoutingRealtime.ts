@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useRef } from "react";
+import { isExternalNavSessionActive } from "@/lib/logistics/externalNavSession";
 import { supabase } from "@/lib/supabaseClient";
 import { routingChannelName } from "@/lib/dispatch/routing/realtime-push";
 import { useRealtimeRow } from "@/lib/useRealtime";
@@ -22,10 +23,10 @@ export function useRoutingRealtime(driverId, onUpdate) {
 
   useEffect(() => {
     const onVis = () => {
-      pausedRef.current = document.hidden;
+      pausedRef.current = document.hidden && !isExternalNavSessionActive();
     };
     document.addEventListener("visibilitychange", onVis);
-    pausedRef.current = document.hidden;
+    pausedRef.current = document.hidden && !isExternalNavSessionActive();
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 

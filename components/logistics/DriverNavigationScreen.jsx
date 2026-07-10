@@ -173,7 +173,7 @@ export default function DriverNavigationScreen() {
                   </div>
                   <div className="font-bold">{destination.name || destination.address}</div>
                   <div className="mt-3">
-                    <ExternalNavigationButtons destination={destination} origin={data?.position} />
+                    <ExternalNavigationButtons destination={destination} origin={data?.position} orderId={data?.order_id ?? orderId} />
                   </div>
                 </div>
               )}

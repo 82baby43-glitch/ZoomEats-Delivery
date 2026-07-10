@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { isExternalNavSessionActive } from "@/lib/logistics/externalNavSession";
 import { api } from "@/lib/api";
 import { trackingIntervalMs, resolveTrackingMode } from "@/lib/logistics/driver-location-service";
 
@@ -80,10 +81,12 @@ export function useDriverGpsTracking({ enabled, activeOrderId, activeOrderStatus
     }
     if (!enabled) return;
 
-    const mode = resolveTrackingMode(
-      true,
-      activeOrderStatus ?? (activeOrderId ? "assigned_internal" : null)
-    );
+    const mode = isExternalNavSessionActive()
+      ? "active_delivery"
+      : resolveTrackingMode(
+          true,
+          activeOrderStatus ?? (activeOrderId ? "assigned_internal" : null)
+        );
 
     const send = async () => {
       const current = coordsRef.current;

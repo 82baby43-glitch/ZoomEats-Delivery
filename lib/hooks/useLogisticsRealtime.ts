@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRealtimeRow } from "@/lib/useRealtime";
 
+import { isExternalNavSessionActive } from "@/lib/logistics/externalNavSession";
+
 const CACHE_PREFIX = "zoomeats_logistics_cache_";
 
 /**
@@ -17,9 +19,9 @@ export function useLogisticsRealtime({ role, restaurantId, driverId, onRefresh }
   }, [onRefresh, paused]);
 
   useEffect(() => {
-    const onVis = () => setPaused(document.hidden);
+    const onVis = () => setPaused(document.hidden && !isExternalNavSessionActive());
     document.addEventListener("visibilitychange", onVis);
-    setPaused(document.hidden);
+    setPaused(document.hidden && !isExternalNavSessionActive());
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
@@ -89,11 +91,11 @@ export function useLogisticsPoll(fetchFn, cacheKey, intervalMs = 12000) {
     }
     load();
     const onVis = () => {
-      pausedRef.current = document.hidden;
+      pausedRef.current = document.hidden && !isExternalNavSessionActive();
       if (!document.hidden) load();
     };
     document.addEventListener("visibilitychange", onVis);
-    pausedRef.current = document.hidden;
+    pausedRef.current = document.hidden && !isExternalNavSessionActive();
     const t = setInterval(load, intervalMs);
     return () => {
       clearInterval(t);
