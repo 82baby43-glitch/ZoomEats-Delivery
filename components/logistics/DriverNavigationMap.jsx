@@ -73,12 +73,32 @@ function AnimatedDriver({ lat, lng, heading }) {
 function FitBounds({ points }) {
   const map = useMap();
   useEffect(() => {
-    const valid = points.filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+    const valid = points.filter(
+      (p) => Number.isFinite(p[0]) && Number.isFinite(p[1]) && !(p[0] === 0 && p[1] === 0)
+    );
     if (!valid.length) return;
     if (valid.length === 1) map.setView(valid[0], 15);
     else map.fitBounds(valid, { padding: [56, 56], maxZoom: 16 });
   }, [map, points]);
   return null;
+}
+
+function MapResizeFix() {
+  const map = useMap();
+  useEffect(() => {
+    const fix = () => map.invalidateSize();
+    const t = setTimeout(fix, 100);
+    window.addEventListener("resize", fix);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("resize", fix);
+    };
+  }, [map]);
+  return null;
+}
+
+function isValidMarker(m) {
+  return m?.lat && m?.lng && Number.isFinite(m.lat) && Number.isFinite(m.lng) && !(m.lat === 0 && m.lng === 0);
 }
 
 export default function DriverNavigationMap({
@@ -88,13 +108,14 @@ export default function DriverNavigationMap({
   className = "",
 }) {
   const points = useMemo(
-    () => markers.filter((m) => m.lat && m.lng).map((m) => [m.lat, m.lng]),
+    () => markers.filter(isValidMarker).map((m) => [m.lat, m.lng]),
     [markers]
   );
-  const driver = markers.find((m) => m.type === "driver");
-  const restaurant = markers.find((m) => m.type === "restaurant");
-  const customer = markers.find((m) => m.type === "customer");
+  const driver = markers.find((m) => m.type === "driver" && isValidMarker(m));
+  const restaurant = markers.find((m) => m.type === "restaurant" && isValidMarker(m));
+  const customer = markers.find((m) => m.type === "customer" && isValidMarker(m));
   const center = points[0] || [37.77, -122.42];
+  const mapKey = `${driver?.lat ?? "d"}-${restaurant?.lat ?? "r"}-${customer?.lat ?? "c"}-${routes.length}`;
 
   return (
     <div
@@ -103,13 +124,15 @@ export default function DriverNavigationMap({
       data-testid="driver-navigation-map"
     >
       <MapContainer
+        key={mapKey}
         center={center}
         zoom={14}
-        style={{ height: "100%", width: "100%" }}
+        style={{ height: "100%", width: "100%", minHeight: 320 }}
         scrollWheelZoom
         zoomControl
       >
         <CachedTileLayer url={OSM_URL} attribution={OSM_ATTRIBUTION} />
+        <MapResizeFix />
         {routes.map((r) => (
           <Polyline
             key={r.id}

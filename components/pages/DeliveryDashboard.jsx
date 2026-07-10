@@ -317,6 +317,11 @@ function DeliveryDashboardInner() {
                       <span className="badge mt-2">{o.status ?? "unknown"}</span>
                     </div>
                     <div className="flex flex-col items-end gap-2 shrink-0">
+                      {(o.status === "assigned_internal" || o.status === "picked_up") && (
+                        <Link href={`/driver/navigate/${o.order_id}`} className="btn-secondary !py-2 text-sm inline-flex items-center gap-1">
+                          <Navigation size={14} /> Navigate
+                        </Link>
+                      )}
                       {o.status === "assigned_internal" && (
                         <button className="btn-primary !py-2" onClick={() => action(o.order_id, "accept", true)} data-testid={`pickup-${o.order_id}`}>
                           Pickup
@@ -375,13 +380,18 @@ function DeliveryDashboardInner() {
                     <div className="badge mt-2">{o.status ?? "unknown"}</div>
                   </div>
                   {o.status === "picked_up" && (
-                    <button
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      <Link href={`/driver/navigate/${o.order_id}`} className="btn-secondary !py-2 text-sm inline-flex items-center gap-1">
+                        <Navigation size={14} /> Navigate
+                      </Link>
+                      <button
                       className="btn-primary !py-2"
                       onClick={() => action(o.order_id, "deliver", o.delivery_type === "internal")}
                       data-testid={`deliver-mine-${o.order_id}`}
                     >
                       Mark delivered
                     </button>
+                    </div>
                   )}
                 </div>
               ))}

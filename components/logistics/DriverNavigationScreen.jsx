@@ -24,7 +24,7 @@ const PHASE_LABELS = {
 
 export default function DriverNavigationScreen() {
   const params = useParams();
-  const orderId = params?.oid;
+  const orderId = Array.isArray(params?.oid) ? params.oid[0] : params?.oid;
 
   const fetchNav = useCallback(() => {
     const path = orderId
@@ -43,11 +43,11 @@ export default function DriverNavigationScreen() {
 
   useRoutingRealtime(data?.driver_id, reload);
 
-  const hasActiveDelivery = !!data?.order_id;
+  const hasActiveDelivery = Boolean(data?.order_id || orderId);
   useDriverGpsTracking({
     enabled: hasActiveDelivery,
-    activeOrderId: data?.order_id,
-    activeOrderStatus: data?.status,
+    activeOrderId: data?.order_id ?? orderId,
+    activeOrderStatus: data?.status ?? (orderId ? "assigned_internal" : null),
   });
 
   const destination = useMemo(() => {
@@ -70,8 +70,12 @@ export default function DriverNavigationScreen() {
         <Header />
         <div className="flex-1 p-6 max-w-lg mx-auto w-full">
           <ErrorState
-            title="No active delivery"
-            description="Accept or pick up an order to start navigation."
+            title="Navigation unavailable"
+            description={
+              orderId
+                ? `Could not load navigation for order #${String(orderId).slice(-8)}. Confirm it is assigned to you and still active.`
+                : "Accept or pick up an order to start navigation."
+            }
             onRetry={reload}
           />
           <Link href="/driver/dashboard" className="btn-primary mt-4 inline-block text-sm">Back to dashboard</Link>
@@ -83,13 +87,13 @@ export default function DriverNavigationScreen() {
   return (
     <div className="min-h-screen flex flex-col" data-testid="driver-navigation-screen">
       <Header />
-      <div className="flex flex-col lg:flex-row flex-1 min-h-0">
-        <div className="flex-1 min-h-[50vh] lg:min-h-0 relative">
+      <div className="flex flex-col lg:flex-row flex-1 min-h-[calc(100vh-64px)]">
+        <div className="flex-1 min-h-[50vh] lg:min-h-[calc(100vh-64px)] relative">
           <DriverNavigationMap
             markers={data?.markers || []}
             routes={data?.routes || []}
             height="100%"
-            className="h-full min-h-[50vh] lg:min-h-[calc(100vh-64px)]"
+            className="absolute inset-0 min-h-[50vh] lg:min-h-[calc(100vh-64px)]"
           />
         </div>
 

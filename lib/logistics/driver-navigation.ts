@@ -52,6 +52,57 @@ function navigationPhase(status: string): DriverNavigationPhase {
   return ["picked_up", "out_for_delivery"].includes(status) ? "to_customer" : "to_restaurant";
 }
 
+function isValidCoord(lat: number, lng: number): boolean {
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0);
+}
+
+function orderAssignedToUser(
+  order: Record<string, unknown>,
+  userId: string,
+  driverId?: string | null
+): boolean {
+  if (driverId && order.driver_id === driverId) return true;
+  return order.delivery_partner_id === userId;
+}
+
+async function resolveNavigationOrder(
+  db: SupabaseClient,
+  userId: string,
+  driverId: string | null | undefined,
+  orderId?: string
+): Promise<Record<string, unknown> | null> {
+  if (orderId) {
+    const { data: order } = await db.from("orders").select("*").eq("order_id", orderId).maybeSingle();
+    if (!order) return null;
+    if (!orderAssignedToUser(order, userId, driverId)) return null;
+    if (!ACTIVE_NAV_STATUSES.includes(String(order.status))) return null;
+    return order;
+  }
+
+  if (driverId) {
+    const { data: internalOrder } = await db
+      .from("orders")
+      .select("*")
+      .eq("driver_id", driverId)
+      .in("status", ACTIVE_NAV_STATUSES)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (internalOrder) return internalOrder;
+  }
+
+  const { data: partnerOrder } = await db
+    .from("orders")
+    .select("*")
+    .eq("delivery_partner_id", userId)
+    .in("status", ACTIVE_NAV_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return partnerOrder;
+}
+
 function buildDeliveryNotes(
   order: Record<string, unknown>,
   guide: ReturnType<typeof mergePickupGuide>,
@@ -87,22 +138,10 @@ export async function buildDriverNavigationView(
   orderId?: string
 ): Promise<DriverNavigationView | null> {
   const { data: driver } = await db.from("drivers").select("*").eq("user_id", userId).maybeSingle();
-  if (!driver?.driver_id) return null;
-
-  let orderQuery = db
-    .from("orders")
-    .select("*")
-    .eq("driver_id", driver.driver_id)
-    .in("status", ACTIVE_NAV_STATUSES)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (orderId) {
-    orderQuery = db.from("orders").select("*").eq("order_id", orderId).eq("driver_id", driver.driver_id).limit(1);
-  }
-
-  const { data: order } = await orderQuery.maybeSingle();
+  const order = await resolveNavigationOrder(db, userId, driver?.driver_id, orderId);
   if (!order) return null;
+
+  const routingDriverId = String(driver?.driver_id ?? order.driver_id ?? userId);
 
   const { data: restaurant } = order.restaurant_id
     ? await db
@@ -126,12 +165,14 @@ export async function buildDriverNavigationView(
   };
 
   const position =
-    driver.latitude && driver.longitude
+    driver?.latitude && driver?.longitude
       ? { lat: Number(driver.latitude), lng: Number(driver.longitude) }
       : null;
 
   const adapter = createRoutingDbAdapter(db);
-  const routeState = await adapter.getDriverState(String(driver.driver_id));
+  const routeState = driver?.driver_id
+    ? await adapter.getDriverState(String(driver.driver_id))
+    : null;
   const heading = routeState?.current_location?.heading_deg;
   const speedKmh =
     routeState?.current_location?.speed_mps != null
@@ -154,7 +195,7 @@ export async function buildDriverNavigationView(
     position,
     restaurantPt,
     customerPt,
-    String(driver.driver_id),
+    routingDriverId,
     historicalAvgMin,
     defaultEstimateMin
   );
@@ -166,7 +207,7 @@ export async function buildDriverNavigationView(
       : intel.eta_pickup_min ?? intel.estimated_arrival_min ?? 0;
 
   const markers: LogisticsMarker[] = [];
-  if (position) {
+  if (position && isValidCoord(position.lat, position.lng)) {
     markers.push({
       id: "driver",
       type: "driver",
@@ -176,7 +217,7 @@ export async function buildDriverNavigationView(
       meta: { heading_deg: heading, speed_kmh: speedKmh },
     });
   }
-  if (restaurantPt.lat && restaurantPt.lng) {
+  if (isValidCoord(restaurantPt.lat, restaurantPt.lng)) {
     markers.push({
       id: "restaurant",
       type: "restaurant",
@@ -185,7 +226,7 @@ export async function buildDriverNavigationView(
       label: String(restaurant?.name || order.restaurant_name || "Restaurant"),
     });
   }
-  if (customerPt.lat && customerPt.lng) {
+  if (isValidCoord(customerPt.lat, customerPt.lng)) {
     markers.push({
       id: "customer",
       type: "customer",
@@ -205,9 +246,17 @@ export async function buildDriverNavigationView(
     guideRow
   );
 
+  const deliveryNotes = buildDeliveryNotes(order, guide, phase);
+  if (!isValidCoord(customerPt.lat, customerPt.lng) && order.address) {
+    deliveryNotes.unshift("Customer pin not geocoded yet — use the address below for dropoff.");
+  }
+  if (!isValidCoord(restaurantPt.lat, restaurantPt.lng) && restaurant?.address) {
+    deliveryNotes.unshift("Restaurant pin not geocoded yet — use the address below for pickup.");
+  }
+
   return {
     order_id: String(order.order_id),
-    driver_id: String(driver.driver_id),
+    driver_id: routingDriverId,
     status: String(order.status),
     phase,
     position,
@@ -231,7 +280,7 @@ export async function buildDriverNavigationView(
     eta_pickup_min: intel.eta_pickup_min,
     eta_dropoff_min: intel.eta_dropoff_min ?? intel.estimated_arrival_min,
     remaining_distance_miles: intel.remaining_distance_miles,
-    delivery_notes: buildDeliveryNotes(order, guide, phase),
+    delivery_notes: deliveryNotes,
     updated_at: new Date().toISOString(),
   };
 }
