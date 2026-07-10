@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { GpsStreamState } from "../dispatch/routing/types";
-import { getGpsStreamState } from "../dispatch/routing/gps-stream";
-import type { OrderRoutingIntel } from "./route-state-helpers";
-import { flushGpsBatch, queueGpsSample } from "./gps-batch-writer";
+import type { GpsStreamState } from "../routing/types.ts";
+import { getGpsStreamState } from "../routing/gps-stream.ts";
+import type { OrderRoutingIntel } from "./route-state-helpers.ts";
+import { flushGpsBatch, queueGpsSample } from "./gps-batch-writer.ts";
 
 const etaSnapshotLastWrite = new Map<string, number>();
 const ETA_SNAPSHOT_MIN_INTERVAL_MS = 30_000;

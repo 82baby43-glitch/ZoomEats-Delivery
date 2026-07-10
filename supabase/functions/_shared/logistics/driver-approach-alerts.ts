@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { metersBetween } from "../routing/geo";
-import type { GeoPoint } from "../routing/types";
+import { metersBetween } from "../routing/geo.ts";
+import type { GeoPoint } from "../routing/types.ts";
 
 /** ~152 m */
 export const ARRIVING_SOON_FEET = 500;

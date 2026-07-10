@@ -111,7 +111,11 @@ export async function handleApiRequest(
   if (token) {
     const { data: { user: authUser } } = await db.auth.getUser(token);
     if (authUser) {
-      const { data: profile } = await db.from("users").select("*").eq("user_id", authUser.id).maybeSingle();
+      const { data: profile } = await db
+        .from("users")
+        .select("*")
+        .or(`user_id.eq.${authUser.id},auth_id.eq.${authUser.id}`)
+        .maybeSingle();
       if (profile) {
         user = profile;
       } else {

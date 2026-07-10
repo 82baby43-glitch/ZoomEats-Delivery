@@ -77,6 +77,12 @@ async function invokeBackendApi(
   const token = await getAccessToken();
   const payload = JSON.stringify({ path, method, body, params });
 
+  // Browser: prefer same-origin /api/backend so logistics + API ship with the Vercel deploy.
+  // Supabase Edge can lag behind and has a separate bundle lifecycle.
+  if (typeof window !== "undefined") {
+    return fetchLocalBackend(payload, token);
+  }
+
   if (isSupabaseConfigured) {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/api`, {
       method: "POST",

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { DriverRouteState } from "../routing/types";
-import { createRoutingDbAdapter } from "../routing/db-adapter";
+import type { DriverRouteState } from "../routing/types.ts";
+import { createRoutingDbAdapter } from "../routing/db-adapter.ts";
 import type { LogisticsMarker, RoutePolyline } from "./types.ts";
 import {
   computeOrderRoutingIntel,

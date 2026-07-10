@@ -1,9 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { DriverRouteState, GeoPoint } from "../routing/types";
-import { ROUTING_CONFIG } from "../routing/types";
-import { getAdaptiveSpeedKmh } from "../routing/eta-engine";
-import { haversineKm } from "../routing/geo";
-import { buildTrafficSegment } from "../routing/traffic-ai";
+import type { DriverRouteState, GeoPoint } from "../routing/types.ts";
+import { ROUTING_CONFIG } from "../routing/types.ts";
+import { getAdaptiveSpeedKmh } from "../routing/eta-engine.ts";
+import { haversineKm } from "../routing/geo.ts";
+import { buildTrafficSegment } from "../routing/traffic-ai.ts";
 import {
   deriveLiveDeliveryPhase,
   type LiveDeliveryPhase,
