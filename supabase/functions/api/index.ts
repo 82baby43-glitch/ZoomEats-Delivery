@@ -25,6 +25,7 @@ import {
 } from "../_shared/googlePlacesImport.ts";
 import { runOpenStreetMapImport } from "../_shared/openStreetMapImport.ts";
 import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
+import { handleSpotlightRequest } from "../_shared/spotlight/handler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
 import { handleFounderDriverRequest } from "../_shared/founderDriverHandler.ts";
 import { canUseDriverApis } from "../_shared/founderDriverAuth.ts";
@@ -198,6 +199,16 @@ Deno.serve(async (req) => {
       });
       return err(`Rate limit exceeded. Retry in ${rate.retryAfterSec}s`, 429);
     }
+
+    const spotlightResult = await handleSpotlightRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (spotlightResult !== null) return json(spotlightResult);
 
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return json(complianceResult);

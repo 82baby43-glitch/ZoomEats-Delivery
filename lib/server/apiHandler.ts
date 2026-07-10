@@ -14,6 +14,7 @@ import {
   recalculateOptimalRoute,
   tryInsertOrderIntoRoute,
 } from "../dispatch/routing/uber-routing-ai";
+import { handleSpotlightRequest } from "../spotlight/handler";
 import { handleComplianceRequest } from "./complianceHandler";
 import { handleDreamlandRequest } from "./dreamlandHandler";
 import { handleFounderDriverRequest } from "../founderDriver/handler";
@@ -179,6 +180,16 @@ export async function handleApiRequest(
       });
       throwErr(`Rate limit exceeded. Retry in ${rate.retryAfterSec}s`, 429);
     }
+
+    const spotlightResult = await handleSpotlightRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (spotlightResult !== null) return spotlightResult;
 
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return complianceResult;
