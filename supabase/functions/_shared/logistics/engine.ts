@@ -1,6 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { haversineKm } from "../routing/geo.ts";
-import { etaMinutesBetween } from "../routing/eta-engine.ts";
+import { haversineKm } from "../routing/geo";
+import { etaMinutesBetween } from "../routing/eta-engine";
+import { createRoutingDbAdapter } from "../routing/db-adapter";
+import { getGpsStreamState } from "../routing/gps-stream";
+import {
+  buildRoutesFromRouteState,
+  remainingDistanceKm,
+  computeOrderRoutingIntel,
+} from "./route-state-helpers.ts";
 import type {
   AdminLogisticsView,
   DeliveryQueueItem,
@@ -67,35 +74,6 @@ function buildHotspots(orders: Array<Record<string, unknown>>, restaurants: Arra
   }));
 }
 
-function buildRoutes(
-  driverPos: { lat: number; lng: number } | null,
-  orders: Array<Record<string, unknown>>
-): RoutePolyline[] {
-  const routes: RoutePolyline[] = [];
-  for (const o of orders) {
-    const rest = o.restaurants as { latitude?: number; longitude?: number } | undefined;
-    const rLat = Number(o.restaurant_lat ?? rest?.latitude);
-    const rLng = Number(o.restaurant_lng ?? rest?.longitude);
-    const cLat = Number(o.customer_lat);
-    const cLng = Number(o.customer_lng);
-    if (!rLat || !rLng || !cLat || !cLng) continue;
-    const start = driverPos || { lat: rLat, lng: rLng };
-    routes.push({
-      id: `${o.order_id}-pickup`,
-      kind: "pickup",
-      color: "#D49A36",
-      points: [[start.lat, start.lng], [rLat, rLng]],
-    });
-    routes.push({
-      id: `${o.order_id}-delivery`,
-      kind: "delivery",
-      color: "#C2533B",
-      points: [[rLat, rLng], [cLat, cLng]],
-    });
-  }
-  return routes;
-}
-
 function buildKitchenTimeline(status: string) {
   const steps = ["Order Received", "Cooking", "Packaging", "Ready", "Driver Arrived", "Picked Up", "Delivered"];
   const idx = {
@@ -145,9 +123,24 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
     ? { lat: Number(driver.latitude), lng: Number(driver.longitude) }
     : null;
 
+  let routeState = null;
+  if (driverId) {
+    const adapter = createRoutingDbAdapter(db);
+    routeState = await adapter.getDriverState(driverId);
+  }
+  const gpsStream = driverId ? getGpsStreamState(driverId) : null;
+  const speedKmh = routeState?.current_location?.speed_mps != null
+    ? Math.round(routeState.current_location.speed_mps * 3.6 * 10) / 10
+    : gpsStream
+      ? Math.round(gpsStream.speed_mps * 3.6 * 10) / 10
+      : 0;
+  const headingDeg = routeState?.current_location?.heading_deg ?? gpsStream?.heading_deg;
+
   const status = deriveDriverStatus(driver, orders || []);
-  let remainingKm = 0;
-  let etaMin = 0;
+  let remainingKm = remainingDistanceKm(routeState, position);
+  let etaMin = routeState?.total_eta_minutes
+    ? Math.round(routeState.total_eta_minutes)
+    : 0;
   const queue: DeliveryQueueItem[] = [];
 
   for (const o of orders || []) {
@@ -156,9 +149,11 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
     const cLat = Number(o.customer_lat);
     const cLng = Number(o.customer_lng);
     const dist = position && cLat && cLng ? haversineKm(position, { lat: cLat, lng: cLng }) : 0;
-    const legEta = position && cLat && cLng ? etaMinutesBetween(position, { lat: cLat, lng: cLng }) : 25;
-    remainingKm += dist;
-    etaMin += legEta;
+    const legEta = position && cLat && cLng ? etaMinutesBetween(position, { lat: cLat, lng: cLng }, { driverId }) : 25;
+    if (!routeState?.total_eta_minutes) {
+      remainingKm += dist;
+      etaMin += legEta;
+    }
     queue.push({
       order_id: String(o.order_id),
       restaurant_name: String(o.restaurant_name || "Restaurant"),
@@ -207,7 +202,16 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
   };
 
   const markers: LogisticsMarker[] = [];
-  if (position) markers.push({ id: "driver", type: "driver", lat: position.lat, lng: position.lng, label: "You" });
+  if (position) {
+    markers.push({
+      id: "driver",
+      type: "driver",
+      lat: position.lat,
+      lng: position.lng,
+      label: "You",
+      meta: { heading_deg: headingDeg, speed_kmh: speedKmh },
+    });
+  }
   for (const q of queue) {
     if (q.restaurant_lat && q.restaurant_lng) {
       markers.push({ id: `r-${q.order_id}`, type: "restaurant", lat: q.restaurant_lat, lng: q.restaurant_lng, label: q.restaurant_name });
@@ -225,13 +229,15 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
   );
 
   return {
+    driver_id: driverId,
     status,
     position,
-    speed_kmh: 0,
+    heading_deg: headingDeg,
+    speed_kmh: speedKmh,
     remaining_distance_km: Math.round(remainingKm * 10) / 10,
     eta_min: Math.round(etaMin),
     markers,
-    routes: buildRoutes(position, orders || []),
+    routes: buildRoutesFromRouteState(routeState, position, orders || []),
     queue,
     hotspots,
     earnings,
@@ -267,22 +273,66 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
     let driverLat: number | undefined;
     let driverLng: number | undefined;
     let driverName = "Unassigned";
+    let etaPickup: number | undefined;
+    let etaDelivery: number | undefined;
     if (o.driver_id) {
       const { data: drv } = await db.from("drivers").select("latitude,longitude,user_id").eq("driver_id", o.driver_id).maybeSingle();
       if (drv?.latitude) {
         driverLat = Number(drv.latitude);
         driverLng = Number(drv.longitude);
-        markers.push({ id: `d-${o.order_id}`, type: "driver", lat: driverLat, lng: driverLng!, label: "Driver" });
+        markers.push({
+          id: `d-${o.order_id}`,
+          type: "driver",
+          lat: driverLat,
+          lng: driverLng!,
+          label: "Driver",
+        });
       }
       if (drv?.user_id) {
         const { data: u } = await db.from("users").select("name").eq("user_id", drv.user_id).maybeSingle();
         driverName = String(u?.name || "Driver");
       }
+      const adapter = createRoutingDbAdapter(db);
+      const routeState = await adapter.getDriverState(String(o.driver_id));
+      const driverPos = driverLat && driverLng ? { lat: driverLat, lng: driverLng } : null;
+      const restaurantPt = { lat: Number(rest.latitude), lng: Number(rest.longitude) };
+      const customerPt = { lat: Number(o.customer_lat), lng: Number(o.customer_lng) };
+      const intel = computeOrderRoutingIntel(
+        routeState,
+        String(o.order_id),
+        String(o.status),
+        driverPos,
+        restaurantPt,
+        customerPt,
+        String(o.driver_id)
+      );
+      etaPickup = intel.eta_pickup_min ?? undefined;
+      etaDelivery = intel.eta_dropoff_min ?? undefined;
+      if (driverLat && routeState?.current_location?.heading_deg != null) {
+        const idx = markers.findIndex((m) => m.id === `d-${o.order_id}`);
+        if (idx >= 0) {
+          markers[idx] = {
+            ...markers[idx],
+            meta: {
+              heading_deg: routeState.current_location.heading_deg,
+              speed_kmh: routeState.current_location.speed_mps != null
+                ? Math.round(routeState.current_location.speed_mps * 3.6 * 10) / 10
+                : undefined,
+            },
+          };
+        }
+      }
     }
     const age = orderAgeMin(String(o.created_at));
-    const etaPickup = driverLat && rest.latitude
-      ? Math.round(etaMinutesBetween({ lat: driverLat, lng: driverLng! }, { lat: Number(rest.latitude), lng: Number(rest.longitude) }))
-      : undefined;
+    if (etaPickup == null && driverLat && rest.latitude) {
+      etaPickup = Math.round(
+        etaMinutesBetween(
+          { lat: driverLat, lng: driverLng! },
+          { lat: Number(rest.latitude), lng: Number(rest.longitude) },
+          { driverId: o.driver_id as string }
+        )
+      );
+    }
     if (etaPickup != null && etaPickup <= 3) {
       arrivals.push({ order_id: String(o.order_id), message: `Driver ${etaPickup} min away`, severity: "info" });
     }
@@ -299,7 +349,7 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
       live_status: String(o.status).replace(/_/g, " "),
       prep_timer_min: age,
       eta_pickup_min: etaPickup,
-      eta_delivery_min: etaPickup != null ? etaPickup + 12 : undefined,
+      eta_delivery_min: etaDelivery ?? (etaPickup != null ? etaPickup + 12 : undefined),
       delay_warning: age > 20 ? "Prep running long" : undefined,
       driver_lat: driverLat,
       driver_lng: driverLng,

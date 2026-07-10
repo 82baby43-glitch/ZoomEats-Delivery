@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { safeGet } from "@/lib/api";
 import { useRealtimeRow } from "@/lib/useRealtime";
 import Header from "@/components/Header";
-import LiveMap from "@/components/LiveMap";
+import CustomerLiveMapDashboard from "@/components/logistics/CustomerLiveMapDashboard";
 import { CheckCircle2, Circle, ExternalLink, MapPin, Truck, Clock, Wifi } from "lucide-react";
 import { formatMoney, safeNumber, safeOrderId, sanitizeOrder } from "@/lib/safeData";
 import { PAYMENT_STATE_LABEL, resolvePaymentState } from "@/lib/orderState";
@@ -71,9 +71,10 @@ export default function OrderDetail() {
   useRealtimeRow("orders", "order_id", oid, onChange);
   useRealtimeRow("deliveries", "order_id", oid, onChange);
   useRealtimeRow("drivers", "driver_id", data?.driver?.driver_id, onChange);
+  useRealtimeRow("driver_route_states", "driver_id", data?.driver?.driver_id, onChange);
 
   useEffect(() => {
-    const t = setInterval(load, 8000);
+    const t = setInterval(load, 6000);
     return () => clearInterval(t);
   }, [load]);
 
@@ -165,11 +166,13 @@ export default function OrderDetail() {
           </div>
         )}
 
-        {(data.restaurant?.latitude || data.customer?.latitude || data.driver?.latitude) && (
-          <div className="mt-6">
-            <LiveMap restaurant={data.restaurant} customer={data.customer} driver={data.driver} />
+        {data.logistics ? (
+          <CustomerLiveMapDashboard logistics={data.logistics} />
+        ) : (data.restaurant?.latitude || data.customer?.latitude || data.driver?.latitude) ? (
+          <div className="mt-6 text-sm" style={{ color: "var(--muted)" }}>
+            Live map will appear when your driver is assigned.
           </div>
-        )}
+        ) : null}
 
         <div className="card p-6 mt-6">
           <h3 className="font-display text-xl font-bold mb-4">Status</h3>

@@ -15,7 +15,10 @@ export type LogisticsMarker = {
   lat: number;
   lng: number;
   label?: string;
-  meta?: Record<string, unknown>;
+  meta?: Record<string, unknown> & {
+    heading_deg?: number;
+    speed_kmh?: number;
+  };
 };
 
 export type RoutePolyline = {
@@ -122,8 +125,10 @@ export type RestaurantPerformancePanel = {
 };
 
 export type DriverLogisticsView = {
+  driver_id?: string;
   status: DriverMapStatus;
   position: { lat: number; lng: number } | null;
+  heading_deg?: number;
   speed_kmh: number;
   remaining_distance_km: number;
   eta_min: number;

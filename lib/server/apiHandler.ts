@@ -19,6 +19,11 @@ import { handleDreamlandRequest } from "./dreamlandHandler";
 import { handleFounderDriverRequest } from "../founderDriver/handler";
 import { canUseDriverApis } from "../founderDriver/auth";
 import { handleLogisticsRequest } from "./logisticsHandler";
+import { buildCustomerTrackingView } from "../logistics/customer-tracking";
+import {
+  appendDeliveryRouteHistory,
+  persistDriverGpsSample,
+} from "../logistics/gps-persistence";
 import { handlePickupPhotoRequest } from "../pickupPhotos/handler";
 import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { handleStripeAdminRequest } from "./stripeAdmin";
@@ -427,6 +432,24 @@ export async function handleApiRequest(
         restaurant = rest;
       }
       const { data: delivery } = await db.from("deliveries").select("*").eq("order_id", oid).order("created_at", { ascending: false }).limit(1).maybeSingle();
+
+      let logistics = null;
+      try {
+        logistics = await buildCustomerTrackingView(db, o, driver, restaurant, { persistSnapshot: true });
+        if (logistics && driver?.driver_id && logistics.routing.route_polyline.length > 1) {
+          await appendDeliveryRouteHistory(
+            db,
+            oid,
+            driver.driver_id,
+            logistics.routing.route_polyline,
+            undefined,
+            logistics.routing.eta_dropoff_min
+          );
+        }
+      } catch (e) {
+        console.warn(JSON.stringify({ customer_tracking_skipped: String(e) }));
+      }
+
       return {
         order: o,
         delivery_type: o.delivery_type,
@@ -435,6 +458,8 @@ export async function handleApiRequest(
         restaurant,
         customer: o.customer_lat ? { latitude: o.customer_lat, longitude: o.customer_lng, address: o.address } : null,
         delivery,
+        logistics,
+        routing: logistics?.routing ?? null,
       };
     }
 
@@ -483,7 +508,6 @@ export async function handleApiRequest(
           availability: true,
         }).eq("driver_id", existing.driver_id);
 
-        // Routing intelligence layer — GPS stream ingestion
         try {
           const routingDb = createRoutingDbAdapter(db);
           await processGpsAndMaybeReroute(routingDb, {
@@ -492,6 +516,23 @@ export async function handleApiRequest(
             lng: body.longitude as number,
             timestamp: now,
           });
+
+          const { data: activeOrder } = await db
+            .from("orders")
+            .select("order_id")
+            .eq("driver_id", existing.driver_id)
+            .in("status", ["assigned_internal", "picked_up", "out_for_delivery", "ready"])
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          await persistDriverGpsSample(
+            db,
+            existing.driver_id,
+            body.latitude as number,
+            body.longitude as number,
+            activeOrder?.order_id
+          );
         } catch (e) {
           console.warn(JSON.stringify({ routing_gps_skipped: String(e) }));
         }

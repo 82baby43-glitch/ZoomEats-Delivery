@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import LogisticsMap from "@/components/maps/LogisticsMap";
 import { useLogisticsPoll, useLogisticsRealtime } from "@/lib/hooks/useLogisticsRealtime";
+import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { formatMoney } from "@/lib/safeData";
 import { MapPin, Navigation, DollarSign, Radio } from "lucide-react";
@@ -25,13 +26,15 @@ const STATUS_LABELS = {
 export default function DriverLiveMapDashboard() {
   const [theme, setTheme] = useState("dark");
   const fetchDriver = useCallback(() => api.get("/logistics/driver"), []);
-  const { data, loading, error, reload } = useLogisticsPoll(fetchDriver, "driver");
+  const { data, loading, error, reload } = useLogisticsPoll(fetchDriver, "driver", 6000);
 
   useLogisticsRealtime({
     role: "driver",
-    driverId: data?.position ? "active" : null,
+    driverId: data?.driver_id ?? null,
     onRefresh: reload,
   });
+
+  useRoutingRealtime(data?.driver_id, reload);
 
   if (loading && !data) {
     return (

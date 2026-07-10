@@ -29,6 +29,11 @@ import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
 import { handleFounderDriverRequest } from "../_shared/founderDriverHandler.ts";
 import { canUseDriverApis } from "../_shared/founderDriverAuth.ts";
 import { handleLogisticsRequest } from "../_shared/logisticsHandler.ts";
+import { buildCustomerTrackingView } from "../_shared/logistics/customer-tracking.ts";
+import {
+  appendDeliveryRouteHistory,
+  persistDriverGpsSample,
+} from "../_shared/logistics/gps-persistence.ts";
 import { handlePickupPhotoRequest } from "../_shared/pickupPhotosHandler.ts";
 import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
@@ -446,6 +451,24 @@ Deno.serve(async (req) => {
         restaurant = rest;
       }
       const { data: delivery } = await db.from("deliveries").select("*").eq("order_id", oid).order("created_at", { ascending: false }).limit(1).maybeSingle();
+
+      let logistics = null;
+      try {
+        logistics = await buildCustomerTrackingView(db, o, driver, restaurant, { persistSnapshot: true });
+        if (logistics && driver?.driver_id && logistics.routing.route_polyline.length > 1) {
+          await appendDeliveryRouteHistory(
+            db,
+            oid,
+            driver.driver_id,
+            logistics.routing.route_polyline,
+            undefined,
+            logistics.routing.eta_dropoff_min
+          );
+        }
+      } catch (e) {
+        console.warn(JSON.stringify({ customer_tracking_skipped: String(e) }));
+      }
+
       return json({
         order: o,
         delivery_type: o.delivery_type,
@@ -454,6 +477,8 @@ Deno.serve(async (req) => {
         restaurant,
         customer: o.customer_lat ? { latitude: o.customer_lat, longitude: o.customer_lng, address: o.address } : null,
         delivery,
+        logistics,
+        routing: logistics?.routing ?? null,
       });
     }
 
@@ -513,6 +538,23 @@ Deno.serve(async (req) => {
               timestamp: now,
             },
             { supabaseUrl, serviceKey }
+          );
+
+          const { data: activeOrder } = await db
+            .from("orders")
+            .select("order_id")
+            .eq("driver_id", existing.driver_id)
+            .in("status", ["assigned_internal", "picked_up", "out_for_delivery", "ready"])
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          await persistDriverGpsSample(
+            db,
+            existing.driver_id,
+            body.latitude as number,
+            body.longitude as number,
+            activeOrder?.order_id
           );
         } catch (e) {
           console.warn(JSON.stringify({ routing_gps_skipped: String(e) }));
