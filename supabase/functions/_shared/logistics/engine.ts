@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { haversineKm } from "../routing/geo";
-import { etaMinutesBetween } from "../routing/eta-engine";
-import { createRoutingDbAdapter } from "../routing/db-adapter";
-import { getGpsStreamState } from "../routing/gps-stream";
+import { haversineKm } from "../routing/geo.ts";
+import { etaMinutesBetween } from "../routing/eta-engine.ts";
+import { createRoutingDbAdapter } from "../routing/db-adapter.ts";
+import { getGpsStreamState } from "../routing/gps-stream.ts";
 import {
   buildRoutesFromRouteState,
   remainingDistanceKm,

@@ -1,5 +1,5 @@
-import type { DriverRouteState, GeoPoint, RouteStop } from "../routing/types";
-import { haversineKm } from "../routing/geo";
+import type { DriverRouteState, GeoPoint, RouteStop } from "../routing/types.ts";
+import { haversineKm } from "../routing/geo.ts";
 import { calculateIntelligentEta } from "./eta-service.ts";
 import type { RoutePolyline } from "./types.ts";
 

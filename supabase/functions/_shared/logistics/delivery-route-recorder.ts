@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { haversineKm } from "../routing/geo";
+import { haversineKm } from "../routing/geo.ts";
 
 const KM_TO_MILES = 0.621371;
 
