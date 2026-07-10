@@ -10,6 +10,7 @@ import { useLogisticsPoll, useLogisticsRealtime } from "@/lib/hooks/useLogistics
 import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
 import { useDriverGpsTracking } from "@/lib/hooks/useDriverGpsTracking";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
+import ExternalNavigationButtons from "@/components/logistics/ExternalNavigationButtons";
 import { Clock, MapPin, Navigation, FileText, Utensils, User } from "lucide-react";
 
 const DriverNavigationMap = dynamic(
@@ -171,6 +172,9 @@ export default function DriverNavigationScreen() {
                     Next stop
                   </div>
                   <div className="font-bold">{destination.name || destination.address}</div>
+                  <div className="mt-3">
+                    <ExternalNavigationButtons destination={destination} origin={data?.position} />
+                  </div>
                 </div>
               )}
             </div>
