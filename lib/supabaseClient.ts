@@ -27,7 +27,7 @@ export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKe
     detectSessionInUrl: true,
   },
   realtime: {
-    params: { eventsPerSecond: 10 },
+    params: { eventsPerSecond: 5 },
   },
 });
 

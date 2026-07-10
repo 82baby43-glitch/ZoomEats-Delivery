@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getGpsStreamState } from "../routing/gps-stream";
-import { pushDeliveryEvent, type RealtimeRuntime } from "./delivery-realtime.ts";
+import { getGpsStreamState } from "../dispatch/routing/gps-stream";
+import { pushDeliveryEvent, type RealtimeRuntime } from "./delivery-realtime";
 
 export type DriverTrackingMode = "offline" | "online" | "active_delivery";
 
@@ -18,6 +18,10 @@ const ACTIVE_DELIVERY_STATUSES = [
   "picked_up",
   "out_for_delivery",
 ];
+
+/** Throttle archival history rows — latest position uses upsert table. */
+const LOCATION_HISTORY_MIN_INTERVAL_MS = 5 * 60_000;
+const lastHistoryInsertMs = new Map<string, number>();
 
 export function resolveTrackingMode(
   available: boolean,
@@ -63,6 +67,65 @@ export async function findActiveOrderForDriver(
   return data ? { order_id: String(data.order_id), status: String(data.status) } : null;
 }
 
+async function upsertLatestDriverLocation(
+  db: SupabaseClient,
+  row: {
+    driver_id: string;
+    order_id: string | null;
+    latitude: number;
+    longitude: number;
+    heading: number | null;
+    speed: number | null;
+    accuracy: number | null;
+    battery_level: number | null;
+    status: DriverTrackingStatus;
+  }
+) {
+  const { error } = await db.from("driver_latest_locations").upsert(
+    {
+      driver_id: row.driver_id,
+      order_id: row.order_id,
+      latitude: row.latitude,
+      longitude: row.longitude,
+      heading: row.heading,
+      speed: row.speed,
+      accuracy: row.accuracy,
+      battery_level: row.battery_level,
+      status: row.status,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "driver_id" }
+  );
+  if (error) {
+    console.warn(JSON.stringify({ driver_latest_location_upsert_failed: error.message }));
+  }
+}
+
+async function maybeInsertLocationHistory(
+  db: SupabaseClient,
+  row: {
+    driver_id: string;
+    order_id: string | null;
+    latitude: number;
+    longitude: number;
+    heading: number | null;
+    speed: number | null;
+    accuracy: number | null;
+    battery_level: number | null;
+    status: DriverTrackingStatus;
+  }
+) {
+  const now = Date.now();
+  const last = lastHistoryInsertMs.get(row.driver_id) ?? 0;
+  if (now - last < LOCATION_HISTORY_MIN_INTERVAL_MS) return;
+  lastHistoryInsertMs.set(row.driver_id, now);
+
+  const { error } = await db.from("driver_locations").insert(row);
+  if (error) {
+    console.warn(JSON.stringify({ driver_location_history_skipped: error.message }));
+  }
+}
+
 export async function recordDriverLocation(
   db: SupabaseClient,
   input: DriverLocationInput,
@@ -87,9 +150,10 @@ export async function recordDriverLocation(
     status,
   };
 
-  const { data, error } = await db.from("driver_locations").insert(row).select("id").maybeSingle();
-  if (error) {
-    console.warn(JSON.stringify({ driver_location_insert_failed: error.message }));
+  await upsertLatestDriverLocation(db, row);
+
+  if (input.order_id && status === "active_delivery") {
+    await maybeInsertLocationHistory(db, row);
   }
 
   if (input.order_id && status === "active_delivery") {
@@ -110,13 +174,33 @@ export async function recordDriverLocation(
     );
   }
 
-  return { id: data?.id, status, order_id: input.order_id ?? null };
+  return { status, order_id: input.order_id ?? null };
 }
 
 export async function getLatestDriverLocation(
   db: SupabaseClient,
   opts: { driverId?: string; orderId?: string }
 ) {
+  if (opts.orderId) {
+    const { data: byOrder } = await db
+      .from("driver_latest_locations")
+      .select("*")
+      .eq("order_id", opts.orderId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (byOrder) return byOrder;
+  }
+
+  if (opts.driverId) {
+    const { data: latest } = await db
+      .from("driver_latest_locations")
+      .select("*")
+      .eq("driver_id", opts.driverId)
+      .maybeSingle();
+    if (latest) return latest;
+  }
+
   let query = db
     .from("driver_locations")
     .select("*")

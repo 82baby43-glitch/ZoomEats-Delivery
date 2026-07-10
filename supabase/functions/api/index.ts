@@ -34,6 +34,7 @@ import {
   appendDeliveryRouteHistory,
   persistDriverGpsSample,
 } from "../_shared/logistics/gps-persistence.ts";
+import { flushGpsBatch } from "../_shared/logistics/gps-batch-writer.ts";
 import {
   broadcastDeliveryCompleted,
   broadcastDriverArrived,
@@ -591,6 +592,7 @@ Deno.serve(async (req) => {
             battery_level: body.battery_level as number | undefined,
             status: activeOrder ? "active_delivery" : "online",
           }, runtime);
+          await flushGpsBatch(db, existing.driver_id);
         } catch (e) {
           console.warn(JSON.stringify({ routing_gps_skipped: String(e) }));
         }

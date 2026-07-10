@@ -73,7 +73,6 @@ export default function OrderDetail() {
   useRealtimeRow("deliveries", "order_id", oid, onChange);
   useRealtimeRow("drivers", "driver_id", data?.driver?.driver_id, onChange);
   useRealtimeRow("driver_route_states", "driver_id", data?.driver?.driver_id, onChange);
-  useRealtimeRow("driver_locations", "order_id", oid, onChange);
 
   const onDeliveryEvent = useCallback((event, payload) => {
     setPulse((p) => p + 1);
@@ -114,7 +113,7 @@ export default function OrderDetail() {
   useDeliveryRealtime(oid, onDeliveryEvent);
 
   useEffect(() => {
-    const t = setInterval(load, 6000);
+    const t = setInterval(load, 15000);
     return () => clearInterval(t);
   }, [load]);
 

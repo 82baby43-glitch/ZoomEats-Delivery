@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { deliveryChannelName, type DeliveryRealtimeEvent } from "@/lib/logistics/delivery-realtime";
 
@@ -9,12 +9,24 @@ import { deliveryChannelName, type DeliveryRealtimeEvent } from "@/lib/logistics
  * Events: driver_location_updated, driver_arrived, delivery_completed
  */
 export function useDeliveryRealtime(orderId, onEvent) {
+  const pausedRef = useRef(false);
+
   const stableHandler = useCallback(
     (event: DeliveryRealtimeEvent, payload: Record<string, unknown>) => {
-      if (typeof onEvent === "function") onEvent(event, payload);
+      if (pausedRef.current || typeof onEvent !== "function") return;
+      onEvent(event, payload);
     },
     [onEvent]
   );
+
+  useEffect(() => {
+    const onVis = () => {
+      pausedRef.current = document.hidden;
+    };
+    document.addEventListener("visibilitychange", onVis);
+    pausedRef.current = document.hidden;
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
 
   useEffect(() => {
     if (!supabase || !orderId) return;

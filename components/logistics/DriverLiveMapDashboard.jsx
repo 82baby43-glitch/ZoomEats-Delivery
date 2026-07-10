@@ -26,7 +26,7 @@ const STATUS_LABELS = {
 export default function DriverLiveMapDashboard() {
   const [theme, setTheme] = useState("dark");
   const fetchDriver = useCallback(() => api.get("/logistics/driver"), []);
-  const { data, loading, error, reload } = useLogisticsPoll(fetchDriver, "driver", 6000);
+  const { data, loading, error, reload } = useLogisticsPoll(fetchDriver, "driver", 12000);
 
   useLogisticsRealtime({
     role: "driver",

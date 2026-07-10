@@ -24,6 +24,7 @@ import {
   appendDeliveryRouteHistory,
   persistDriverGpsSample,
 } from "../logistics/gps-persistence";
+import { flushGpsBatch } from "../logistics/gps-batch-writer";
 import {
   broadcastDeliveryCompleted,
   broadcastDriverArrived,
@@ -571,6 +572,7 @@ export async function handleApiRequest(
             battery_level: body.battery_level as number | undefined,
             status: activeOrder ? "active_delivery" : "online",
           }, runtime);
+          await flushGpsBatch(db, existing.driver_id);
         } catch (e) {
           console.warn(JSON.stringify({ routing_gps_skipped: String(e) }));
         }

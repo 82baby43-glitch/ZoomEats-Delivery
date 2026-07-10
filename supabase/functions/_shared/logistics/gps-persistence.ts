@@ -1,8 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { GpsStreamState } from "../routing/types";
-import { getGpsStreamState } from "../routing/gps-stream";
-import type { OrderRoutingIntel } from "./route-state-helpers.ts";
+import type { GpsStreamState } from "../dispatch/routing/types";
+import { getGpsStreamState } from "../dispatch/routing/gps-stream";
+import type { OrderRoutingIntel } from "./route-state-helpers";
+import { flushGpsBatch, queueGpsSample } from "./gps-batch-writer";
 
+const etaSnapshotLastWrite = new Map<string, number>();
+const ETA_SNAPSHOT_MIN_INTERVAL_MS = 30_000;
+
+/**
+ * Queue GPS trail samples during active deliveries only.
+ * Samples are flushed in batches to reduce write amplification.
+ */
 export async function persistDriverGpsSample(
   db: SupabaseClient,
   driverId: string,
@@ -10,16 +18,21 @@ export async function persistDriverGpsSample(
   lng: number,
   activeOrderId?: string | null
 ): Promise<void> {
+  if (!activeOrderId) return;
+
   const stream = getGpsStreamState(driverId);
   try {
-    await db.from("driver_gps_samples").insert({
+    const shouldFlush = queueGpsSample({
       driver_id: driverId,
-      order_id: activeOrderId ?? null,
+      order_id: activeOrderId,
       lat,
       lng,
       heading_deg: stream?.heading_deg ?? null,
       speed_mps: stream?.speed_mps ?? null,
     });
+    if (shouldFlush) {
+      await flushGpsBatch(db, driverId);
+    }
   } catch (e) {
     console.warn(JSON.stringify({ gps_sample_skipped: String(e) }));
   }
@@ -33,6 +46,11 @@ export async function persistOrderEtaSnapshot(
   driverLng: number | null,
   routing: OrderRoutingIntel
 ): Promise<void> {
+  const now = Date.now();
+  const last = etaSnapshotLastWrite.get(orderId) ?? 0;
+  if (now - last < ETA_SNAPSHOT_MIN_INTERVAL_MS) return;
+  etaSnapshotLastWrite.set(orderId, now);
+
   try {
     await db.from("order_eta_snapshots").insert({
       order_id: orderId,
@@ -65,7 +83,7 @@ export async function appendDeliveryRouteHistory(
       .from("delivery_route_history")
       .select("id", { count: "exact", head: true })
       .eq("order_id", orderId)
-      .gte("created_at", new Date(Date.now() - 60000).toISOString());
+      .gte("created_at", new Date(Date.now() - 120000).toISOString());
     if ((count ?? 0) > 0) return;
 
     await db.from("delivery_route_history").insert({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { routingChannelName } from "@/lib/dispatch/routing/realtime-push";
 import { useRealtimeRow } from "@/lib/useRealtime";
@@ -10,12 +10,24 @@ import { useRealtimeRow } from "@/lib/useRealtime";
  * Combines Supabase broadcast (route.updated, eta.changed) + postgres_changes on driver_route_states.
  */
 export function useRoutingRealtime(driverId, onUpdate) {
+  const pausedRef = useRef(false);
+
   const stableOnUpdate = useCallback(
     (payload) => {
-      if (typeof onUpdate === "function") onUpdate(payload);
+      if (pausedRef.current || typeof onUpdate !== "function") return;
+      onUpdate(payload);
     },
     [onUpdate]
   );
+
+  useEffect(() => {
+    const onVis = () => {
+      pausedRef.current = document.hidden;
+    };
+    document.addEventListener("visibilitychange", onVis);
+    pausedRef.current = document.hidden;
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
 
   useRealtimeRow("driver_route_states", "driver_id", driverId, (payload) => {
     stableOnUpdate({ source: "postgres", ...payload });

@@ -14,7 +14,7 @@ import { ChefHat, Truck, TrendingUp, Bell, MapPin, Clock } from "lucide-react";
 export default function RestaurantLiveMapDashboard() {
   const [theme, setTheme] = useState("dark");
   const fetchRestaurant = useCallback(() => api.get("/logistics/restaurant"), []);
-  const { data, loading, error, reload } = useLogisticsPoll(fetchRestaurant, "restaurant", 6000);
+  const { data, loading, error, reload } = useLogisticsPoll(fetchRestaurant, "restaurant", 12000);
 
   useLogisticsRealtime({
     role: "restaurant",

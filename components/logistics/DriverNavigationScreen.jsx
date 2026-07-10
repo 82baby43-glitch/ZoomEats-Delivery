@@ -33,7 +33,7 @@ export default function DriverNavigationScreen() {
     return api.get(path);
   }, [orderId]);
 
-  const { data, loading, error, reload } = useLogisticsPoll(fetchNav, `driver-nav-${orderId || "active"}`, 6000);
+  const { data, loading, error, reload } = useLogisticsPoll(fetchNav, `driver-nav-${orderId || "active"}`, 12000);
 
   useLogisticsRealtime({
     role: "driver",
