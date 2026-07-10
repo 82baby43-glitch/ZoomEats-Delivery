@@ -10,6 +10,7 @@ import {
   isExternalNavSessionActive,
   startExternalNavSession,
 } from "@/lib/logistics/externalNavSession";
+import { isExternalNavReturnPingEnabled } from "@/lib/logistics/externalNavPreferences";
 
 const RETURN_PING_MS = 2500;
 const RETURN_PING_TAG = "zoomeats-external-nav-return";
@@ -45,6 +46,7 @@ export function useExternalNavHandoff(orderId?: string | null) {
   }, []);
 
   const scheduleReturnPing = useCallback(() => {
+    if (!isExternalNavReturnPingEnabled()) return;
     if (pingTimerRef.current) clearTimeout(pingTimerRef.current);
     if (pingCountRef.current >= 3) return;
     pingTimerRef.current = setTimeout(() => {
@@ -99,7 +101,9 @@ export function useExternalNavHandoff(orderId?: string | null) {
       setReturned(false);
       pingCountRef.current = 0;
 
-      await request();
+      if (isExternalNavReturnPingEnabled()) {
+        await request();
+      }
       wakeLockRef.current = await requestScreenWakeLock();
 
       const useNative = isMobileDevice() && nativeUrl;
