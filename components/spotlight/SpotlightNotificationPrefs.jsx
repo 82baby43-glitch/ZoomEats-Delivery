@@ -32,7 +32,7 @@ export default function SpotlightNotificationPrefs() {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-40 card p-3 max-w-xs shadow-lg"
+      className="fixed bottom-28 right-6 z-40 card p-3 max-w-xs shadow-lg"
       data-testid="spotlight-notification-prefs"
     >
       <label className="flex items-start gap-2 text-sm cursor-pointer">
