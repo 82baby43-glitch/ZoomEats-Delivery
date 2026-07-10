@@ -25,6 +25,7 @@ import {
 } from "../_shared/googlePlacesImport.ts";
 import { runOpenStreetMapImport } from "../_shared/openStreetMapImport.ts";
 import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
+import { handleMenuImageRequest } from "../_shared/menuImages/handler.ts";
 import { handleSpotlightRequest } from "../_shared/spotlight/handler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
 import { handleFounderDriverRequest } from "../_shared/founderDriverHandler.ts";
@@ -199,6 +200,14 @@ Deno.serve(async (req) => {
       });
       return err(`Rate limit exceeded. Retry in ${rate.retryAfterSec}s`, 429);
     }
+
+    const menuImageResult = await handleMenuImageRequest(db, {
+      path,
+      method,
+      body,
+      requireRole,
+    });
+    if (menuImageResult !== null) return json(menuImageResult);
 
     const spotlightResult = await handleSpotlightRequest(db, {
       path,

@@ -18,6 +18,7 @@ import FloatingMusicPlayer from "@/components/companion/FloatingMusicPlayer";
 import { useCompanionRealtime } from "@/lib/hooks/useCompanionRealtime";
 import { useCompanionMode } from "@/lib/hooks/useCompanionMode";
 import VendorCommunityProfile from "@/components/vendor/VendorCommunityProfile";
+import MenuImageEnhancer from "@/components/vendor/MenuImageEnhancer";
 import { useAuth } from "@/lib/auth";
 
 const STATUS_NEXT = {
@@ -328,7 +329,11 @@ function VendorDashboardInner() {
               <input className="input-field" placeholder="Name" value={item.name} onChange={(e) => setItem({ ...item, name: e.target.value })} data-testid="menu-item-name" />
               <textarea className="input-field" rows={2} placeholder="Description" value={item.description} onChange={(e) => setItem({ ...item, description: e.target.value })} />
               <input className="input-field" placeholder="Price" type="number" step="0.01" value={item.price} onChange={(e) => setItem({ ...item, price: e.target.value })} data-testid="menu-item-price" />
-              <input className="input-field" placeholder="Image URL (optional)" value={item.image_url} onChange={(e) => setItem({ ...item, image_url: e.target.value })} />
+              <MenuImageEnhancer
+                imageUrl={item.image_url}
+                onImageUrl={(url) => setItem((prev) => ({ ...prev, image_url: url }))}
+              />
+              <input className="input-field" placeholder="Or paste image URL" value={item.image_url} onChange={(e) => setItem({ ...item, image_url: e.target.value })} />
               <select className="input-field" value={item.category} onChange={(e) => setItem({ ...item, category: e.target.value })}>
                 {["Starters", "Mains", "Sides", "Desserts", "Drinks"].map((c) => <option key={c}>{c}</option>)}
               </select>
