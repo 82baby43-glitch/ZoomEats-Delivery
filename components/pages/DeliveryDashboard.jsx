@@ -19,6 +19,7 @@ import { logClientError } from "@/lib/clientErrorLog";
 import { ErrorState } from "@/components/ui/PageStates";
 import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
 import { useDriverGpsTracking } from "@/lib/hooks/useDriverGpsTracking";
+import { TRACKING_INTERVAL_MS, resolveTrackingMode } from "@/lib/logistics/driver-location-service";
 
 export default function DeliveryDashboard() {
   return (
@@ -91,7 +92,7 @@ function DeliveryDashboardInner() {
 
   useEffect(() => {
     refresh();
-    const t = setInterval(refresh, 6000);
+    const t = setInterval(refresh, 12000);
     return () => clearInterval(t);
   }, [refresh]);
 
@@ -144,6 +145,13 @@ function DeliveryDashboardInner() {
 
   const route = activeDispatch?.route;
   const routeStops = route?.remaining_stops ?? [];
+  const trackingMode = resolveTrackingMode(online, activeOrder?.status);
+  const heartbeatLabel =
+    trackingMode === "active_delivery"
+      ? `${TRACKING_INTERVAL_MS.active_delivery.min / 1000}–${TRACKING_INTERVAL_MS.active_delivery.max / 1000}s`
+      : trackingMode === "online"
+        ? `${TRACKING_INTERVAL_MS.online.min / 1000}–${TRACKING_INTERVAL_MS.online.max / 1000}s`
+        : "off";
 
   return (
     <div>
@@ -197,7 +205,7 @@ function DeliveryDashboardInner() {
             <div className="text-sm" style={{ color: "var(--muted)" }}>
               {online
                 ? coords
-                  ? <>📍 {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)} · heartbeat every {HEARTBEAT_MS/1000}s</>
+                  ? <>📍 {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)} · heartbeat every {heartbeatLabel}</>
                   : "Waiting for GPS…"
                 : "Tap the button to start receiving dispatches"}
               {geoError && <span style={{ color: "var(--primary)" }}> · {geoError}</span>}
