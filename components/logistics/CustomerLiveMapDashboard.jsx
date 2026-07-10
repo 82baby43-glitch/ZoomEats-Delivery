@@ -75,10 +75,26 @@ export default function CustomerLiveMapDashboard({ logistics, driverName }) {
           </div>
           <div className="card p-3" style={{ background: "var(--surface-2)" }}>
             <div className="text-xs font-bold uppercase tracking-wider" style={{ color: "var(--muted)" }}>ETA</div>
-            <div className="font-bold mt-1" data-testid="delivery-eta-message">{etaText}</div>
-            {routing?.eta_dropoff_min != null && (
-              <div className="text-sm mt-1" style={{ color: "var(--muted)" }}>
-                Estimated {routing.eta_dropoff_min} min to your door
+            <div className="font-bold mt-1" data-testid="delivery-eta-message">
+              {routing?.customer_eta_message || etaText}
+            </div>
+            {(routing?.remaining_distance_miles != null || routing?.current_speed_mph != null) && (
+              <div className="grid grid-cols-1 gap-1 text-sm mt-3" style={{ color: "var(--muted)" }}>
+                {routing.remaining_distance_miles != null && routing.remaining_distance_miles > 0 && (
+                  <div data-testid="eta-distance">
+                    Driver: <strong style={{ color: "var(--text)" }}>{routing.remaining_distance_miles} miles away</strong>
+                  </div>
+                )}
+                {routing.current_speed_mph != null && routing.current_speed_mph > 0 && (
+                  <div data-testid="eta-speed">
+                    Current speed: <strong style={{ color: "var(--text)" }}>{routing.current_speed_mph} mph</strong>
+                  </div>
+                )}
+                {routing.estimated_arrival_min != null && (
+                  <div data-testid="eta-arrival">
+                    Estimated arrival: <strong style={{ color: "var(--text)" }}>{routing.estimated_arrival_min} minutes</strong>
+                  </div>
+                )}
               </div>
             )}
           </div>

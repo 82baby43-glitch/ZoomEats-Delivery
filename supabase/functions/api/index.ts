@@ -34,6 +34,13 @@ import {
   appendDeliveryRouteHistory,
   persistDriverGpsSample,
 } from "../_shared/logistics/gps-persistence.ts";
+import {
+  broadcastDeliveryCompleted,
+  broadcastDriverArrived,
+  findActiveOrderForDriver,
+  getLatestDriverLocation,
+  recordDriverLocation,
+} from "../_shared/logistics/driver-location-service.ts";
 import { handlePickupPhotoRequest } from "../_shared/pickupPhotosHandler.ts";
 import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
@@ -453,8 +460,13 @@ Deno.serve(async (req) => {
       const { data: delivery } = await db.from("deliveries").select("*").eq("order_id", oid).order("created_at", { ascending: false }).limit(1).maybeSingle();
 
       let logistics = null;
+      let driver_location = null;
       try {
         logistics = await buildCustomerTrackingView(db, o, driver, restaurant, { persistSnapshot: true });
+        if (driver?.driver_id) {
+          driver_location = await getLatestDriverLocation(db, { orderId: oid })
+            ?? await getLatestDriverLocation(db, { driverId: driver.driver_id });
+        }
         if (logistics && driver?.driver_id && logistics.routing.route_polyline.length > 1) {
           await appendDeliveryRouteHistory(
             db,
@@ -479,6 +491,7 @@ Deno.serve(async (req) => {
         delivery,
         logistics,
         routing: logistics?.routing ?? null,
+        driver_location,
       });
     }
 
@@ -529,6 +542,7 @@ Deno.serve(async (req) => {
 
         try {
           const routingDb = createRoutingDbAdapter(db);
+          const runtime = { supabaseUrl, serviceKey };
           await processGpsAndMaybeReroute(
             routingDb,
             {
@@ -537,17 +551,12 @@ Deno.serve(async (req) => {
               lng: body.longitude as number,
               timestamp: now,
             },
-            { supabaseUrl, serviceKey }
+            runtime
           );
 
-          const { data: activeOrder } = await db
-            .from("orders")
-            .select("order_id")
-            .eq("driver_id", existing.driver_id)
-            .in("status", ["assigned_internal", "picked_up", "out_for_delivery", "ready"])
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
+          const activeOrder = body.order_id
+            ? { order_id: String(body.order_id), status: "active_delivery" }
+            : await findActiveOrderForDriver(db, existing.driver_id);
 
           await persistDriverGpsSample(
             db,
@@ -556,11 +565,28 @@ Deno.serve(async (req) => {
             body.longitude as number,
             activeOrder?.order_id
           );
+
+          await recordDriverLocation(db, {
+            driver_id: existing.driver_id,
+            latitude: body.latitude as number,
+            longitude: body.longitude as number,
+            order_id: activeOrder?.order_id ?? null,
+            heading: body.heading as number | undefined,
+            speed: body.speed as number | undefined,
+            accuracy: body.accuracy as number | undefined,
+            battery_level: body.battery_level as number | undefined,
+            status: activeOrder ? "active_delivery" : "online",
+          }, runtime);
         } catch (e) {
           console.warn(JSON.stringify({ routing_gps_skipped: String(e) }));
         }
 
-        return json({ ok: true, driver_id: existing.driver_id, last_seen: now });
+        return json({
+          ok: true,
+          driver_id: existing.driver_id,
+          last_seen: now,
+          order_id: (body.order_id as string) || null,
+        });
       }
       const driver = { driver_id: uid("drv"), user_id: u.user_id, latitude: body.latitude, longitude: body.longitude, availability: true, workload: 0, last_seen: now };
       await db.from("drivers").insert(driver);
@@ -614,6 +640,11 @@ Deno.serve(async (req) => {
         }
         await db.from("orders").update({ status: "picked_up", updated_at: new Date().toISOString() }).eq("order_id", oid);
         await completeRouteStopsForOrder(routingDb, d.driver_id, oid, "pickup", runtime);
+        try {
+          await broadcastDriverArrived(oid, d.driver_id, runtime);
+        } catch (e) {
+          console.warn(JSON.stringify({ driver_arrived_broadcast_skipped: String(e) }));
+        }
       } else {
         if (o.status !== "picked_up") return err("Order not picked up yet", 400);
         await db.from("orders").update({ status: "delivered", updated_at: new Date().toISOString() }).eq("order_id", oid);
@@ -622,6 +653,11 @@ Deno.serve(async (req) => {
           .from("drivers")
           .update({ workload: Math.max(0, (d.workload || 0) - 1), updated_at: new Date().toISOString() })
           .eq("driver_id", d.driver_id);
+        try {
+          await broadcastDeliveryCompleted(oid, d.driver_id, runtime);
+        } catch (e) {
+          console.warn(JSON.stringify({ delivery_completed_broadcast_skipped: String(e) }));
+        }
         try {
           await recordOrderFinancials(db, oid);
         } catch (e) {

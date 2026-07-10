@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { safeGet } from "@/lib/api";
 import { useRealtimeRow } from "@/lib/useRealtime";
+import { useDeliveryRealtime } from "@/lib/hooks/useDeliveryRealtime";
 import Header from "@/components/Header";
 import CustomerLiveMapDashboard from "@/components/logistics/CustomerLiveMapDashboard";
 import { CheckCircle2, Circle, ExternalLink, MapPin, Truck, Clock, Wifi } from "lucide-react";
@@ -72,6 +73,45 @@ export default function OrderDetail() {
   useRealtimeRow("deliveries", "order_id", oid, onChange);
   useRealtimeRow("drivers", "driver_id", data?.driver?.driver_id, onChange);
   useRealtimeRow("driver_route_states", "driver_id", data?.driver?.driver_id, onChange);
+  useRealtimeRow("driver_locations", "order_id", oid, onChange);
+
+  const onDeliveryEvent = useCallback((event, payload) => {
+    setPulse((p) => p + 1);
+    if (event === "driver_location_updated" && payload?.latitude != null) {
+      setData((prev) => {
+        if (!prev) return prev;
+        const lat = Number(payload.latitude);
+        const lng = Number(payload.longitude);
+        const nextDriver = prev.driver
+          ? { ...prev.driver, latitude: lat, longitude: lng }
+          : prev.driver;
+        const nextLogistics = prev.logistics
+          ? {
+              ...prev.logistics,
+              markers: (prev.logistics.markers || []).map((m) =>
+                m.type === "driver"
+                  ? {
+                      ...m,
+                      lat,
+                      lng,
+                      meta: {
+                        ...m.meta,
+                        heading_deg: payload.heading ?? m.meta?.heading_deg,
+                        speed_kmh: payload.speed != null ? Math.round(Number(payload.speed) * 3.6 * 10) / 10 : m.meta?.speed_kmh,
+                      },
+                    }
+                  : m
+              ),
+            }
+          : prev.logistics;
+        return { ...prev, driver: nextDriver, logistics: nextLogistics, driver_location: payload };
+      });
+    } else {
+      load();
+    }
+  }, [load]);
+
+  useDeliveryRealtime(oid, onDeliveryEvent);
 
   useEffect(() => {
     const t = setInterval(load, 6000);

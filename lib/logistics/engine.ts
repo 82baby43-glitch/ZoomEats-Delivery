@@ -8,6 +8,7 @@ import {
   remainingDistanceKm,
   computeOrderRoutingIntel,
 } from "./route-state-helpers";
+import { fetchHistoricalDeliveryMinutes } from "./eta-service";
 import type {
   AdminLogisticsView,
   DeliveryQueueItem,
@@ -268,6 +269,7 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
     label: rest.name,
   }];
   const arrivals: RestaurantLogisticsView["arrivals"] = [];
+  const historicalAvgMin = await fetchHistoricalDeliveryMinutes(db, String(rest.restaurant_id));
 
   for (const o of orders || []) {
     let driverLat: number | undefined;
@@ -304,7 +306,8 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
         driverPos,
         restaurantPt,
         customerPt,
-        String(o.driver_id)
+        String(o.driver_id),
+        historicalAvgMin
       );
       etaPickup = intel.eta_pickup_min ?? undefined;
       etaDelivery = intel.eta_dropoff_min ?? undefined;

@@ -1,6 +1,6 @@
 import type { DriverRouteState, GeoPoint, RouteStop } from "../dispatch/routing/types";
-import { etaMinutesBetween } from "../dispatch/routing/eta-engine";
 import { haversineKm } from "../dispatch/routing/geo";
+import { calculateIntelligentEta } from "./eta-service";
 import type { RoutePolyline } from "./types";
 
 export type LiveDeliveryPhase = "picking_up" | "en_route" | "arriving_soon" | "delivered" | "pending";
@@ -8,6 +8,13 @@ export type LiveDeliveryPhase = "picking_up" | "en_route" | "arriving_soon" | "d
 export type OrderRoutingIntel = {
   eta_pickup_min: number | null;
   eta_dropoff_min: number | null;
+  estimated_arrival_min?: number | null;
+  remaining_distance_km?: number;
+  remaining_distance_miles?: number;
+  current_speed_mph?: number;
+  customer_eta_message?: string | null;
+  confidence?: number;
+  used_historical_blend?: boolean;
   live_status: LiveDeliveryPhase;
   driver_heading_deg?: number;
   speed_kmh?: number;
@@ -77,7 +84,8 @@ export function computeOrderRoutingIntel(
   driverPos: GeoPoint | null,
   restaurant: GeoPoint,
   customer: GeoPoint,
-  driverId?: string
+  driverId?: string,
+  historicalAvgMin?: number | null
 ): OrderRoutingIntel {
   const remaining = routeState?.remaining_stops ?? [];
   const orderStops = stopsForOrder(remaining, orderId);
@@ -85,36 +93,18 @@ export function computeOrderRoutingIntel(
   const speedKmh = loc?.speed_mps != null ? Math.round(loc.speed_mps * 3.6 * 10) / 10 : undefined;
   const heading = loc?.heading_deg;
 
-  let etaPickup: number | null = null;
-  let etaDropoff: number | null = null;
+  const intel = calculateIntelligentEta({
+    orderId,
+    orderStatus,
+    driverPos,
+    restaurant,
+    customer,
+    driverId,
+    routeState,
+    speedKmh,
+    historicalAvgMin,
+  });
 
-  if (orderStops.length && driverPos) {
-    const pickupStop = orderStops.find((s) => s.type === "pickup");
-    const dropStop = orderStops.find((s) => s.type === "dropoff");
-    if (pickupStop?.eta_minutes != null) etaPickup = Math.round(pickupStop.eta_minutes);
-    if (dropStop?.eta_minutes != null) etaDropoff = Math.round(dropStop.eta_minutes);
-    else if (orderStops[orderStops.length - 1]?.eta_minutes != null) {
-      etaDropoff = Math.round(orderStops[orderStops.length - 1].eta_minutes!);
-    }
-  }
-
-  if (driverPos) {
-    if (etaPickup == null && restaurant.lat && !["picked_up", "out_for_delivery", "delivered"].includes(orderStatus)) {
-      etaPickup = Math.max(1, Math.round(etaMinutesBetween(driverPos, restaurant, { driverId })));
-    }
-    if (etaDropoff == null && customer.lat) {
-      const target = ["picked_up", "out_for_delivery"].includes(orderStatus) ? customer : restaurant;
-      const base = etaMinutesBetween(driverPos, target, { driverId });
-      const leg = ["picked_up", "out_for_delivery"].includes(orderStatus)
-        ? base
-        : base + etaMinutesBetween(restaurant, customer, { driverId });
-      etaDropoff = Math.max(1, Math.round(leg));
-    }
-  } else if (routeState?.total_eta_minutes) {
-    etaDropoff = Math.max(1, Math.round(routeState.total_eta_minutes));
-  }
-
-  const phase = deriveLiveDeliveryPhase(orderStatus, etaDropoff);
   const route_polyline = buildPolylineFromStops(
     driverPos,
     orderStops,
@@ -124,11 +114,18 @@ export function computeOrderRoutingIntel(
   );
 
   return {
-    eta_pickup_min: etaPickup,
-    eta_dropoff_min: etaDropoff,
-    live_status: phase,
+    eta_pickup_min: intel.eta_pickup_min,
+    eta_dropoff_min: intel.eta_dropoff_min,
+    estimated_arrival_min: intel.estimated_arrival_min,
+    remaining_distance_km: intel.remaining_distance_km,
+    remaining_distance_miles: intel.remaining_distance_miles,
+    current_speed_mph: intel.current_speed_mph,
+    customer_eta_message: intel.customer_eta_message,
+    confidence: intel.confidence,
+    used_historical_blend: intel.used_historical_blend,
+    live_status: intel.live_status,
     driver_heading_deg: heading,
-    speed_kmh: speedKmh,
+    speed_kmh: speedKmh ?? intel.current_speed_kmh,
     route_polyline,
     remaining_stops: orderStops,
   };

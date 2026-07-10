@@ -24,6 +24,13 @@ import {
   appendDeliveryRouteHistory,
   persistDriverGpsSample,
 } from "../logistics/gps-persistence";
+import {
+  broadcastDeliveryCompleted,
+  broadcastDriverArrived,
+  findActiveOrderForDriver,
+  getLatestDriverLocation,
+  recordDriverLocation,
+} from "../logistics/driver-location-service";
 import { handlePickupPhotoRequest } from "../pickupPhotos/handler";
 import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { handleStripeAdminRequest } from "./stripeAdmin";
@@ -434,8 +441,13 @@ export async function handleApiRequest(
       const { data: delivery } = await db.from("deliveries").select("*").eq("order_id", oid).order("created_at", { ascending: false }).limit(1).maybeSingle();
 
       let logistics = null;
+      let driver_location = null;
       try {
         logistics = await buildCustomerTrackingView(db, o, driver, restaurant, { persistSnapshot: true });
+        if (driver?.driver_id) {
+          driver_location = await getLatestDriverLocation(db, { orderId: oid })
+            ?? await getLatestDriverLocation(db, { driverId: driver.driver_id });
+        }
         if (logistics && driver?.driver_id && logistics.routing.route_polyline.length > 1) {
           await appendDeliveryRouteHistory(
             db,
@@ -460,6 +472,7 @@ export async function handleApiRequest(
         delivery,
         logistics,
         routing: logistics?.routing ?? null,
+        driver_location,
       };
     }
 
@@ -500,6 +513,10 @@ export async function handleApiRequest(
       const u = requireDriverOrFounder();
       const { data: existing } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
       const now = new Date().toISOString();
+      const runtime = {
+        supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+        serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      };
       if (existing) {
         await db.from("drivers").update({
           latitude: body.latitude,
@@ -507,6 +524,10 @@ export async function handleApiRequest(
           last_seen: now,
           availability: true,
         }).eq("driver_id", existing.driver_id);
+
+        const activeOrder = body.order_id
+          ? { order_id: String(body.order_id), status: "active_delivery" }
+          : await findActiveOrderForDriver(db, existing.driver_id);
 
         try {
           const routingDb = createRoutingDbAdapter(db);
@@ -517,15 +538,6 @@ export async function handleApiRequest(
             timestamp: now,
           });
 
-          const { data: activeOrder } = await db
-            .from("orders")
-            .select("order_id")
-            .eq("driver_id", existing.driver_id)
-            .in("status", ["assigned_internal", "picked_up", "out_for_delivery", "ready"])
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
           await persistDriverGpsSample(
             db,
             existing.driver_id,
@@ -533,11 +545,28 @@ export async function handleApiRequest(
             body.longitude as number,
             activeOrder?.order_id
           );
+
+          await recordDriverLocation(db, {
+            driver_id: existing.driver_id,
+            latitude: body.latitude as number,
+            longitude: body.longitude as number,
+            order_id: activeOrder?.order_id ?? null,
+            heading: body.heading as number | undefined,
+            speed: body.speed as number | undefined,
+            accuracy: body.accuracy as number | undefined,
+            battery_level: body.battery_level as number | undefined,
+            status: activeOrder ? "active_delivery" : "online",
+          }, runtime);
         } catch (e) {
           console.warn(JSON.stringify({ routing_gps_skipped: String(e) }));
         }
 
-        return { ok: true, driver_id: existing.driver_id, last_seen: now };
+        return {
+          ok: true,
+          driver_id: existing.driver_id,
+          last_seen: now,
+          order_id: activeOrder?.order_id ?? null,
+        };
       }
       const driver = { driver_id: uid("drv"), user_id: u.user_id, latitude: body.latitude, longitude: body.longitude, availability: true, workload: 0, last_seen: now };
       await db.from("drivers").insert(driver);
@@ -585,12 +614,28 @@ export async function handleApiRequest(
         if (o.status !== "assigned_internal") throwErr(`Cannot pickup from status ${o.status}`);
         await db.from("orders").update({ status: "picked_up", updated_at: new Date().toISOString() }).eq("order_id", oid);
         await db.from("deliveries").update({ status: "picked_up" }).eq("order_id", oid);
+        try {
+          await broadcastDriverArrived(oid, d.driver_id, {
+            supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+            serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+          });
+        } catch (e) {
+          console.warn(JSON.stringify({ driver_arrived_broadcast_skipped: String(e) }));
+        }
       } else {
         if (o.status !== "picked_up") throwErr(`Cannot deliver from status ${o.status}`);
         await db.from("orders").update({ status: "delivered", updated_at: new Date().toISOString() }).eq("order_id", oid);
         await db.from("deliveries").update({ status: "delivered" }).eq("order_id", oid);
         const workload = Math.max(0, Number(d.workload || 1) - 1);
         await db.from("drivers").update({ workload, last_seen: new Date().toISOString() }).eq("driver_id", d.driver_id);
+        try {
+          await broadcastDeliveryCompleted(oid, d.driver_id, {
+            supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+            serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+          });
+        } catch (e) {
+          console.warn(JSON.stringify({ delivery_completed_broadcast_skipped: String(e) }));
+        }
         try {
           await recordOrderFinancials(db, oid);
         } catch (e) {

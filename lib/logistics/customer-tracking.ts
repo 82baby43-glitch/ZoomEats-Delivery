@@ -8,6 +8,7 @@ import {
   type LiveDeliveryPhase,
   type OrderRoutingIntel,
 } from "./route-state-helpers";
+import { fetchHistoricalDeliveryMinutes } from "./eta-service";
 import { persistOrderEtaSnapshot } from "./gps-persistence";
 
 export type CustomerTrackingRouting = OrderRoutingIntel & {
@@ -32,13 +33,16 @@ async function loadRouteState(db: SupabaseClient, driverId: string): Promise<Dri
   return adapter.getDriverState(driverId);
 }
 
-function buildEtaMessage(phase: LiveDeliveryPhase, etaDropoff: number | null): string | null {
+function buildEtaMessage(
+  phase: LiveDeliveryPhase,
+  routing: OrderRoutingIntel
+): string | null {
+  if (routing.customer_eta_message) return routing.customer_eta_message;
+  const etaDropoff = routing.estimated_arrival_min ?? routing.eta_dropoff_min;
   if (phase === "delivered") return "Your order has been delivered";
   if (phase === "pending") return "Your order is being prepared";
-  if (etaDropoff == null) return "Driver is on the way";
-  if (phase === "arriving_soon") return `Driver is ${etaDropoff} minute${etaDropoff === 1 ? "" : "s"} away`;
-  if (phase === "picking_up") return `Driver arriving at restaurant in ~${etaDropoff} min`;
-  return `Driver is ${etaDropoff} minute${etaDropoff === 1 ? "" : "s"} away`;
+  if (etaDropoff == null) return "Your driver is on the way";
+  return `Your driver is approximately ${etaDropoff} minute${etaDropoff === 1 ? "" : "s"} away`;
 }
 
 export async function buildCustomerTrackingView(
@@ -75,6 +79,10 @@ export async function buildCustomerTrackingView(
     }
   }
 
+  const historicalAvgMin = order.restaurant_id
+    ? await fetchHistoricalDeliveryMinutes(db, String(order.restaurant_id))
+    : null;
+
   const routingIntel = computeOrderRoutingIntel(
     routeState,
     String(order.order_id),
@@ -82,7 +90,8 @@ export async function buildCustomerTrackingView(
     driverPos,
     restaurantPt,
     customerPt,
-    driver?.driver_id
+    driver?.driver_id,
+    historicalAvgMin
   );
 
   let driverName: string | undefined;
@@ -97,7 +106,7 @@ export async function buildCustomerTrackingView(
   const routing: CustomerTrackingRouting = {
     ...routingIntel,
     live_status_label: liveStatusLabel(routingIntel.live_status),
-    eta_message: buildEtaMessage(routingIntel.live_status, routingIntel.eta_dropoff_min),
+    eta_message: buildEtaMessage(routingIntel.live_status, routingIntel),
     driver_name: driverName,
   };
 
