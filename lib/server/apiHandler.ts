@@ -14,6 +14,7 @@ import {
   recalculateOptimalRoute,
   tryInsertOrderIntoRoute,
 } from "../dispatch/routing/uber-routing-ai";
+import { handleMenuImageRequest } from "../menuImages/handler";
 import { handleSpotlightRequest } from "../spotlight/handler";
 import { handleComplianceRequest } from "./complianceHandler";
 import { handleDreamlandRequest } from "./dreamlandHandler";
@@ -180,6 +181,14 @@ export async function handleApiRequest(
       });
       throwErr(`Rate limit exceeded. Retry in ${rate.retryAfterSec}s`, 429);
     }
+
+    const menuImageResult = await handleMenuImageRequest(db, {
+      path,
+      method,
+      body,
+      requireRole,
+    });
+    if (menuImageResult !== null) return menuImageResult;
 
     const spotlightResult = await handleSpotlightRequest(db, {
       path,
