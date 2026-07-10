@@ -162,6 +162,9 @@ function DeliveryDashboardInner() {
           <Link href="/driver/live-map" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="driver-live-map-link">
             <MapPin size={16} /> Live Map Dashboard
           </Link>
+          <Link href="/driver/navigate" className="btn-secondary inline-flex items-center gap-2 text-sm" data-testid="driver-navigation-link">
+            <Navigation size={16} /> Navigation
+          </Link>
           <CompanionModeButton href="/driver/companion" label="Companion Mode" />
         </div>
 
