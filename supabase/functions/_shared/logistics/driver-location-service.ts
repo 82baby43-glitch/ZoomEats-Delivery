@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getGpsStreamState } from "../routing/gps-stream.ts";
-import { pushDeliveryEvent, type RealtimeRuntime } from "./delivery-realtime";
+import { pushDeliveryEvent, type RealtimeRuntime } from "./delivery-realtime.ts";
 
 export type DriverTrackingMode = "offline" | "online" | "active_delivery";
 
