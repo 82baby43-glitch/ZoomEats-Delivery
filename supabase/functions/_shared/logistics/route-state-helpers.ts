@@ -15,6 +15,8 @@ export type OrderRoutingIntel = {
   customer_eta_message?: string | null;
   confidence?: number;
   used_historical_blend?: boolean;
+  fallback_level?: 1 | 2 | 3 | 4;
+  fallback_source?: string;
   live_status: LiveDeliveryPhase;
   driver_heading_deg?: number;
   speed_kmh?: number;
@@ -85,7 +87,8 @@ export function computeOrderRoutingIntel(
   restaurant: GeoPoint,
   customer: GeoPoint,
   driverId?: string,
-  historicalAvgMin?: number | null
+  historicalAvgMin?: number | null,
+  defaultEstimateMin?: number | null
 ): OrderRoutingIntel {
   const remaining = routeState?.remaining_stops ?? [];
   const orderStops = stopsForOrder(remaining, orderId);
@@ -103,6 +106,7 @@ export function computeOrderRoutingIntel(
     routeState,
     speedKmh,
     historicalAvgMin,
+    defaultEstimateMin,
   });
 
   const route_polyline = buildPolylineFromStops(
@@ -123,6 +127,8 @@ export function computeOrderRoutingIntel(
     customer_eta_message: intel.customer_eta_message,
     confidence: intel.confidence,
     used_historical_blend: intel.used_historical_blend,
+    fallback_level: intel.fallback_level,
+    fallback_source: intel.fallback_source,
     live_status: intel.live_status,
     driver_heading_deg: heading,
     speed_kmh: speedKmh ?? intel.current_speed_kmh,

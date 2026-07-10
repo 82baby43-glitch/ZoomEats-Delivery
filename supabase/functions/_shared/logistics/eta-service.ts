@@ -12,6 +12,23 @@ import {
 const KM_TO_MILES = 0.621371;
 const KMH_TO_MPH = 0.621371;
 
+/** Level 4 default when no GPS, speed profile, or history exists. */
+export const DEFAULT_ETA_MIN = 25;
+
+/** Slow urban crawl — used for physics upper bound (route truly needs long ETA). */
+const MIN_PHYSICS_SPEED_KMH = 14;
+/** Highway-ish ceiling for physics lower bound. */
+const MAX_PHYSICS_SPEED_KMH = 72;
+
+export type EtaFallbackLevel = 1 | 2 | 3 | 4;
+
+export const ETA_FALLBACK_LABELS: Record<EtaFallbackLevel, string> = {
+  1: "live_gps",
+  2: "average_driver_speed",
+  3: "historical_delivery_time",
+  4: "default_estimate",
+};
+
 export type IntelligentEtaInput = {
   orderId: string;
   orderStatus: string;
@@ -23,6 +40,8 @@ export type IntelligentEtaInput = {
   /** Live speed from GPS stream (km/h) */
   speedKmh?: number | null;
   historicalAvgMin?: number | null;
+  /** Restaurant default delivery_time_min — level 4 */
+  defaultEstimateMin?: number | null;
 };
 
 export type IntelligentEtaResult = {
@@ -38,6 +57,8 @@ export type IntelligentEtaResult = {
   customer_eta_message: string | null;
   confidence: number;
   used_historical_blend: boolean;
+  fallback_level: EtaFallbackLevel;
+  fallback_source: string;
 };
 
 function kmToMiles(km: number): number {
@@ -50,6 +71,10 @@ function kmhToMph(kmh: number): number {
 
 function isPickedUp(status: string): boolean {
   return ["picked_up", "out_for_delivery", "delivered"].includes(status);
+}
+
+function hasValidPoint(p: GeoPoint): boolean {
+  return Number.isFinite(p.lat) && Number.isFinite(p.lng) && (p.lat !== 0 || p.lng !== 0);
 }
 
 function remainingLegDistanceKm(
@@ -70,53 +95,221 @@ function remainingLegDistanceKm(
     if (total > 0) return total;
   }
 
-  if (!driverPos) return 0;
-
-  if (isPickedUp(orderStatus)) {
-    return haversineKm(driverPos, customer);
+  if (driverPos && hasValidPoint(driverPos)) {
+    if (isPickedUp(orderStatus) && hasValidPoint(customer)) {
+      return haversineKm(driverPos, customer);
+    }
+    if (hasValidPoint(restaurant) && hasValidPoint(customer)) {
+      const toRestaurant = haversineKm(driverPos, restaurant);
+      const restaurantToCustomer = haversineKm(restaurant, customer);
+      return toRestaurant + restaurantToCustomer;
+    }
   }
 
-  const toRestaurant = haversineKm(driverPos, restaurant);
-  const restaurantToCustomer = haversineKm(restaurant, customer);
-  return toRestaurant + restaurantToCustomer;
-}
+  if (hasValidPoint(restaurant) && hasValidPoint(customer)) {
+    return haversineKm(restaurant, customer);
+  }
 
-function resolveSpeedKmh(
-  driverId: string | undefined,
-  liveSpeedKmh?: number | null,
-  distanceKm?: number,
-  historicalAvgMin?: number | null
-): number {
-  if (liveSpeedKmh != null && liveSpeedKmh > 3) return Math.min(80, liveSpeedKmh);
-  if (driverId) {
-    const adaptive = getAdaptiveSpeedKmh(driverId);
-    if (adaptive > ROUTING_CONFIG.BASE_SPEED_KMH * 0.5) return adaptive;
-  }
-  if (distanceKm && historicalAvgMin && historicalAvgMin > 0) {
-    const implied = (distanceKm / historicalAvgMin) * 60;
-    if (implied >= 12 && implied <= 55) return implied;
-  }
-  return ROUTING_CONFIG.BASE_SPEED_KMH;
+  return 0;
 }
 
 function travelMinutes(
   distanceKm: number,
   speedKmh: number,
   from: GeoPoint,
-  to: GeoPoint,
-  driverId?: string
+  to: GeoPoint
 ): number {
-  if (distanceKm <= 0) return 0;
-  const segment = buildTrafficSegment(from, to, {
-    driverSpeedHistory: driverId ? undefined : undefined,
-  });
+  if (distanceKm <= 0 || speedKmh <= 0) return 0;
+  const segment = buildTrafficSegment(from, to, {});
   return (distanceKm / speedKmh) * 60 * segment.multiplier;
 }
 
-function blendEta(calculated: number, historical: number | null | undefined, weightCalc = 0.75): number {
-  if (historical == null || historical <= 0) return calculated;
-  const blended = calculated * weightCalc + historical * (1 - weightCalc);
-  return Math.max(1, Math.round(blended));
+/** Physics-based ETA window — values outside this range are unrealistic for the distance. */
+export function physicsEtaBounds(
+  distanceKm: number,
+  includePickupWait: boolean
+): { min_min: number; max_min: number } {
+  if (distanceKm <= 0) {
+    const base = includePickupWait ? ROUTING_CONFIG.PICKUP_WAIT_MIN : 1;
+    return { min_min: 1, max_min: Math.max(3, base + 2) };
+  }
+
+  const pickup = includePickupWait ? ROUTING_CONFIG.PICKUP_WAIT_MIN : 0;
+  const minMin = Math.max(1, Math.ceil((distanceKm / MAX_PHYSICS_SPEED_KMH) * 60));
+  const maxMin = Math.ceil((distanceKm / MIN_PHYSICS_SPEED_KMH) * 60 * 1.2) + pickup;
+  return { min_min: minMin, max_min: Math.max(minMin + 1, maxMin) };
+}
+
+/**
+ * Clamp ETA to a realistic window for the route distance.
+ * Prevents spurious values like "100 minutes" on a 2-mile delivery.
+ */
+export function clampEtaToRealistic(
+  etaMin: number,
+  distanceKm: number,
+  includePickupWait: boolean
+): number {
+  const { min_min, max_min } = physicsEtaBounds(distanceKm, includePickupWait);
+
+  if (distanceKm < 0.8) {
+    return Math.min(Math.max(Math.round(etaMin), 1), Math.min(max_min, 12));
+  }
+
+  const rounded = Math.round(etaMin);
+  if (rounded < min_min) return min_min;
+  if (rounded > max_min) return max_min;
+  return rounded;
+}
+
+function computeEtaFromDriverGps(
+  driverPos: GeoPoint,
+  restaurant: GeoPoint,
+  customer: GeoPoint,
+  orderStatus: string,
+  speedKmh: number
+): number {
+  if (!hasValidPoint(customer)) return 0;
+
+  if (isPickedUp(orderStatus)) {
+    const dist = haversineKm(driverPos, customer);
+    return travelMinutes(dist, speedKmh, driverPos, customer);
+  }
+
+  if (!hasValidPoint(restaurant)) return 0;
+
+  const toRest = haversineKm(driverPos, restaurant);
+  const restToCust = haversineKm(restaurant, customer);
+  return (
+    travelMinutes(toRest, speedKmh, driverPos, restaurant) +
+    ROUTING_CONFIG.PICKUP_WAIT_MIN +
+    travelMinutes(restToCust, speedKmh, restaurant, customer)
+  );
+}
+
+function level4DefaultEta(
+  distanceKm: number,
+  includePickupWait: boolean,
+  defaultEstimateMin?: number | null
+): number {
+  const distanceBased =
+    distanceKm > 0
+      ? travelMinutes(
+          distanceKm,
+          ROUTING_CONFIG.BASE_SPEED_KMH,
+          { lat: 0, lng: 0 },
+          { lat: 1, lng: 1 }
+        ) + (includePickupWait ? ROUTING_CONFIG.PICKUP_WAIT_MIN : 0)
+      : 0;
+
+  const baseline = defaultEstimateMin ?? DEFAULT_ETA_MIN;
+  const raw = distanceKm > 0
+    ? Math.round((distanceBased + baseline) / 2)
+    : baseline;
+
+  return clampEtaToRealistic(raw, distanceKm || 8, includePickupWait);
+}
+
+type ResolveDropoffParams = {
+  driverPos: GeoPoint | null;
+  restaurant: GeoPoint;
+  customer: GeoPoint;
+  orderStatus: string;
+  driverId?: string;
+  liveSpeed?: number | null;
+  historicalAvgMin?: number | null;
+  defaultEstimateMin?: number | null;
+  remainingKm: number;
+  routeState?: DriverRouteState | null;
+};
+
+function resolveDropoffEta(params: ResolveDropoffParams): {
+  eta_min: number;
+  fallback_level: EtaFallbackLevel;
+  speed_kmh: number;
+  used_historical: boolean;
+} {
+  const {
+    driverPos,
+    restaurant,
+    customer,
+    orderStatus,
+    driverId,
+    liveSpeed,
+    historicalAvgMin,
+    defaultEstimateMin,
+    remainingKm,
+    routeState,
+  } = params;
+
+  const includePickup = !isPickedUp(orderStatus);
+  const boundsKm = remainingKm > 0 ? remainingKm : Math.max(remainingLegDistanceKm(null, restaurant, customer, orderStatus, routeState), 1);
+
+  // Level 1 — current GPS + live speed
+  if (driverPos && hasValidPoint(driverPos) && liveSpeed != null && liveSpeed > 3) {
+    const raw = computeEtaFromDriverGps(driverPos, restaurant, customer, orderStatus, liveSpeed);
+    if (raw > 0) {
+      const clamped = clampEtaToRealistic(raw, boundsKm, includePickup);
+      return {
+        eta_min: clamped,
+        fallback_level: 1,
+        speed_kmh: Math.min(80, liveSpeed),
+        used_historical: false,
+      };
+    }
+  }
+
+  // Level 2 — driver position + average driver speed
+  if (driverPos && hasValidPoint(driverPos)) {
+    const avgSpeed = driverId
+      ? getAdaptiveSpeedKmh(driverId)
+      : ROUTING_CONFIG.BASE_SPEED_KMH;
+    const raw = computeEtaFromDriverGps(driverPos, restaurant, customer, orderStatus, avgSpeed);
+    if (raw > 0) {
+      const clamped = clampEtaToRealistic(raw, boundsKm, includePickup);
+      return {
+        eta_min: clamped,
+        fallback_level: 2,
+        speed_kmh: avgSpeed,
+        used_historical: false,
+      };
+    }
+  }
+
+  // Level 3 — historical delivery time
+  if (historicalAvgMin != null && historicalAvgMin > 0) {
+    let hist = historicalAvgMin;
+    if (isPickedUp(orderStatus) && boundsKm > 0) {
+      const { max_min } = physicsEtaBounds(boundsKm, false);
+      hist = Math.min(hist, max_min);
+    }
+    const clamped = clampEtaToRealistic(hist, boundsKm, includePickup);
+    return {
+      eta_min: clamped,
+      fallback_level: 3,
+      speed_kmh: ROUTING_CONFIG.BASE_SPEED_KMH,
+      used_historical: true,
+    };
+  }
+
+  // Level 4 — default estimate
+  const routeStateEta = routeState?.total_eta_minutes
+    ? clampEtaToRealistic(Number(routeState.total_eta_minutes), boundsKm, includePickup)
+    : null;
+
+  const eta = routeStateEta ?? level4DefaultEta(boundsKm, includePickup, defaultEstimateMin);
+  return {
+    eta_min: eta,
+    fallback_level: 4,
+    speed_kmh: ROUTING_CONFIG.BASE_SPEED_KMH,
+    used_historical: false,
+  };
+}
+
+function confidenceForLevel(level: EtaFallbackLevel, hasDriver: boolean): number {
+  if (level === 1) return 0.92;
+  if (level === 2) return hasDriver ? 0.8 : 0.65;
+  if (level === 3) return 0.58;
+  return 0.42;
 }
 
 function buildCustomerEtaMessage(
@@ -129,12 +322,6 @@ function buildCustomerEtaMessage(
   if (etaMin == null) return "Your driver is on the way";
   if (phase === "picking_up") {
     return `Your driver is approximately ${etaMin} minute${etaMin === 1 ? "" : "s"} from the restaurant`;
-  }
-  if (phase === "arriving_soon") {
-    return `Your driver is approximately ${etaMin} minute${etaMin === 1 ? "" : "s"} away`;
-  }
-  if (miles > 0 && miles < 5) {
-    return `Your driver is approximately ${etaMin} minute${etaMin === 1 ? "" : "s"} away (${miles} mi)`;
   }
   return `Your driver is approximately ${etaMin} minute${etaMin === 1 ? "" : "s"} away`;
 }
@@ -153,7 +340,9 @@ function buildDriverEtaMessage(
 }
 
 /**
- * Intelligent ETA — uses live GPS, route distance, driver speed, traffic, and historical delivery times.
+ * Intelligent ETA with explicit fallback chain:
+ * 1 live GPS → 2 average speed → 3 historical → 4 default.
+ * All values are clamped to physics-realistic bounds for the route distance.
  */
 export function calculateIntelligentEta(input: IntelligentEtaInput): IntelligentEtaResult {
   const {
@@ -165,6 +354,7 @@ export function calculateIntelligentEta(input: IntelligentEtaInput): Intelligent
     routeState,
     speedKmh: liveSpeed,
     historicalAvgMin,
+    defaultEstimateMin,
   } = input;
 
   const remainingKm = remainingLegDistanceKm(
@@ -175,82 +365,52 @@ export function calculateIntelligentEta(input: IntelligentEtaInput): Intelligent
     routeState
   );
   const remainingMiles = kmToMiles(remainingKm);
+  const includePickup = !isPickedUp(orderStatus);
 
-  const speedKmh = resolveSpeedKmh(driverId, liveSpeed, remainingKm, historicalAvgMin);
-  const speedMph = kmhToMph(speedKmh);
+  const dropoff = resolveDropoffEta({
+    driverPos,
+    restaurant,
+    customer,
+    orderStatus,
+    driverId,
+    liveSpeed,
+    historicalAvgMin,
+    defaultEstimateMin,
+    remainingKm,
+    routeState,
+  });
 
   let etaPickup: number | null = null;
-  let etaDropoff: number | null = null;
-  let usedHistorical = false;
-
-  if (driverPos && restaurant.lat && restaurant.lng) {
-    if (!isPickedUp(orderStatus)) {
-      const distToRest = haversineKm(driverPos, restaurant);
-      const calcPickup = travelMinutes(distToRest, speedKmh, driverPos, restaurant, driverId);
-      etaPickup = blendEta(Math.max(1, Math.round(calcPickup)), null);
-    }
-
-    if (customer.lat && customer.lng) {
-      let calcDropoff: number;
-      if (isPickedUp(orderStatus)) {
-        const dist = haversineKm(driverPos, customer);
-        calcDropoff = travelMinutes(dist, speedKmh, driverPos, customer, driverId);
-      } else {
-        const toRest = haversineKm(driverPos, restaurant);
-        const restToCust = haversineKm(restaurant, customer);
-        calcDropoff =
-          travelMinutes(toRest, speedKmh, driverPos, restaurant, driverId) +
-          ROUTING_CONFIG.PICKUP_WAIT_MIN +
-          travelMinutes(restToCust, speedKmh, restaurant, customer, driverId);
-      }
-
-      const raw = Math.max(1, Math.round(calcDropoff));
-      if (historicalAvgMin != null) {
-        etaDropoff = blendEta(raw, historicalAvgMin, isPickedUp(orderStatus) ? 0.85 : 0.7);
-        usedHistorical = true;
-      } else {
-        etaDropoff = raw;
-      }
-    }
-  } else if (routeState?.total_eta_minutes) {
-    etaDropoff = Math.max(1, Math.round(routeState.total_eta_minutes));
-  } else if (historicalAvgMin != null) {
-    etaDropoff = historicalAvgMin;
-    usedHistorical = true;
+  if (driverPos && hasValidPoint(driverPos) && hasValidPoint(restaurant) && includePickup) {
+    const speed = dropoff.speed_kmh;
+    const distToRest = haversineKm(driverPos, restaurant);
+    const rawPickup = travelMinutes(distToRest, speed, driverPos, restaurant);
+    etaPickup = clampEtaToRealistic(rawPickup, distToRest || 0.5, false);
   }
 
-  const estimatedArrival = isPickedUp(orderStatus) ? etaDropoff : etaDropoff;
+  const estimatedArrival = dropoff.eta_min;
   const phase = deriveLiveDeliveryPhase(orderStatus, estimatedArrival);
-
-  const confidence =
-    driverPos && liveSpeed != null
-      ? 0.92
-      : driverPos
-        ? 0.78
-        : historicalAvgMin != null
-          ? 0.55
-          : 0.4;
-
-  const customer_eta_message = buildCustomerEtaMessage(phase, estimatedArrival, remainingMiles);
-  const eta_message = buildDriverEtaMessage(phase, estimatedArrival, remainingMiles, speedMph);
+  const speedMph = kmhToMph(dropoff.speed_kmh);
 
   return {
     eta_pickup_min: etaPickup,
-    eta_dropoff_min: etaDropoff,
+    eta_dropoff_min: estimatedArrival,
     estimated_arrival_min: estimatedArrival,
     remaining_distance_km: Math.round(remainingKm * 100) / 100,
     remaining_distance_miles: remainingMiles,
-    current_speed_kmh: Math.round(speedKmh * 10) / 10,
+    current_speed_kmh: Math.round(dropoff.speed_kmh * 10) / 10,
     current_speed_mph: speedMph,
     live_status: phase,
-    eta_message,
-    customer_eta_message,
-    confidence: Math.round(confidence * 100) / 100,
-    used_historical_blend: usedHistorical,
+    eta_message: buildDriverEtaMessage(phase, estimatedArrival, remainingMiles, speedMph),
+    customer_eta_message: buildCustomerEtaMessage(phase, estimatedArrival, remainingMiles),
+    confidence: confidenceForLevel(dropoff.fallback_level, !!driverPos),
+    used_historical_blend: dropoff.used_historical,
+    fallback_level: dropoff.fallback_level,
+    fallback_source: ETA_FALLBACK_LABELS[dropoff.fallback_level],
   };
 }
 
-/** Historical average minutes from placed → delivered for a restaurant. */
+/** Historical median minutes from delivered orders + ETA snapshots for a restaurant. */
 export async function fetchHistoricalDeliveryMinutes(
   db: SupabaseClient,
   restaurantId: string
@@ -279,7 +439,7 @@ export async function fetchHistoricalDeliveryMinutes(
     const end = new Date(String(o.updated_at)).getTime();
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
     const min = Math.round((end - start) / 60000);
-    if (min >= 8 && min <= 90) samples.push(min);
+    if (min >= 8 && min <= 75) samples.push(min);
   }
 
   for (const s of snapshots || []) {
@@ -287,15 +447,7 @@ export async function fetchHistoricalDeliveryMinutes(
     if (min >= 3 && min <= 60) samples.push(min);
   }
 
-  if (!samples.length) {
-    const { data: rest } = await db
-      .from("restaurants")
-      .select("delivery_time_min")
-      .eq("restaurant_id", restaurantId)
-      .maybeSingle();
-    const fallback = Number(rest?.delivery_time_min);
-    return Number.isFinite(fallback) && fallback > 0 ? fallback : null;
-  }
+  if (!samples.length) return null;
 
   samples.sort((a, b) => a - b);
   const mid = Math.floor(samples.length / 2);
@@ -304,12 +456,33 @@ export async function fetchHistoricalDeliveryMinutes(
     : Math.round((samples[mid - 1] + samples[mid]) / 2);
 }
 
+export async function fetchDefaultEstimateMinutes(
+  db: SupabaseClient,
+  restaurantId: string
+): Promise<number> {
+  const { data: rest } = await db
+    .from("restaurants")
+    .select("delivery_time_min")
+    .eq("restaurant_id", restaurantId)
+    .maybeSingle();
+  const n = Number(rest?.delivery_time_min);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_ETA_MIN;
+}
+
 export async function calculateIntelligentEtaForOrder(
   db: SupabaseClient,
-  input: Omit<IntelligentEtaInput, "historicalAvgMin"> & { restaurantId?: string }
+  input: Omit<IntelligentEtaInput, "historicalAvgMin" | "defaultEstimateMin"> & {
+    restaurantId?: string;
+  }
 ): Promise<IntelligentEtaResult> {
-  const historicalAvgMin = input.restaurantId
-    ? await fetchHistoricalDeliveryMinutes(db, input.restaurantId)
-    : null;
-  return calculateIntelligentEta({ ...input, historicalAvgMin });
+  const restaurantId = input.restaurantId ?? "";
+  const [historicalAvgMin, defaultEstimateMin] = await Promise.all([
+    restaurantId ? fetchHistoricalDeliveryMinutes(db, restaurantId) : Promise.resolve(null),
+    restaurantId ? fetchDefaultEstimateMinutes(db, restaurantId) : Promise.resolve(DEFAULT_ETA_MIN),
+  ]);
+  return calculateIntelligentEta({
+    ...input,
+    historicalAvgMin,
+    defaultEstimateMin,
+  });
 }

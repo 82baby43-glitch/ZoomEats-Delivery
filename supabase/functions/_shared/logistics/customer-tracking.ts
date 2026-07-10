@@ -8,7 +8,7 @@ import {
   type LiveDeliveryPhase,
   type OrderRoutingIntel,
 } from "./route-state-helpers.ts";
-import { fetchHistoricalDeliveryMinutes } from "./eta-service.ts";
+import { fetchHistoricalDeliveryMinutes, fetchDefaultEstimateMinutes } from "./eta-service.ts";
 import { persistOrderEtaSnapshot } from "./gps-persistence.ts";
 
 export type CustomerTrackingRouting = OrderRoutingIntel & {
@@ -79,9 +79,14 @@ export async function buildCustomerTrackingView(
     }
   }
 
-  const historicalAvgMin = order.restaurant_id
-    ? await fetchHistoricalDeliveryMinutes(db, String(order.restaurant_id))
-    : null;
+  const [historicalAvgMin, defaultEstimateMin] = await Promise.all([
+    order.restaurant_id
+      ? fetchHistoricalDeliveryMinutes(db, String(order.restaurant_id))
+      : Promise.resolve(null),
+    order.restaurant_id
+      ? fetchDefaultEstimateMinutes(db, String(order.restaurant_id))
+      : Promise.resolve(25),
+  ]);
 
   const routingIntel = computeOrderRoutingIntel(
     routeState,
@@ -91,7 +96,8 @@ export async function buildCustomerTrackingView(
     restaurantPt,
     customerPt,
     driver?.driver_id,
-    historicalAvgMin
+    historicalAvgMin,
+    defaultEstimateMin
   );
 
   let driverName: string | undefined;
