@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { GpsStreamState } from "../dispatch/routing/types";
-import { getGpsStreamState } from "../dispatch/routing/gps-stream";
+import type { GpsStreamState } from "../routing/types.ts";
+import { getGpsStreamState } from "../routing/gps-stream.ts";
 import type { OrderRoutingIntel } from "./route-state-helpers";
 import { flushGpsBatch, queueGpsSample } from "./gps-batch-writer";
 

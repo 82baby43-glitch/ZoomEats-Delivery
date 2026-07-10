@@ -65,6 +65,28 @@ function orderAssignedToUser(
   return order.delivery_partner_id === userId;
 }
 
+async function resolveDriverProfile(
+  db: SupabaseClient,
+  userId: string
+): Promise<Record<string, unknown> | null> {
+  const { data: direct } = await db.from("drivers").select("*").eq("user_id", userId).maybeSingle();
+  if (direct) return direct;
+
+  const { data: user } = await db
+    .from("users")
+    .select("user_id,auth_id")
+    .or(`user_id.eq.${userId},auth_id.eq.${userId}`)
+    .maybeSingle();
+
+  const aliasIds = [...new Set([userId, user?.user_id, user?.auth_id].filter(Boolean).map(String))];
+  for (const id of aliasIds) {
+    if (id === userId) continue;
+    const { data: driver } = await db.from("drivers").select("*").eq("user_id", id).maybeSingle();
+    if (driver) return driver;
+  }
+  return null;
+}
+
 async function resolveNavigationOrder(
   db: SupabaseClient,
   userId: string,
@@ -137,8 +159,9 @@ export async function buildDriverNavigationView(
   userId: string,
   orderId?: string
 ): Promise<DriverNavigationView | null> {
-  const { data: driver } = await db.from("drivers").select("*").eq("user_id", userId).maybeSingle();
-  const order = await resolveNavigationOrder(db, userId, driver?.driver_id, orderId);
+  const driver = await resolveDriverProfile(db, userId);
+  const driverId = driver?.driver_id ? String(driver.driver_id) : null;
+  const order = await resolveNavigationOrder(db, userId, driverId, orderId);
   if (!order) return null;
 
   const routingDriverId = String(driver?.driver_id ?? order.driver_id ?? userId);

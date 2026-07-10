@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { metersBetween } from "../dispatch/routing/geo";
+import { metersBetween } from "../routing/geo.ts";
 import { ARRIVED_FEET, ARRIVING_SOON_FEET } from "./driver-approach-alerts";
 
 const METERS_TO_FEET = 3.28084;
