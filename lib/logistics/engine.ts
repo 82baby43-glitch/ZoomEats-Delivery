@@ -9,6 +9,12 @@ import {
   computeOrderRoutingIntel,
 } from "./route-state-helpers";
 import { fetchHistoricalDeliveryMinutes, fetchDefaultEstimateMinutes } from "./eta-service";
+import {
+  computeDriverApproachAlert,
+  distanceFeetBetween,
+  fetchDriverVehicleLabel,
+} from "./driver-approach-alerts";
+import type { RestaurantDriverApproachAlert } from "./types";
 import type {
   AdminLogisticsView,
   DeliveryQueueItem,
@@ -269,6 +275,7 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
     label: rest.name,
   }];
   const arrivals: RestaurantLogisticsView["arrivals"] = [];
+  const approach_alerts: RestaurantDriverApproachAlert[] = [];
   const historicalAvgMin = await fetchHistoricalDeliveryMinutes(db, String(rest.restaurant_id));
   const defaultEstimateMin = await fetchDefaultEstimateMinutes(db, String(rest.restaurant_id));
 
@@ -276,6 +283,7 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
     let driverLat: number | undefined;
     let driverLng: number | undefined;
     let driverName = "Unassigned";
+    let vehicleType = "Car";
     let etaPickup: number | undefined;
     let etaDelivery: number | undefined;
     if (o.driver_id) {
@@ -294,6 +302,7 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
       if (drv?.user_id) {
         const { data: u } = await db.from("users").select("name").eq("user_id", drv.user_id).maybeSingle();
         driverName = String(u?.name || "Driver");
+        vehicleType = await fetchDriverVehicleLabel(db, String(drv.user_id));
       }
       const adapter = createRoutingDbAdapter(db);
       const routeState = await adapter.getDriverState(String(o.driver_id));
@@ -338,12 +347,39 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
         )
       );
     }
-    if (etaPickup != null && etaPickup <= 3) {
+
+    let driverDistanceFeet: number | undefined;
+    if (driverLat && driverLng && rest.latitude) {
+      driverDistanceFeet = distanceFeetBetween(
+        { lat: driverLat, lng: driverLng },
+        { lat: Number(rest.latitude), lng: Number(rest.longitude) }
+      );
+    }
+
+    const approach = computeDriverApproachAlert({
+      order_id: String(o.order_id),
+      order_status: String(o.status),
+      driver_name: driverName,
+      vehicle_type: vehicleType,
+      driver_pos: driverLat && driverLng ? { lat: driverLat, lng: driverLng } : null,
+      restaurant: { lat: Number(rest.latitude), lng: Number(rest.longitude) },
+      eta_pickup_min: etaPickup,
+    });
+
+    if (approach) {
+      approach_alerts.push(approach);
+      arrivals.push({
+        order_id: approach.order_id,
+        message: approach.message,
+        severity: approach.severity,
+      });
+    } else if (etaPickup != null && etaPickup <= 3) {
       arrivals.push({ order_id: String(o.order_id), message: `Driver ${etaPickup} min away`, severity: "info" });
     }
     if (o.status === "ready" && age > 15) {
       arrivals.push({ order_id: String(o.order_id), message: "Driver delayed — food waiting", severity: "warning" });
     }
+
     active_orders.push({
       order_id: String(o.order_id),
       customer_name: String(o.customer_name || "Customer"),
@@ -358,8 +394,12 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
       delay_warning: age > 20 ? "Prep running long" : undefined,
       driver_lat: driverLat,
       driver_lng: driverLng,
+      driver_distance_feet: driverDistanceFeet,
       driver_rating: 4.7,
-      vehicle_type: "Car",
+      vehicle_type: vehicleType,
+      approach_alert: approach
+        ? { phase: approach.phase, message: approach.message, distance_feet: approach.distance_feet }
+        : null,
       timeline: buildKitchenTimeline(String(o.status)),
       customer_lat: Number(o.customer_lat) || undefined,
       customer_lng: Number(o.customer_lng) || undefined,
@@ -427,6 +467,7 @@ export async function buildRestaurantLogisticsView(db: SupabaseClient, userId: s
     markers,
     routes,
     active_orders,
+    approach_alerts,
     arrivals,
     performance,
     heatmap_zones,

@@ -106,11 +106,30 @@ export type RestaurantActiveOrder = {
   delay_warning?: string;
   driver_lat?: number;
   driver_lng?: number;
+  driver_distance_feet?: number;
   driver_rating?: number;
   vehicle_type?: string;
+  approach_alert?: {
+    phase: "arriving_soon" | "arrived";
+    message: string;
+    distance_feet: number;
+  } | null;
   timeline: Array<{ step: string; at?: string; done: boolean }>;
   customer_lat?: number;
   customer_lng?: number;
+};
+
+export type RestaurantDriverApproachAlert = {
+  order_id: string;
+  phase: "arriving_soon" | "arrived";
+  message: string;
+  distance_feet: number;
+  driver_name: string;
+  vehicle_type: string;
+  driver_lat: number;
+  driver_lng: number;
+  eta_pickup_min?: number;
+  severity: "info" | "success";
 };
 
 export type RestaurantPerformancePanel = {
@@ -147,6 +166,7 @@ export type RestaurantLogisticsView = {
   markers: LogisticsMarker[];
   routes: RoutePolyline[];
   active_orders: RestaurantActiveOrder[];
+  approach_alerts: RestaurantDriverApproachAlert[];
   arrivals: Array<{ order_id: string; message: string; severity: "info" | "warning" | "success" }>;
   performance: RestaurantPerformancePanel;
   heatmap_zones: DemandHotspot[];
