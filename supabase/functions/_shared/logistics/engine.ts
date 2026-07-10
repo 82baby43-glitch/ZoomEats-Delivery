@@ -30,6 +30,7 @@ import type {
   RoutePolyline,
 } from "./types.ts";
 import { buildDispatchExplain } from "./dispatchExplain.ts";
+import { fetchDeliveryDemandZonesAsHotspots } from "./delivery-demand-zones.ts";
 
 const ACTIVE_ORDER_STATUSES = [
   "placed", "confirmed", "accepted", "preparing", "ready",
@@ -228,8 +229,7 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
     }
   }
 
-  const { data: demandOrders } = await db.from("orders").select("customer_lat,customer_lng,restaurant_name,created_at").gte("created_at", new Date(Date.now() - 3600000).toISOString()).limit(100);
-  const hotspots = buildHotspots(demandOrders || [], []);
+  const hotspots = await fetchDeliveryDemandZonesAsHotspots(db, "1h");
 
   const dispatch = await Promise.all(
     (orders || []).slice(0, 3).map((o) => buildDispatchExplain(db, o, o.driver_id as string | undefined))
