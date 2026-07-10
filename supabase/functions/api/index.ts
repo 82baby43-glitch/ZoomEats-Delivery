@@ -41,6 +41,7 @@ import {
   getLatestDriverLocation,
   recordDriverLocation,
 } from "../_shared/logistics/driver-location-service.ts";
+import { recordDeliveryMetrics } from "../_shared/logistics/delivery-metrics-recorder.ts";
 import { recordCompletedDeliveryRoute } from "../_shared/logistics/delivery-route-recorder.ts";
 import { handlePickupPhotoRequest } from "../_shared/pickupPhotosHandler.ts";
 import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
@@ -527,6 +528,11 @@ Deno.serve(async (req) => {
           console.warn(JSON.stringify({ delivery_route_skipped: String(e), order_id: oid }));
         }
         try {
+          await recordDeliveryMetrics(db, oid);
+        } catch (e) {
+          console.warn(JSON.stringify({ delivery_metrics_skipped: String(e), order_id: oid }));
+        }
+        try {
           await recordOrderFinancials(db, oid);
         } catch (e) {
           console.warn(JSON.stringify({ financial_ledger_skipped: String(e), order_id: oid }));
@@ -670,6 +676,11 @@ Deno.serve(async (req) => {
           await recordCompletedDeliveryRoute(db, oid, d.driver_id);
         } catch (e) {
           console.warn(JSON.stringify({ delivery_route_skipped: String(e), order_id: oid }));
+        }
+        try {
+          await recordDeliveryMetrics(db, oid);
+        } catch (e) {
+          console.warn(JSON.stringify({ delivery_metrics_skipped: String(e), order_id: oid }));
         }
         try {
           await recordOrderFinancials(db, oid);

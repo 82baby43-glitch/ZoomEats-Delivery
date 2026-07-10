@@ -31,6 +31,7 @@ import {
   getLatestDriverLocation,
   recordDriverLocation,
 } from "../logistics/driver-location-service";
+import { recordDeliveryMetrics } from "../logistics/delivery-metrics-recorder";
 import { recordCompletedDeliveryRoute } from "../logistics/delivery-route-recorder";
 import { handlePickupPhotoRequest } from "../pickupPhotos/handler";
 import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
@@ -508,6 +509,11 @@ export async function handleApiRequest(
           console.warn(JSON.stringify({ delivery_route_skipped: String(e), order_id: oid }));
         }
         try {
+          await recordDeliveryMetrics(db, oid);
+        } catch (e) {
+          console.warn(JSON.stringify({ delivery_metrics_skipped: String(e), order_id: oid }));
+        }
+        try {
           await recordOrderFinancials(db, oid);
         } catch (e) {
           console.warn(JSON.stringify({ financial_ledger_skipped: String(e), order_id: oid }));
@@ -648,6 +654,11 @@ export async function handleApiRequest(
           await recordCompletedDeliveryRoute(db, oid, d.driver_id);
         } catch (e) {
           console.warn(JSON.stringify({ delivery_route_skipped: String(e), order_id: oid }));
+        }
+        try {
+          await recordDeliveryMetrics(db, oid);
+        } catch (e) {
+          console.warn(JSON.stringify({ delivery_metrics_skipped: String(e), order_id: oid }));
         }
         try {
           await recordOrderFinancials(db, oid);
