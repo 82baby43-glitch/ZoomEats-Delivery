@@ -25,7 +25,7 @@ export type CustomerTrackingView = {
 };
 
 const ACTIVE_TRACKING = [
-  "ready", "assigned_internal", "assigned_uber", "picked_up", "out_for_delivery",
+  "ready", "assigned_internal", "assigned_uber", "arrived_at_store", "picked_up", "out_for_delivery", "arrived_at_customer",
 ];
 
 async function loadRouteState(db: SupabaseClient, driverId: string): Promise<DriverRouteState | null> {

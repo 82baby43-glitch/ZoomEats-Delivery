@@ -3,11 +3,6 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { createRoutingDbAdapter } from "../_shared/routing/db-adapter.ts";
-import { selectOptimalDriverForOrder } from "../_shared/routing/dispatch-routing.ts";
-import {
-  initializeRouteForOrder,
-  tryInsertOrderIntoRoute,
-} from "../_shared/routing/uber-routing-ai.ts";
 import {
   buildManifestFromOrderItems,
   dispatchOrderViaUberDirect,
@@ -205,6 +200,8 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "order_coords_missing" }), { status: 404 });
   }
 
+  // Internal driver assignment deferred to offer-order when restaurant accepts.
+  // Payment-time dispatch only handles Uber Direct fallback when preferred.
   if (uberCfg?.enabled && uberCfg.preferred) {
     try {
       return await assignUberDirect(db, order as OrderRow);
@@ -217,99 +214,13 @@ Deno.serve(async (req) => {
     }
   }
 
-  const proposal = await selectOptimalDriverForOrder(db, routingDb, orderRef);
-
-  let driver = null;
-  if (proposal) {
-    const { data } = await db.from("drivers").select("*").eq("driver_id", proposal.driverId).maybeSingle();
-    driver = data;
-  }
-
-  if (!driver) {
-    const { data: drivers } = await db
-      .from("drivers")
-      .select("*")
-      .eq("availability", true)
-      .order("workload", { ascending: true })
-      .limit(1);
-    driver = drivers?.[0] ?? null;
-  }
-
-  if (!driver) {
-    if (uberCfg?.enabled) {
-      try {
-        return await assignUberDirect(db, order as OrderRow);
-      } catch (e) {
-        console.error(JSON.stringify({ uber_direct_failed: String(e), order_id: orderId }));
-        return new Response(
-          JSON.stringify({ ok: true, order_id: orderId, driver_id: null, reason: "no_drivers_uber_failed", detail: String(e) }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
-      }
-    }
-
-    return new Response(JSON.stringify({ ok: true, order_id: orderId, driver_id: null, reason: "no_drivers" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const trackingId = `trk_${orderId}`;
-  const { error: updateError } = await db
-    .from("orders")
-    .update({
-      driver_id: driver.driver_id,
-      status: "assigned_internal",
-      delivery_type: "internal",
-      tracking_id: trackingId,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("order_id", orderId)
-    .eq("payment_status", "paid")
-    .is("driver_id", null);
-
-  if (updateError) {
-    console.error(JSON.stringify({ error: updateError.message, order_id: orderId }));
-    return new Response(JSON.stringify({ error: updateError.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  await db.from("drivers").update({ workload: (driver.workload || 0) + 1 }).eq("driver_id", driver.driver_id);
-
-  await db.from("deliveries").insert({
-    delivery_id: `dlv_${crypto.randomUUID().slice(0, 12)}`,
-    order_id: orderId,
-    provider: "internal",
-    tracking_id: trackingId,
-    status: "assigned",
-    driver_id: driver.driver_id,
-  });
-
-  const routingMode = proposal?.mode ?? "init";
-  try {
-    if (routingMode === "insert") {
-      await tryInsertOrderIntoRoute(routingDb, driver.driver_id, orderRef, runtime);
-    } else {
-      await initializeRouteForOrder(
-        routingDb,
-        driver.driver_id,
-        orderRef,
-        { lat: driver.latitude ?? 0, lng: driver.longitude ?? 0 },
-        runtime
-      );
-    }
-  } catch (e) {
-    console.warn(JSON.stringify({ routing_hook_skipped: String(e), order_id: orderId, mode: routingMode }));
-  }
-
   return new Response(
     JSON.stringify({
       ok: true,
       order_id: orderId,
-      driver_id: driver.driver_id,
-      routing: routingMode,
+      driver_id: null,
+      reason: "deferred_to_driver_offers",
+      message: "Driver offers begin when restaurant accepts the order",
     }),
     { status: 200, headers: { "Content-Type": "application/json" } }
   );

@@ -15,6 +15,12 @@ import { useCompanionRealtime } from "@/lib/hooks/useCompanionRealtime";
 import { useAuth } from "@/lib/auth";
 import { formatMoney, sanitizeOrders, sanitizeWallet } from "@/lib/safeData";
 import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
+import DriverDeliveryWorkflow from "@/components/driver/DriverDeliveryWorkflow";
+import DriverOrderOfferModal from "@/components/driver/DriverOrderOfferModal";
+import { getDriverDeviceId } from "@/lib/driverDeviceId";
+import { useDriverOfferRealtime } from "@/lib/hooks/useDriverOfferRealtime";
+import { useWebPush } from "@/lib/useWebPush";
+import { primeDriverOfferSound } from "@/lib/driverOfferSound";
 import { logClientError } from "@/lib/clientErrorLog";
 import { ErrorState } from "@/components/ui/PageStates";
 import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
@@ -37,9 +43,11 @@ function DeliveryDashboardInner() {
   const [wallet, setWallet] = useState({ available: 0.0, pending: 0.0 });
   const [payoutAmt, setPayoutAmt] = useState(0.0);
   const [loadError, setLoadError] = useState(false);
+  const [incomingOffer, setIncomingOffer] = useState(null);
+  const deviceId = typeof window !== "undefined" ? getDriverDeviceId() : "";
   const dispatchOrders = activeDispatch?.orders ?? [];
   const activeOrder = dispatchOrders[0] ?? mine.find((o) =>
-    ["assigned_internal", "picked_up", "out_for_delivery", "ready"].includes(o.status)
+    ["assigned_internal", "arrived_at_store", "picked_up", "out_for_delivery", "arrived_at_customer", "ready"].includes(o.status)
   );
   const { coords, geoError } = useDriverGpsTracking({
     enabled: online,
@@ -50,6 +58,7 @@ function DeliveryDashboardInner() {
   const [founderMode, setFounderMode] = useState(false);
   const { user } = useAuth();
   const { settings: companionSettings } = useCompanionMode();
+  const { request: requestPush } = useWebPush("ZoomEats Driver");
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -101,6 +110,43 @@ function DeliveryDashboardInner() {
     refresh();
   });
 
+  const loadActiveOffer = useCallback(async () => {
+    if (!online || !driverId) return;
+    try {
+      const res = await api.get("/driver/offers/active", { params: { device_id: deviceId } });
+      const offer = res?.data?.offer ?? res?.offer;
+      if (offer && !res?.data?.locked_elsewhere && !res?.locked_elsewhere) {
+        setIncomingOffer({
+          ...offer,
+          ttl_seconds: offer.ttl_seconds ?? Math.max(0, Math.ceil((new Date(offer.expires_at).getTime() - Date.now()) / 1000)),
+        });
+      }
+    } catch (e) {
+      logClientError("delivery.activeOffer", e);
+    }
+  }, [online, driverId, deviceId]);
+
+  useEffect(() => {
+    if (online) loadActiveOffer();
+  }, [online, loadActiveOffer]);
+
+  useEffect(() => {
+    if (!online) return;
+    const t = setInterval(loadActiveOffer, 5000);
+    return () => clearInterval(t);
+  }, [online, loadActiveOffer]);
+
+  useDriverOfferRealtime(driverId, (payload) => {
+    if (payload?.event === "offer_accepted") {
+      setIncomingOffer(null);
+      refresh();
+      return;
+    }
+    if (payload?.offer_id) {
+      setIncomingOffer(payload);
+    }
+  });
+
   useCompanionRealtime({
     role: "driver",
     userId: user?.user_id,
@@ -121,6 +167,13 @@ function DeliveryDashboardInner() {
     }
     try {
       await api.post("/driver/availability", { available: next });
+      if (next) {
+        primeDriverOfferSound();
+        requestPush();
+        loadActiveOffer();
+      } else {
+        setIncomingOffer(null);
+      }
     } catch (e) {
       logClientError("delivery.toggleOnline", e);
     }
@@ -156,6 +209,13 @@ function DeliveryDashboardInner() {
   return (
     <div>
       <Header />
+      {incomingOffer && (
+        <DriverOrderOfferModal
+          offer={incomingOffer}
+          onClear={() => setIncomingOffer(null)}
+          onRefresh={refresh}
+        />
+      )}
       <div className="max-w-5xl mx-auto px-6 md:px-12 py-12">
         {founderMode && (
           <div className="card p-4 mb-6 flex flex-wrap items-center justify-between gap-3" style={{ borderColor: "var(--accent)" }} data-testid="founder-driver-banner">
@@ -317,24 +377,13 @@ function DeliveryDashboardInner() {
                       <span className="badge mt-2">{o.status ?? "unknown"}</span>
                     </div>
                     <div className="flex flex-col items-end gap-2 shrink-0">
-                      {(o.status === "assigned_internal" || o.status === "picked_up") && (
-                        <Link href={`/driver/navigate/${o.order_id}`} className="btn-secondary !py-2 text-sm inline-flex items-center gap-1">
-                          <Navigation size={14} /> Navigate
-                        </Link>
-                      )}
-                      {o.status === "assigned_internal" && (
-                        <button className="btn-primary !py-2" onClick={() => action(o.order_id, "accept", true)} data-testid={`pickup-${o.order_id}`}>
-                          Pickup
-                        </button>
-                      )}
-                      {o.status === "picked_up" && (
-                        <button className="btn-primary !py-2" onClick={() => action(o.order_id, "deliver", true)} data-testid={`deliver-${o.order_id}`}>
-                          Mark delivered
-                        </button>
-                      )}
+                      <Link href={`/driver/navigate/${o.order_id}`} className="btn-secondary !py-2 text-sm inline-flex items-center gap-1">
+                        <Navigation size={14} /> Navigate
+                      </Link>
                     </div>
                   </div>
-                  {(o.status === "assigned_internal" || o.status === "ready") && (
+                  <DriverDeliveryWorkflow order={o} coords={coords} onRefresh={refresh} />
+                  {(o.status === "assigned_internal" || o.status === "arrived_at_store" || o.status === "ready") && (
                     <PickupPhotoInstructions orderId={o.order_id} compact />
                   )}
                 </div>
@@ -373,26 +422,20 @@ function DeliveryDashboardInner() {
           ) : (
             <div className="space-y-3">
               {mine.map((o) => (
-                <div key={o.order_id} className="card p-5 flex items-center justify-between" data-testid={`mine-${o.order_id}`}>
-                  <div>
-                    <div className="font-bold">{o.restaurant_name ?? "Unknown Restaurant"}</div>
-                    <div className="text-sm" style={{ color: "var(--muted)" }}>{o.address || "—"}</div>
-                    <div className="badge mt-2">{o.status ?? "unknown"}</div>
-                  </div>
-                  {o.status === "picked_up" && (
-                    <div className="flex flex-col items-end gap-2 shrink-0">
-                      <Link href={`/driver/navigate/${o.order_id}`} className="btn-secondary !py-2 text-sm inline-flex items-center gap-1">
+                <div key={o.order_id} className="card p-5 space-y-4" data-testid={`mine-${o.order_id}`}>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="font-bold">{o.restaurant_name ?? "Unknown Restaurant"}</div>
+                      <div className="text-sm" style={{ color: "var(--muted)" }}>{o.address || "—"}</div>
+                      <div className="badge mt-2">{o.status ?? "unknown"}</div>
+                    </div>
+                    {["picked_up", "out_for_delivery", "arrived_at_customer", "assigned_internal", "arrived_at_store"].includes(o.status) && (
+                      <Link href={`/driver/navigate/${o.order_id}`} className="btn-secondary !py-2 text-sm inline-flex items-center gap-1 shrink-0">
                         <Navigation size={14} /> Navigate
                       </Link>
-                      <button
-                      className="btn-primary !py-2"
-                      onClick={() => action(o.order_id, "deliver", o.delivery_type === "internal")}
-                      data-testid={`deliver-mine-${o.order_id}`}
-                    >
-                      Mark delivered
-                    </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                  <DriverDeliveryWorkflow order={o} coords={coords} onRefresh={refresh} />
                 </div>
               ))}
             </div>

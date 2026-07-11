@@ -1,12 +1,13 @@
 export type DeliveryRealtimeEvent =
   | "driver_location_updated"
   | "driver_arrived"
-  | "delivery_completed";
+  | "delivery_completed"
+  | "delivery_milestone";
 
 export type DriverLocationBroadcast = {
   event: DeliveryRealtimeEvent;
   order_id: string;
-  driver_id: string;
+  driver_id?: string;
   latitude?: number;
   longitude?: number;
   heading?: number | null;
@@ -14,6 +15,9 @@ export type DriverLocationBroadcast = {
   accuracy?: number | null;
   battery_level?: number | null;
   status?: string;
+  milestone?: string;
+  message?: string;
+  phase?: string;
   ts: string;
 };
 

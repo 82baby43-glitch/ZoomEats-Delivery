@@ -44,6 +44,9 @@ verify_jwt = false
 [functions.dispatch-order]
 verify_jwt = false
 
+[functions.offer-order]
+verify_jwt = false
+
 # Routing intelligence layer — GPS ingestion + continuous optimization loop.
 [functions.routing-engine]
 verify_jwt = false

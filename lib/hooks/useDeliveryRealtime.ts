@@ -42,6 +42,9 @@ export function useDeliveryRealtime(orderId, onEvent) {
       .on("broadcast", { event: "delivery_completed" }, (msg) => {
         stableHandler("delivery_completed", msg.payload ?? {});
       })
+      .on("broadcast", { event: "delivery_milestone" }, (msg) => {
+        stableHandler("delivery_milestone", msg.payload ?? {});
+      })
       .subscribe();
 
     return () => {

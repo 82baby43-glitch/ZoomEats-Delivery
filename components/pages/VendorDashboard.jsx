@@ -50,6 +50,7 @@ function VendorDashboardInner() {
   const { permission, request, fire } = useWebPush("ZoomEats Kitchen");
   // Track which "placed" orders have already been notified so we don't ping on every poll.
   const notifiedRef = useRef(new Set());
+  const driverAssignedRef = useRef(new Set());
   // First load is silent — only orders that *arrive* after mount trigger a notification.
   const primedRef = useRef(false);
   const { user } = useAuth();
@@ -93,6 +94,22 @@ function VendorDashboardInner() {
         orderList.forEach((x) => {
           if (x.status === "placed") notifiedRef.current.add(x.order_id);
         });
+
+        const newlyAssigned = orderList.filter(
+          (x) => (x.status === "assigned_internal" || x.driver_id) && !driverAssignedRef.current.has(x.order_id)
+        );
+        if (primedRef.current && newlyAssigned.length > 0) {
+          newlyAssigned.forEach((x) => {
+            fire("Driver assigned", `A driver is heading to pick up order #${String(x.order_id).slice(-6)}`, {
+              tag: `driver-${x.order_id}`,
+            });
+            playChime();
+          });
+        }
+        orderList.forEach((x) => {
+          if (x.status === "assigned_internal" || x.driver_id) driverAssignedRef.current.add(x.order_id);
+        });
+
         primedRef.current = true;
       }
     } catch (e) {
