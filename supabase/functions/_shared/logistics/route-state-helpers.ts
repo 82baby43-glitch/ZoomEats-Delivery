@@ -30,7 +30,8 @@ export function deriveLiveDeliveryPhase(
 ): LiveDeliveryPhase {
   if (orderStatus === "delivered") return "delivered";
   if (["placed", "confirmed", "accepted", "preparing"].includes(orderStatus)) return "pending";
-  if (["ready", "assigned_internal", "assigned_uber"].includes(orderStatus)) return "picking_up";
+  if (["ready", "assigned_internal", "assigned_uber", "arrived_at_store"].includes(orderStatus)) return "picking_up";
+  if (orderStatus === "arrived_at_customer") return "arriving_soon";
   if (etaDropoffMin != null && etaDropoffMin <= 3) return "arriving_soon";
   if (["picked_up", "out_for_delivery"].includes(orderStatus)) return "en_route";
   return "pending";

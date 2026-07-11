@@ -15,6 +15,7 @@ import { useCompanionRealtime } from "@/lib/hooks/useCompanionRealtime";
 import { useAuth } from "@/lib/auth";
 import { formatMoney, sanitizeOrders, sanitizeWallet } from "@/lib/safeData";
 import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
+import DriverDeliveryWorkflow from "@/components/driver/DriverDeliveryWorkflow";
 import { logClientError } from "@/lib/clientErrorLog";
 import { ErrorState } from "@/components/ui/PageStates";
 import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
@@ -39,7 +40,7 @@ function DeliveryDashboardInner() {
   const [loadError, setLoadError] = useState(false);
   const dispatchOrders = activeDispatch?.orders ?? [];
   const activeOrder = dispatchOrders[0] ?? mine.find((o) =>
-    ["assigned_internal", "picked_up", "out_for_delivery", "ready"].includes(o.status)
+    ["assigned_internal", "arrived_at_store", "picked_up", "out_for_delivery", "arrived_at_customer", "ready"].includes(o.status)
   );
   const { coords, geoError } = useDriverGpsTracking({
     enabled: online,
@@ -317,24 +318,13 @@ function DeliveryDashboardInner() {
                       <span className="badge mt-2">{o.status ?? "unknown"}</span>
                     </div>
                     <div className="flex flex-col items-end gap-2 shrink-0">
-                      {(o.status === "assigned_internal" || o.status === "picked_up") && (
-                        <Link href={`/driver/navigate/${o.order_id}`} className="btn-secondary !py-2 text-sm inline-flex items-center gap-1">
-                          <Navigation size={14} /> Navigate
-                        </Link>
-                      )}
-                      {o.status === "assigned_internal" && (
-                        <button className="btn-primary !py-2" onClick={() => action(o.order_id, "accept", true)} data-testid={`pickup-${o.order_id}`}>
-                          Pickup
-                        </button>
-                      )}
-                      {o.status === "picked_up" && (
-                        <button className="btn-primary !py-2" onClick={() => action(o.order_id, "deliver", true)} data-testid={`deliver-${o.order_id}`}>
-                          Mark delivered
-                        </button>
-                      )}
+                      <Link href={`/driver/navigate/${o.order_id}`} className="btn-secondary !py-2 text-sm inline-flex items-center gap-1">
+                        <Navigation size={14} /> Navigate
+                      </Link>
                     </div>
                   </div>
-                  {(o.status === "assigned_internal" || o.status === "ready") && (
+                  <DriverDeliveryWorkflow order={o} coords={coords} onRefresh={refresh} />
+                  {(o.status === "assigned_internal" || o.status === "arrived_at_store" || o.status === "ready") && (
                     <PickupPhotoInstructions orderId={o.order_id} compact />
                   )}
                 </div>
@@ -373,26 +363,20 @@ function DeliveryDashboardInner() {
           ) : (
             <div className="space-y-3">
               {mine.map((o) => (
-                <div key={o.order_id} className="card p-5 flex items-center justify-between" data-testid={`mine-${o.order_id}`}>
-                  <div>
-                    <div className="font-bold">{o.restaurant_name ?? "Unknown Restaurant"}</div>
-                    <div className="text-sm" style={{ color: "var(--muted)" }}>{o.address || "—"}</div>
-                    <div className="badge mt-2">{o.status ?? "unknown"}</div>
-                  </div>
-                  {o.status === "picked_up" && (
-                    <div className="flex flex-col items-end gap-2 shrink-0">
-                      <Link href={`/driver/navigate/${o.order_id}`} className="btn-secondary !py-2 text-sm inline-flex items-center gap-1">
+                <div key={o.order_id} className="card p-5 space-y-4" data-testid={`mine-${o.order_id}`}>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="font-bold">{o.restaurant_name ?? "Unknown Restaurant"}</div>
+                      <div className="text-sm" style={{ color: "var(--muted)" }}>{o.address || "—"}</div>
+                      <div className="badge mt-2">{o.status ?? "unknown"}</div>
+                    </div>
+                    {["picked_up", "out_for_delivery", "arrived_at_customer", "assigned_internal", "arrived_at_store"].includes(o.status) && (
+                      <Link href={`/driver/navigate/${o.order_id}`} className="btn-secondary !py-2 text-sm inline-flex items-center gap-1 shrink-0">
                         <Navigation size={14} /> Navigate
                       </Link>
-                      <button
-                      className="btn-primary !py-2"
-                      onClick={() => action(o.order_id, "deliver", o.delivery_type === "internal")}
-                      data-testid={`deliver-mine-${o.order_id}`}
-                    >
-                      Mark delivered
-                    </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                  <DriverDeliveryWorkflow order={o} coords={coords} onRefresh={refresh} />
                 </div>
               ))}
             </div>

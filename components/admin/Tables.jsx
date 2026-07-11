@@ -1,7 +1,9 @@
 "use client";
 
+import { Fragment, useState } from "react";
 import { formatMoney, safeOrderId, sanitizeUsers, sanitizeRestaurants, sanitizeOrders } from "@/lib/safeData";
 import { EmptyState } from "@/components/ui/PageStates";
+import AdminDeliveryTimeline from "@/components/admin/AdminDeliveryTimeline";
 
 export function UsersTable({ users }) {
   const rows = sanitizeUsers(users);
@@ -110,6 +112,7 @@ export function RestaurantsList({ restaurants, onApprove, onEditLocation }) {
 
 export function OrdersTable({ orders }) {
   const rows = sanitizeOrders(orders);
+  const [expanded, setExpanded] = useState(null);
 
   if (rows.length === 0) {
     return <EmptyState title="No orders" description="Orders will appear here as customers place them." />;
@@ -126,18 +129,33 @@ export function OrdersTable({ orders }) {
             <th className="text-right p-3">Total</th>
             <th className="text-left p-3">Status</th>
             <th className="text-left p-3">Payment</th>
+            <th className="text-left p-3">Delivery</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((o) => (
-            <tr key={o.order_id} className="border-t" style={{ borderColor: "var(--border)" }}>
-              <td className="p-3 font-mono">#{safeOrderId(o.order_id)}</td>
-              <td className="p-3">{o.restaurant_name}</td>
-              <td className="p-3">{o.customer_name}</td>
-              <td className="p-3 text-right font-bold">${formatMoney(o.total)}</td>
-              <td className="p-3"><span className="badge">{o.status}</span></td>
-              <td className="p-3"><span className="badge">{o.payment_status ?? "pending"}</span></td>
-            </tr>
+            <Fragment key={o.order_id}>
+              <tr className="border-t" style={{ borderColor: "var(--border)" }}>
+                <td className="p-3 font-mono">#{safeOrderId(o.order_id)}</td>
+                <td className="p-3">{o.restaurant_name}</td>
+                <td className="p-3">{o.customer_name}</td>
+                <td className="p-3 text-right font-bold">${formatMoney(o.total)}</td>
+                <td className="p-3"><span className="badge">{o.status}</span></td>
+                <td className="p-3"><span className="badge">{o.payment_status ?? "pending"}</span></td>
+                <td className="p-3">
+                  <button type="button" className="btn-ghost !py-1 text-xs" onClick={() => setExpanded(expanded === o.order_id ? null : o.order_id)}>
+                    {expanded === o.order_id ? "Hide" : "Timeline"}
+                  </button>
+                </td>
+              </tr>
+              {expanded === o.order_id && (
+                <tr>
+                  <td colSpan={7} className="p-3">
+                    <AdminDeliveryTimeline orderId={o.order_id} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>

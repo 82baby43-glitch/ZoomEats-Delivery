@@ -13,6 +13,10 @@ export default function Cart() {
   const { user } = useAuth();
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
+  const [deliveryMethod, setDeliveryMethod] = useState("hand_to_me");
+  const [deliveryInstructions, setDeliveryInstructions] = useState("");
+  const [requirePin, setRequirePin] = useState(false);
+  const [allowPhoto, setAllowPhoto] = useState(true);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const router = useRouter();
@@ -34,6 +38,10 @@ export default function Cart() {
         items: cart.items,
         address,
         notes,
+        delivery_method: deliveryMethod,
+        delivery_instructions: deliveryInstructions,
+        require_delivery_pin: deliveryMethod === "hand_to_me" && requirePin,
+        allow_photo_confirmation: allowPhoto,
       });
       const order = orderRes?.data;
       if (!order?.order_id) throw new Error("Could not create order — please try again");
@@ -107,13 +115,47 @@ export default function Cart() {
                 />
               </div>
               <div>
-                <label className="label-eyebrow">Notes (optional)</label>
+                <label className="label-eyebrow">Delivery preferences</label>
+                <div className="mt-2 space-y-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="radio" name="delivery_method" checked={deliveryMethod === "hand_to_me"} onChange={() => setDeliveryMethod("hand_to_me")} />
+                    Hand it to Me
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="radio" name="delivery_method" checked={deliveryMethod === "leave_at_door"} onChange={() => setDeliveryMethod("leave_at_door")} />
+                    Leave at Door
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label className="label-eyebrow">Delivery instructions</label>
+                <textarea
+                  className="input-field mt-2"
+                  rows={2}
+                  value={deliveryInstructions}
+                  onChange={(e) => setDeliveryInstructions(e.target.value)}
+                  placeholder="Gate code, building entrance, etc."
+                  data-testid="checkout-delivery-instructions"
+                />
+              </div>
+              {deliveryMethod === "hand_to_me" && (
+                <label className="flex items-start gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" className="mt-1" checked={requirePin} onChange={(e) => setRequirePin(e.target.checked)} data-testid="checkout-require-pin" />
+                  <span>Require delivery PIN at handoff</span>
+                </label>
+              )}
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input type="checkbox" className="mt-1" checked={allowPhoto} onChange={(e) => setAllowPhoto(e.target.checked)} />
+                <span>Allow photo confirmation</span>
+              </label>
+              <div>
+                <label className="label-eyebrow">Order notes (optional)</label>
                 <textarea
                   className="input-field mt-2"
                   rows={2}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Leave at door…"
+                  placeholder="Allergies, utensils, etc."
                   data-testid="checkout-notes"
                 />
               </div>

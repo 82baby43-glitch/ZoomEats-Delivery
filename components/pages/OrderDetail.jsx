@@ -11,7 +11,7 @@ import { CheckCircle2, Circle, ExternalLink, MapPin, Truck, Clock, Wifi } from "
 import { formatMoney, safeNumber, safeOrderId, sanitizeOrder } from "@/lib/safeData";
 import { PAYMENT_STATE_LABEL, resolvePaymentState } from "@/lib/orderState";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
-import { logClientError } from "@/lib/clientErrorLog";
+import CustomerDeliveryPin from "@/components/orders/CustomerDeliveryPin";
 
 const TIMELINE = [
   { id: "placed", label: "Placed" },
@@ -20,14 +20,18 @@ const TIMELINE = [
   { id: "ready", label: "Ready for pickup" },
   { id: "assigned_internal", label: "Driver assigned" },
   { id: "assigned_uber", label: "Uber driver assigned" },
+  { id: "arrived_at_store", label: "Driver at restaurant" },
   { id: "picked_up", label: "Out for delivery" },
+  { id: "arrived_at_customer", label: "Driver arrived" },
   { id: "delivered", label: "Delivered" },
 ];
 
 function timelineIndex(status) {
-  if (status === "assigned_uber" || status === "assigned_internal") return 4;
+  if (status === "assigned_uber" || status === "assigned_internal") {
+    return TIMELINE.findIndex((t) => t.id === status);
+  }
   const i = TIMELINE.findIndex((t) => t.id === status);
-  return i === 5 ? 4 : i;
+  return i >= 0 ? i : 0;
 }
 
 function fmtEta(iso) {
@@ -212,6 +216,20 @@ export default function OrderDetail() {
             Live map will appear when your driver is assigned.
           </div>
         ) : null}
+
+        <CustomerDeliveryPin orderId={o.order_id} status={o.status} />
+
+        {o.delivery_method && (
+          <div className="card p-4 mt-6 text-sm">
+            <div className="label-eyebrow">Delivery preference</div>
+            <div className="font-bold mt-1">
+              {o.delivery_method === "leave_at_door" ? "Leave at Door" : "Hand it to Me"}
+            </div>
+            {o.delivery_instructions && (
+              <p className="mt-2" style={{ color: "var(--muted)" }}>{o.delivery_instructions}</p>
+            )}
+          </div>
+        )}
 
         <div className="card p-6 mt-6">
           <h3 className="font-display text-xl font-bold mb-4">Status</h3>

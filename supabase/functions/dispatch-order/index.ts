@@ -14,6 +14,7 @@ import {
   type DispatchOrderContext,
 } from "../_shared/uberDirect.ts";
 import { getUberDirectConfig } from "../_shared/uberDirectEnv.ts";
+import { handleDispatchAssigned } from "../_shared/delivery/handler.ts";
 
 type OrderRow = {
   order_id: string;
@@ -302,6 +303,12 @@ Deno.serve(async (req) => {
     }
   } catch (e) {
     console.warn(JSON.stringify({ routing_hook_skipped: String(e), order_id: orderId, mode: routingMode }));
+  }
+
+  try {
+    await handleDispatchAssigned(db, orderId, driver.driver_id, runtime);
+  } catch (e) {
+    console.warn(JSON.stringify({ dispatch_assigned_event_skipped: String(e), order_id: orderId }));
   }
 
   return new Response(

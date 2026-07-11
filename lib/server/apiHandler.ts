@@ -28,8 +28,6 @@ import {
 } from "../logistics/gps-persistence";
 import { flushGpsBatch } from "../logistics/gps-batch-writer";
 import {
-  broadcastDeliveryCompleted,
-  broadcastDriverArrived,
   findActiveOrderForDriver,
   getLatestDriverLocation,
   recordDriverLocation,
@@ -37,6 +35,13 @@ import {
 import { recordDeliveryMetrics } from "../logistics/delivery-metrics-recorder";
 import { recordCompletedDeliveryRoute } from "../logistics/delivery-route-recorder";
 import { handlePickupPhotoRequest } from "../pickupPhotos/handler";
+import {
+  handleDeliveryWorkflowRequest,
+  handleDriverPickup,
+  handleVendorOrderReady,
+  prepareOrderDeliveryFields,
+} from "../delivery/handler";
+import { stripSensitiveOrders } from "../delivery/sanitize";
 import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { handleStripeAdminRequest } from "./stripeAdmin";
 import { handleGeocodeAdminRequest } from "./geocodeAdmin";
@@ -274,6 +279,20 @@ export async function handleApiRequest(
     });
     if (pickupPhotoResult !== null) return pickupPhotoResult;
 
+    const deliveryWorkflowResult = await handleDeliveryWorkflowRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+      runtime: {
+        supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+        serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      },
+    });
+    if (deliveryWorkflowResult !== null) return deliveryWorkflowResult;
+
     // ---- Auth ----
     if (path === "/auth/me" && method === "GET") {
       const u = requireAuth();
@@ -388,7 +407,16 @@ export async function handleApiRequest(
       if (!["accepted", "preparing", "ready"].includes(newStatus)) throwErr("Invalid status");
       const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).limit(1).maybeSingle();
       if (!rest) throwErr("No restaurant", 404);
-      await db.from("orders").update({ status: newStatus }).eq("order_id", vendorStatusMatch[1]).eq("restaurant_id", rest.restaurant_id);
+      const { data: existing } = await db.from("orders").select("*").eq("order_id", vendorStatusMatch[1]).eq("restaurant_id", rest.restaurant_id).maybeSingle();
+      if (!existing) throwErr("Order not found", 404);
+      if (newStatus === "ready") {
+        await handleVendorOrderReady(db, existing, rest.restaurant_id, {
+          supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+          serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+        });
+      } else {
+        await db.from("orders").update({ status: newStatus, updated_at: new Date().toISOString() }).eq("order_id", vendorStatusMatch[1]).eq("restaurant_id", rest.restaurant_id);
+      }
       return { ok: true };
     }
 
@@ -414,7 +442,16 @@ export async function handleApiRequest(
       const delivery_fee = 2.99;
       const total = Math.round((subtotal + delivery_fee) * 100) / 100;
       const deliveryAddress = String(body.address || "").trim();
+      const deliveryMethod = body.delivery_method === "leave_at_door" ? "leave_at_door" : "hand_to_me";
+      const deliveryInstructions = String(body.delivery_instructions || body.notes || "").trim();
+      const requireDeliveryPin = Boolean(body.require_delivery_pin);
+      const allowPhotoConfirmation = body.allow_photo_confirmation !== false;
       const geo = deliveryAddress ? await geocodeOrderAddress(deliveryAddress, u.name as string) : null;
+      const pinFields = await prepareOrderDeliveryFields({
+        delivery_method: deliveryMethod,
+        require_delivery_pin: requireDeliveryPin,
+        total,
+      });
       const order = {
         order_id: uid("ord"),
         customer_id: u.user_id,
@@ -429,6 +466,11 @@ export async function handleApiRequest(
         customer_lat: geo?.latitude ?? null,
         customer_lng: geo?.longitude ?? null,
         notes: body.notes || "",
+        delivery_method: deliveryMethod,
+        delivery_instructions: deliveryInstructions,
+        require_delivery_pin: requireDeliveryPin,
+        allow_photo_confirmation: allowPhotoConfirmation,
+        ...pinFields,
         status: "pending_payment",
         payment_status: "pending",
         price_hash: computePriceHash(repriced),
@@ -508,12 +550,12 @@ export async function handleApiRequest(
     if (path === "/delivery/available" && method === "GET") {
       requireRole("delivery");
       const { data } = await db.from("orders").select("*").eq("status", "ready").is("delivery_partner_id", null).order("created_at", { ascending: false });
-      return data || [];
+      return stripSensitiveOrders(data || []);
     }
     if (path === "/delivery/my" && method === "GET") {
       const u = requireRole("delivery");
       const { data } = await db.from("orders").select("*").eq("delivery_partner_id", u.user_id).order("created_at", { ascending: false });
-      return data || [];
+      return stripSensitiveOrders(data || []);
     }
     const deliveryActionMatch = path.match(/^\/delivery\/orders\/([^/]+)\/(accept|deliver)$/);
     if (deliveryActionMatch && method === "POST") {
@@ -623,11 +665,11 @@ export async function handleApiRequest(
       const u = requireDriverOrFounder();
       const { data: d } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
       if (!d) return { driver: null, orders: [], route: null };
-      const { data: orders } = await db.from("orders").select("*").eq("driver_id", d.driver_id).in("status", ["assigned_internal", "picked_up"]).order("created_at", { ascending: false });
+      const { data: orders } = await db.from("orders").select("*").eq("driver_id", d.driver_id).in("status", ["assigned_internal", "arrived_at_store", "picked_up", "out_for_delivery", "arrived_at_customer"]).order("created_at", { ascending: false });
       const { data: routeState } = await db.from("driver_route_states").select("*").eq("driver_id", d.driver_id).maybeSingle();
       return {
         driver: d,
-        orders: orders || [],
+        orders: stripSensitiveOrders(orders || []),
         route: routeState
           ? {
               remaining_stops: routeState.remaining_stops ?? [],
@@ -651,48 +693,13 @@ export async function handleApiRequest(
       if (!o) throwErr("Not found", 404);
       if (o.driver_id !== d.driver_id) throwErr("Not your dispatch", 403);
       if (phase === "pickup") {
-        if (o.status !== "assigned_internal") throwErr(`Cannot pickup from status ${o.status}`);
-        await db.from("orders").update({ status: "picked_up", updated_at: new Date().toISOString() }).eq("order_id", oid);
-        await db.from("deliveries").update({ status: "picked_up" }).eq("order_id", oid);
-        try {
-          await broadcastDriverArrived(oid, d.driver_id, {
-            supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-            serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-          });
-        } catch (e) {
-          console.warn(JSON.stringify({ driver_arrived_broadcast_skipped: String(e) }));
-        }
+        return handleDriverPickup(db, o, d, body, {
+          supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+          serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+        });
       } else {
-        if (o.status !== "picked_up") throwErr(`Cannot deliver from status ${o.status}`);
-        await db.from("orders").update({ status: "delivered", updated_at: new Date().toISOString() }).eq("order_id", oid);
-        await db.from("deliveries").update({ status: "delivered" }).eq("order_id", oid);
-        const workload = Math.max(0, Number(d.workload || 1) - 1);
-        await db.from("drivers").update({ workload, last_seen: new Date().toISOString() }).eq("driver_id", d.driver_id);
-        try {
-          await broadcastDeliveryCompleted(oid, d.driver_id, {
-            supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-            serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-          });
-        } catch (e) {
-          console.warn(JSON.stringify({ delivery_completed_broadcast_skipped: String(e) }));
-        }
-        try {
-          await recordCompletedDeliveryRoute(db, oid, d.driver_id);
-        } catch (e) {
-          console.warn(JSON.stringify({ delivery_route_skipped: String(e), order_id: oid }));
-        }
-        try {
-          await recordDeliveryMetrics(db, oid);
-        } catch (e) {
-          console.warn(JSON.stringify({ delivery_metrics_skipped: String(e), order_id: oid }));
-        }
-        try {
-          await recordOrderFinancials(db, oid);
-        } catch (e) {
-          console.warn(JSON.stringify({ financial_ledger_skipped: String(e), order_id: oid }));
-        }
+        throwErr("Use POST /driver/orders/:id/complete for delivery completion", 400);
       }
-      return { ok: true, status: phase === "pickup" ? "picked_up" : "delivered" };
     }
 
     // ---- Routing intelligence (layer on top of dispatch) ----
