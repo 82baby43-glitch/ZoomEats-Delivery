@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canAccessFounderDashboard, hasFounderDriverPermission } from "./founderDriverAuth.ts";
-import { assignOrderToDriver, createOfferForDriver, listClaimableOrders, normalizeOrderId, recordOfferEvent } from "./dispatch/offers.ts";
+import { assignOrderToDriver, createOfferForDriver, listClaimableOrders, recordOfferEvent, resolveOrderId } from "./dispatch/offers.ts";
 import type { RealtimeRuntime } from "./logistics/delivery-realtime.ts";
 
 function uid(prefix: string) {
@@ -185,14 +185,29 @@ export async function handleFounderDriverRequest(
   }
 
   if (path === "/founder-driver/claimable-orders" && method === "GET") {
-    const orders = await listClaimableOrders(db, 25, { founderMode: true });
+    const orders = await listClaimableOrders(db, 50, { founderMode: true });
     return { orders };
+  }
+
+  if (path === "/founder-driver/lookup-order" && method === "GET") {
+    const raw = String(params.order_id || body.order_id || "");
+    if (!raw) throwErr("order_id required");
+    const orderId = await resolveOrderId(db, raw);
+    const { data: order } = await db
+      .from("orders")
+      .select("order_id,restaurant_name,customer_name,address,total,status,payment_status,driver_id,delivery_type,created_at")
+      .eq("order_id", orderId)
+      .maybeSingle();
+    if (!order) throwErr("Order not found", 404);
+    const claimable = !order.driver_id
+      && order.delivery_type !== "uber"
+      && !["delivered", "cancelled", "failed", "refunded", "complete"].includes(String(order.status));
+    return { order, claimable, resolved_order_id: orderId };
   }
 
   const claimMatch = path.match(/^\/founder-driver\/claim-order$/);
   if (claimMatch && method === "POST") {
-    const orderId = normalizeOrderId(String(body.order_id || ""));
-    if (!orderId) throwErr("order_id required");
+    const orderId = await resolveOrderId(db, String(body.order_id || ""));
     const driver = await ensureFounderDriverRow(db, userId, { online: true });
     const result = await assignOrderToDriver(db, orderId, driver, opts.runtime, { founderForce: true });
     await recordOfferEvent(db, orderId, "founder_claimed", {
@@ -204,8 +219,7 @@ export async function handleFounderDriverRequest(
 
   const offerMatch = path.match(/^\/founder-driver\/request-offer$/);
   if (offerMatch && method === "POST") {
-    const orderId = normalizeOrderId(String(body.order_id || ""));
-    if (!orderId) throwErr("order_id required");
+    const orderId = await resolveOrderId(db, String(body.order_id || ""));
     const driver = await ensureFounderDriverRow(db, userId, { online: true });
     const result = await createOfferForDriver(db, orderId, String(driver.driver_id), opts.runtime);
     return result;

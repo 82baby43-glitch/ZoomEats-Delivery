@@ -7,7 +7,7 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import Header from "@/components/Header";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { setFounderDriverModeActive, setShadowDispatchActive } from "@/lib/founderDriver/session";
-import { sanitizeOrders } from "@/lib/safeData";
+import { sanitizeOrders, safeOrderId } from "@/lib/safeData";
 import { Truck, MapPin, BarChart3, MessageSquare, Star, Camera, ClipboardList, Power } from "lucide-react";
 import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
 import DriverOrderOfferModal from "@/components/driver/DriverOrderOfferModal";
@@ -561,7 +561,7 @@ export default function FounderDriverDashboard() {
               <div className="flex flex-wrap gap-2">
                 <input
                   className="input-field flex-1 min-w-[200px]"
-                  placeholder="Order ID"
+                  placeholder="Order #46f166 or full order ID"
                   value={manualOrderId}
                   onChange={(e) => setManualOrderId(e.target.value)}
                   data-testid="founder-claim-manual-id"
@@ -599,7 +599,7 @@ export default function FounderDriverDashboard() {
                         <div className="font-bold">{o.restaurant_name || "Restaurant"}</div>
                         <div style={{ color: "var(--muted)" }}>{o.customer_name} · ${Number(o.total || 0).toFixed(2)}</div>
                         <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>
-                          {o.order_id} · {o.status} · {o.payment_status}
+                          #{safeOrderId(o.order_id)} · {o.status} · {o.payment_status}
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2 shrink-0">
