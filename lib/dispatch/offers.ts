@@ -554,7 +554,9 @@ export async function acceptDriverOffer(
 
   if (!updated) throwErr("Could not accept offer — it may have expired", 409);
 
-  const result = await assignOrderToDriver(db, String(offer.order_id), d, runtime);
+  const offerMeta = offer.meta && typeof offer.meta === "object" ? (offer.meta as Record<string, unknown>) : {};
+  const founderForce = Boolean(offerMeta.founder_offer) || await isFounderDriverUser(db, driverUserId);
+  const result = await assignOrderToDriver(db, String(offer.order_id), d, runtime, { founderForce });
 
   await recordOfferEvent(db, offer.order_id, "accepted", {
     offerId,

@@ -567,12 +567,31 @@ export async function handleApiRequest(
 
     // ---- Delivery ----
     if (path === "/delivery/available" && method === "GET") {
-      requireRole("delivery");
-      const { data } = await db.from("orders").select("*").eq("status", "ready").is("delivery_partner_id", null).order("created_at", { ascending: false });
+      requireDriverOrFounder();
+      const { data } = await db
+        .from("orders")
+        .select("*")
+        .eq("status", "ready")
+        .is("driver_id", null)
+        .is("delivery_partner_id", null)
+        .or("delivery_type.is.null,delivery_type.neq.uber")
+        .order("created_at", { ascending: false });
       return stripSensitiveOrders(data || []);
     }
     if (path === "/delivery/my" && method === "GET") {
-      const u = requireRole("delivery");
+      const u = requireDriverOrFounder();
+      const { data: driver } = await db.from("drivers").select("driver_id").eq("user_id", u.user_id).maybeSingle();
+      if (driver?.driver_id) {
+        const { data: internal } = await db
+          .from("orders")
+          .select("*")
+          .eq("driver_id", driver.driver_id)
+          .in("status", [
+            "assigned_internal", "arrived_at_store", "picked_up", "out_for_delivery", "arrived_at_customer", "ready",
+          ])
+          .order("created_at", { ascending: false });
+        if (internal?.length) return stripSensitiveOrders(internal);
+      }
       const { data } = await db.from("orders").select("*").eq("delivery_partner_id", u.user_id).order("created_at", { ascending: false });
       return stripSensitiveOrders(data || []);
     }

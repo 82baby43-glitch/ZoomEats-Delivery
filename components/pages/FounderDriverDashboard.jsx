@@ -7,6 +7,7 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import Header from "@/components/Header";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { setFounderDriverModeActive, setShadowDispatchActive } from "@/lib/founderDriver/session";
+import { sanitizeOrders } from "@/lib/safeData";
 import { Truck, MapPin, BarChart3, MessageSquare, Star, Camera, ClipboardList, Power } from "lucide-react";
 import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
 import DriverOrderOfferModal from "@/components/driver/DriverOrderOfferModal";
@@ -67,6 +68,7 @@ export default function FounderDriverDashboard() {
   const [manualOrderId, setManualOrderId] = useState("");
   const [online, setOnline] = useState(false);
   const [incomingOffer, setIncomingOffer] = useState(null);
+  const [activeOrders, setActiveOrders] = useState([]);
   const deviceId = typeof window !== "undefined" ? getDriverDeviceId() : "";
   const driverId = status?.driver?.driver_id;
   const { request: requestPush } = useWebPush("ZoomEats Driver");
@@ -140,6 +142,7 @@ export default function FounderDriverDashboard() {
       setManualOrderId("");
       await load();
       await loadClaimableOrders();
+      await refreshActiveOrders();
       window.location.href = navigateTo;
     } catch (e) {
       setMsg(getApiErrorMessage(e, "Could not claim order."));
@@ -152,10 +155,33 @@ export default function FounderDriverDashboard() {
     if (!orderId) return;
     setOfferingId(orderId);
     try {
+      if (!status?.session_active) {
+        await api.post("/founder-driver/session", { action: "start" });
+        setFounderDriverModeActive(true);
+      }
+      if (!online) {
+        setOnline(true);
+        if (typeof window !== "undefined") localStorage.setItem("zoomeats_driver_online", "1");
+        await api.post("/driver/availability", { available: true });
+      }
       await api.post("/founder-driver/request-offer", { order_id: orderId });
-      setMsg(`Offer sent for ${orderId} — accept or decline below.`);
+      setMsg(`Offer sent for ${orderId} — accept or decline in the popup.`);
       setManualOrderId("");
-      await loadActiveOffer();
+      const stRes = await api.get("/founder-driver/status");
+      const freshDriverId = stRes?.data?.driver?.driver_id ?? stRes?.driver?.driver_id;
+      if (freshDriverId) {
+        const res = await api.get("/driver/offers/active", { params: { device_id: deviceId } });
+        const offer = res?.data?.offer ?? res?.offer;
+        if (offer && !res?.data?.locked_elsewhere && !res?.locked_elsewhere) {
+          primeDriverOfferSound();
+          setIncomingOffer({
+            ...offer,
+            ttl_seconds: offer.ttl_seconds ?? Math.max(0, Math.ceil((new Date(offer.expires_at).getTime() - Date.now()) / 1000)),
+          });
+        }
+      }
+      await load();
+      await loadClaimableOrders();
     } catch (e) {
       setMsg(getApiErrorMessage(e, "Could not send offer."));
     } finally {
@@ -205,6 +231,16 @@ export default function FounderDriverDashboard() {
     }
   };
 
+  const refreshActiveOrders = useCallback(async () => {
+    try {
+      const res = await api.get("/driver/active");
+      const orders = res?.data?.orders ?? res?.orders ?? [];
+      setActiveOrders(sanitizeOrders(orders));
+    } catch {
+      setActiveOrders([]);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -231,13 +267,14 @@ export default function FounderDriverDashboard() {
       }
       await loadPickupGallery();
       await loadClaimableOrders();
+      await refreshActiveOrders();
     } catch (e) {
       console.warn(e);
       setError(true);
     } finally {
       setLoading(false);
     }
-  }, [loadPickupGallery, loadClaimableOrders]);
+  }, [loadPickupGallery, loadClaimableOrders, refreshActiveOrders]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -347,7 +384,10 @@ export default function FounderDriverDashboard() {
         <DriverOrderOfferModal
           offer={incomingOffer}
           onClear={() => setIncomingOffer(null)}
-          onRefresh={load}
+          onRefresh={async () => {
+            await load();
+            await refreshActiveOrders();
+          }}
         />
       )}
       <div className="max-w-6xl mx-auto px-6 md:px-12 py-10">
@@ -482,6 +522,23 @@ export default function FounderDriverDashboard() {
                     <Truck size={14} /> Open navigation
                   </Link>
                 </div>
+              </div>
+            ) : activeOrders.length > 0 ? (
+              <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "var(--border)" }} data-testid="founder-active-queue">
+                <div className="font-bold">Your order queue</div>
+                {activeOrders.map((o) => (
+                  <div key={o.order_id} className="rounded-lg border p-3 text-sm space-y-2" style={{ borderColor: "var(--border)" }}>
+                    <div className="font-bold">{o.restaurant_name || "Restaurant"}</div>
+                    <div style={{ color: "var(--muted)" }}>{o.address || "—"}</div>
+                    <div className="text-xs">{o.order_id} · {o.status}</div>
+                    <div className="flex flex-wrap gap-2">
+                      <Link href={`/driver/navigate/${o.order_id}`} className="btn-primary text-sm inline-flex items-center gap-1">
+                        <Truck size={14} /> Navigate
+                      </Link>
+                      <Link href="/driver/dashboard" className="btn-secondary text-sm">Open driver dashboard</Link>
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
               <p className="text-sm" style={{ color: "var(--muted)" }}>
