@@ -54,6 +54,7 @@ import {
   prepareOrderDeliveryFields,
 } from "../_shared/delivery/handler.ts";
 import { stripSensitiveOrders } from "../_shared/delivery/sanitize.ts";
+import { handleDriverOfferRequest } from "../_shared/dispatch/offer-handler.ts";
 import { handleUberDirectAdminRequest } from "../_shared/uberDirectAdmin.ts";
 import { handleStripeAdminRequest } from "../_shared/stripeAdmin.ts";
 import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geocodeAdmin.ts";
@@ -310,6 +311,17 @@ Deno.serve(async (req) => {
       runtime: { supabaseUrl, serviceKey },
     });
     if (deliveryWorkflowResult !== null) return json(deliveryWorkflowResult);
+
+    const driverOfferResult = await handleDriverOfferRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+      runtime: { supabaseUrl, serviceKey },
+    });
+    if (driverOfferResult !== null) return json(driverOfferResult);
 
     // ---- Auth ----
     if (path === "/auth/me" && method === "GET") {
@@ -685,7 +697,7 @@ Deno.serve(async (req) => {
       const { data: routeState } = await db.from("driver_route_states").select("*").eq("driver_id", d.driver_id).maybeSingle();
       return json({
         driver: d,
-        orders: orders || [],
+        orders: stripSensitiveOrders(orders || []),
         route: routeState
           ? {
               remaining_stops: routeState.remaining_stops ?? [],

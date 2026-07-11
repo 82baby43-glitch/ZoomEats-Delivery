@@ -4,6 +4,7 @@ import { Fragment, useState } from "react";
 import { formatMoney, safeOrderId, sanitizeUsers, sanitizeRestaurants, sanitizeOrders } from "@/lib/safeData";
 import { EmptyState } from "@/components/ui/PageStates";
 import AdminDeliveryTimeline from "@/components/admin/AdminDeliveryTimeline";
+import AdminOfferStats from "@/components/admin/AdminOfferStats";
 
 export function UsersTable({ users }) {
   const rows = sanitizeUsers(users);
@@ -152,6 +153,7 @@ export function OrdersTable({ orders }) {
                 <tr>
                   <td colSpan={7} className="p-3">
                     <AdminDeliveryTimeline orderId={o.order_id} />
+                    <AdminOfferStats orderId={o.order_id} />
                   </td>
                 </tr>
               )}

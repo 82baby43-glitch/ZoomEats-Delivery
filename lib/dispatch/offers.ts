@@ -1,0 +1,500 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createRoutingDbAdapter } from "./routing/db-adapter";
+import { selectOptimalDriverForOrder } from "./routing/dispatch-routing";
+import type { ActiveOrderRef } from "./routing/types";
+import { haversineKm } from "./routing/geo";
+import { initializeRouteForOrder } from "./routing/uber-routing-ai";
+import { handleDispatchAssigned } from "../delivery/handler";
+import type { RealtimeRuntime } from "../logistics/delivery-realtime";
+
+export const OFFER_TTL_SECONDS = 20;
+export const DRIVER_OFFER_RADIUS_KM = 15;
+export const DRIVER_ONLINE_MAX_MINUTES = 5;
+
+export type OfferStatus = "pending" | "accepted" | "declined" | "expired" | "cancelled";
+
+export function uid(prefix: string): string {
+  return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+function throwErr(message: string, status = 400): never {
+  const e = new Error(message) as Error & { status?: number };
+  e.status = status;
+  throw e;
+}
+
+export async function recordOfferEvent(
+  db: SupabaseClient,
+  orderId: string,
+  eventType: string,
+  opts: { offerId?: string; driverId?: string; message?: string; meta?: Record<string, unknown> } = {}
+) {
+  await db.from("driver_offer_events").insert({
+    event_id: uid("ofe"),
+    order_id: orderId,
+    offer_id: opts.offerId,
+    driver_id: opts.driverId,
+    event_type: eventType,
+    message: opts.message,
+    meta: opts.meta || {},
+    created_at: new Date().toISOString(),
+  });
+}
+
+export async function pushDriverOfferBroadcast(
+  driverId: string,
+  payload: Record<string, unknown>,
+  runtime?: RealtimeRuntime
+) {
+  const supabaseUrl = runtime?.supabaseUrl ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = runtime?.serviceKey ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) return;
+
+  try {
+    await fetch(`${supabaseUrl}/realtime/v1/api/broadcast`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        "Content-Type": "application/json",
+        apikey: serviceKey,
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            topic: `driver-offers:${driverId}`,
+            event: "new_order_offer",
+            payload: { ...payload, ts: new Date().toISOString() },
+          },
+        ],
+      }),
+    });
+  } catch (e) {
+    console.warn(JSON.stringify({ driver_offer_broadcast_failed: String(e), driver_id: driverId }));
+  }
+}
+
+async function loadOrderForOffer(db: SupabaseClient, orderId: string) {
+  const { data: order } = await db.from("orders").select("*").eq("order_id", orderId).maybeSingle();
+  if (!order) throwErr("Order not found", 404);
+  if (order.driver_id) throwErr("Order already has a driver", 409);
+  if (order.payment_status !== "paid") throwErr("Order not paid", 400);
+  return order;
+}
+
+async function getExcludedDriverIds(db: SupabaseClient, orderId: string): Promise<string[]> {
+  const { data } = await db
+    .from("driver_order_offers")
+    .select("driver_id")
+    .eq("order_id", orderId)
+    .in("status", ["declined", "expired"]);
+  return [...new Set((data || []).map((r) => String(r.driver_id)))];
+}
+
+export async function isDriverEligibleForOffer(
+  db: SupabaseClient,
+  driver: Record<string, unknown>,
+  restaurantLat: number,
+  restaurantLng: number
+): Promise<boolean> {
+  if (!driver.availability) return false;
+  if (Number(driver.workload || 0) > 0) return false;
+
+  const lastSeen = driver.last_seen ? new Date(String(driver.last_seen)).getTime() : 0;
+  if (Date.now() - lastSeen > DRIVER_ONLINE_MAX_MINUTES * 60_000) return false;
+
+  const { data: activeOrders } = await db
+    .from("orders")
+    .select("order_id")
+    .eq("driver_id", driver.driver_id)
+    .in("status", ["assigned_internal", "arrived_at_store", "picked_up", "out_for_delivery", "arrived_at_customer"])
+    .limit(1);
+  if (activeOrders?.length) return false;
+
+  const { data: pendingOffer } = await db
+    .from("driver_order_offers")
+    .select("offer_id")
+    .eq("driver_id", driver.driver_id)
+    .eq("status", "pending")
+    .gt("expires_at", new Date().toISOString())
+    .limit(1);
+  if (pendingOffer?.length) return false;
+
+  const lat = Number(driver.latitude);
+  const lng = Number(driver.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (!Number.isFinite(restaurantLat) || !Number.isFinite(restaurantLng)) return true;
+
+  return haversineKm({ lat, lng }, { lat: restaurantLat, lng: restaurantLng }) <= DRIVER_OFFER_RADIUS_KM;
+}
+
+async function pickDriverForOrder(
+  db: SupabaseClient,
+  orderId: string,
+  excludeDriverIds: string[]
+): Promise<{ driver: Record<string, unknown>; proposal: { driverId: string; eta: number; earnings: number } | null } | null> {
+  const routingDb = createRoutingDbAdapter(db);
+  const orderRef = await routingDb.getOrderCoords?.(orderId);
+  if (!orderRef) return null;
+
+  const { data: restaurant } = orderRef.restaurant_id
+    ? await db.from("restaurants").select("latitude,longitude").eq("restaurant_id", orderRef.restaurant_id).maybeSingle()
+    : { data: null };
+
+  const restLat = Number(restaurant?.latitude ?? orderRef.pickup.lat);
+  const restLng = Number(restaurant?.longitude ?? orderRef.pickup.lng);
+
+  const proposal = await selectOptimalDriverForOrder(db, routingDb, orderRef as ActiveOrderRef);
+  const candidates: string[] = [];
+
+  if (proposal && !excludeDriverIds.includes(proposal.driverId)) {
+    candidates.push(proposal.driverId);
+  }
+
+  const { data: drivers } = await db
+    .from("drivers")
+    .select("*")
+    .eq("availability", true)
+    .order("workload", { ascending: true })
+    .limit(20);
+
+  for (const d of drivers || []) {
+    if (!candidates.includes(d.driver_id) && !excludeDriverIds.includes(d.driver_id)) {
+      candidates.push(d.driver_id);
+    }
+  }
+
+  for (const driverId of candidates) {
+    const { data: driver } = await db.from("drivers").select("*").eq("driver_id", driverId).maybeSingle();
+    if (!driver) continue;
+    if (await isDriverEligibleForOffer(db, driver, restLat, restLng)) {
+      const p = proposal?.driverId === driverId ? proposal : null;
+      return {
+        driver,
+        proposal: p
+          ? { driverId: p.driverId, eta: p.eta, earnings: p.earnings }
+          : { driverId, eta: 15, earnings: 8.5 },
+      };
+    }
+  }
+
+  return null;
+}
+
+export async function cancelPendingOffers(db: SupabaseClient, orderId: string, exceptOfferId?: string) {
+  let q = db
+    .from("driver_order_offers")
+    .update({ status: "cancelled", responded_at: new Date().toISOString() })
+    .eq("order_id", orderId)
+    .eq("status", "pending");
+  if (exceptOfferId) q = q.neq("offer_id", exceptOfferId);
+  await q;
+}
+
+export async function createAndBroadcastOffer(
+  db: SupabaseClient,
+  orderId: string,
+  runtime?: RealtimeRuntime
+): Promise<{ ok: boolean; offer_id?: string; driver_id?: string; reason?: string }> {
+  const order = await loadOrderForOffer(db, orderId);
+  if (order.driver_id) return { ok: false, reason: "already_assigned" };
+
+  await cancelPendingOffers(db, orderId);
+
+  const excluded = await getExcludedDriverIds(db, orderId);
+  const pick = await pickDriverForOrder(db, orderId, excluded);
+  if (!pick) {
+    await recordOfferEvent(db, orderId, "no_drivers_available", { message: "No eligible drivers for offer" });
+    return { ok: false, reason: "no_drivers" };
+  }
+
+  const { driver, proposal } = pick;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + OFFER_TTL_SECONDS * 1000);
+  const offerId = uid("offer");
+
+  const routingDb = createRoutingDbAdapter(db);
+  const orderRef = await routingDb.getOrderCoords?.(orderId);
+  const distKm = orderRef
+    ? haversineKm(
+        { lat: Number(driver.latitude), lng: Number(driver.longitude) },
+        orderRef.pickup
+      ) + haversineKm(orderRef.pickup, orderRef.dropoff)
+    : null;
+
+  await db.from("driver_order_offers").insert({
+    offer_id: offerId,
+    order_id: orderId,
+    driver_id: driver.driver_id,
+    status: "pending",
+    offered_at: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    estimated_distance_km: distKm,
+    estimated_earnings: proposal?.earnings ?? 8.5,
+    estimated_eta_min: Math.round(proposal?.eta ?? 20),
+    meta: {
+      restaurant_name: order.restaurant_name,
+      customer_area: String(order.address || "").split(",").slice(-2).join(",").trim() || "Customer",
+      pickup_address: order.restaurant_name,
+    },
+  });
+
+  await db
+    .from("orders")
+    .update({
+      current_offer_id: offerId,
+      offer_round: Number(order.offer_round || 0) + 1,
+      updated_at: now.toISOString(),
+    })
+    .eq("order_id", orderId);
+
+  await recordOfferEvent(db, orderId, "offer_sent", {
+    offerId,
+    driverId: String(driver.driver_id),
+    message: "Offer sent to driver",
+    meta: { expires_at: expiresAt.toISOString() },
+  });
+
+  const payload = {
+    offer_id: offerId,
+    order_id: orderId,
+    expires_at: expiresAt.toISOString(),
+    ttl_seconds: OFFER_TTL_SECONDS,
+    restaurant_name: order.restaurant_name,
+    customer_area: String(order.address || "").split(",").slice(-2).join(",").trim() || "Customer",
+    estimated_distance_km: distKm,
+    estimated_earnings: proposal?.earnings ?? 8.5,
+    estimated_eta_min: Math.round(proposal?.eta ?? 20),
+    pickup_label: order.restaurant_name,
+    dropoff_label: order.address,
+  };
+
+  await pushDriverOfferBroadcast(String(driver.driver_id), payload, runtime);
+
+  return { ok: true, offer_id: offerId, driver_id: String(driver.driver_id) };
+}
+
+export async function acceptDriverOffer(
+  db: SupabaseClient,
+  offerId: string,
+  driverUserId: string,
+  deviceId: string,
+  runtime?: RealtimeRuntime
+) {
+  const { data: d } = await db.from("drivers").select("*").eq("user_id", driverUserId).maybeSingle();
+  if (!d) throwErr("No driver profile", 404);
+
+  const { data: offer } = await db.from("driver_order_offers").select("*").eq("offer_id", offerId).maybeSingle();
+  if (!offer) throwErr("Offer not found", 404);
+  if (offer.driver_id !== d.driver_id) throwErr("Not your offer", 403);
+  if (offer.status !== "pending") throwErr(`Offer is ${offer.status}`, 409);
+  if (new Date(String(offer.expires_at)).getTime() < Date.now()) {
+    await db.from("driver_order_offers").update({ status: "expired", responded_at: new Date().toISOString() }).eq("offer_id", offerId);
+    throwErr("Offer expired", 410);
+  }
+
+  if (offer.locked_device_id && offer.locked_device_id !== deviceId) {
+    throwErr("Offer is active on another device", 409);
+  }
+
+  const { data: order } = await db.from("orders").select("*").eq("order_id", offer.order_id).maybeSingle();
+  if (!order) throwErr("Order not found", 404);
+  if (order.driver_id) throwErr("Order already assigned", 409);
+
+  const now = new Date().toISOString();
+  const responseMs = Date.now() - new Date(String(offer.offered_at)).getTime();
+
+  const { data: updated } = await db
+    .from("driver_order_offers")
+    .update({
+      status: "accepted",
+      responded_at: now,
+      response_ms: responseMs,
+      locked_device_id: deviceId,
+    })
+    .eq("offer_id", offerId)
+    .eq("status", "pending")
+    .select()
+    .maybeSingle();
+
+  if (!updated) throwErr("Could not accept offer — it may have expired", 409);
+
+  const trackingId = `trk_${offer.order_id}`;
+  const { error: assignError } = await db
+    .from("orders")
+    .update({
+      driver_id: d.driver_id,
+      status: "assigned_internal",
+      delivery_type: "internal",
+      tracking_id: trackingId,
+      current_offer_id: null,
+      updated_at: now,
+    })
+    .eq("order_id", offer.order_id)
+    .is("driver_id", null);
+
+  if (assignError) throwErr(assignError.message, 500);
+
+  await db.from("drivers").update({ workload: Number(d.workload || 0) + 1, last_seen: now }).eq("driver_id", d.driver_id);
+
+  const { data: existingDelivery } = await db.from("deliveries").select("delivery_id").eq("order_id", offer.order_id).maybeSingle();
+  if (!existingDelivery) {
+    await db.from("deliveries").insert({
+      delivery_id: uid("dlv"),
+      order_id: offer.order_id,
+      provider: "internal",
+      tracking_id: trackingId,
+      status: "assigned",
+      driver_id: d.driver_id,
+    });
+  } else {
+    await db.from("deliveries").update({ status: "assigned", driver_id: d.driver_id, tracking_id: trackingId }).eq("order_id", offer.order_id);
+  }
+
+  await cancelPendingOffers(db, offer.order_id, offerId);
+
+  const routingDb = createRoutingDbAdapter(db);
+  const orderRef = await routingDb.getOrderCoords?.(offer.order_id);
+  if (orderRef) {
+    try {
+      await initializeRouteForOrder(
+        routingDb,
+        d.driver_id,
+        orderRef,
+        { lat: Number(d.latitude) || 0, lng: Number(d.longitude) || 0 },
+        runtime
+      );
+    } catch (e) {
+      console.warn(JSON.stringify({ offer_route_init_skipped: String(e) }));
+    }
+  }
+
+  await recordOfferEvent(db, offer.order_id, "accepted", {
+    offerId,
+    driverId: d.driver_id,
+    message: "Driver accepted offer",
+    meta: { response_ms: responseMs },
+  });
+
+  try {
+    await handleDispatchAssigned(db, offer.order_id, d.driver_id, runtime);
+  } catch (e) {
+    console.warn(JSON.stringify({ dispatch_assigned_event_skipped: String(e) }));
+  }
+
+  await pushDriverOfferBroadcast(d.driver_id, { event: "offer_accepted", offer_id: offerId, order_id: offer.order_id }, runtime);
+
+  return {
+    ok: true,
+    order_id: offer.order_id,
+    status: "assigned_internal",
+    navigate_to: `/driver/navigate/${offer.order_id}`,
+  };
+}
+
+export async function declineDriverOffer(
+  db: SupabaseClient,
+  offerId: string,
+  driverUserId: string,
+  runtime?: RealtimeRuntime
+) {
+  const { data: d } = await db.from("drivers").select("driver_id").eq("user_id", driverUserId).maybeSingle();
+  if (!d) throwErr("No driver profile", 404);
+
+  const { data: offer } = await db.from("driver_order_offers").select("*").eq("offer_id", offerId).maybeSingle();
+  if (!offer) throwErr("Offer not found", 404);
+  if (offer.driver_id !== d.driver_id) throwErr("Not your offer", 403);
+  if (offer.status !== "pending") return { ok: true, status: offer.status };
+
+  const now = new Date().toISOString();
+  await db
+    .from("driver_order_offers")
+    .update({ status: "declined", responded_at: now, response_ms: Date.now() - new Date(String(offer.offered_at)).getTime() })
+    .eq("offer_id", offerId);
+
+  await recordOfferEvent(db, offer.order_id, "declined", {
+    offerId,
+    driverId: d.driver_id,
+    message: "Driver declined offer",
+  });
+
+  const next = await createAndBroadcastOffer(db, offer.order_id, runtime);
+  return { ok: true, status: "declined", next };
+}
+
+export async function expireDriverOffer(
+  db: SupabaseClient,
+  offerId: string,
+  driverUserId: string,
+  runtime?: RealtimeRuntime
+) {
+  const { data: d } = await db.from("drivers").select("driver_id").eq("user_id", driverUserId).maybeSingle();
+  if (!d) throwErr("No driver profile", 404);
+
+  const { data: offer } = await db.from("driver_order_offers").select("*").eq("offer_id", offerId).maybeSingle();
+  if (!offer) throwErr("Offer not found", 404);
+  if (offer.driver_id !== d.driver_id) throwErr("Not your offer", 403);
+  if (offer.status !== "pending") return { ok: true, status: offer.status };
+
+  const now = new Date().toISOString();
+  await db
+    .from("driver_order_offers")
+    .update({ status: "expired", responded_at: now })
+    .eq("offer_id", offerId)
+    .eq("status", "pending");
+
+  await recordOfferEvent(db, offer.order_id, "expired", {
+    offerId,
+    driverId: d.driver_id,
+    message: "Offer expired",
+  });
+
+  const { data: order } = await db.from("orders").select("driver_id").eq("order_id", offer.order_id).maybeSingle();
+  if (order?.driver_id) return { ok: true, status: "expired", assigned: true };
+
+  const next = await createAndBroadcastOffer(db, offer.order_id, runtime);
+  return { ok: true, status: "expired", next };
+}
+
+export async function lockOfferToDevice(db: SupabaseClient, offerId: string, driverId: string, deviceId: string) {
+  const { data: offer } = await db.from("driver_order_offers").select("*").eq("offer_id", offerId).maybeSingle();
+  if (!offer || offer.driver_id !== driverId || offer.status !== "pending") return offer;
+
+  if (!offer.locked_device_id) {
+    await db.from("driver_order_offers").update({ locked_device_id: deviceId }).eq("offer_id", offerId).is("locked_device_id", null);
+    const { data: refreshed } = await db.from("driver_order_offers").select("*").eq("offer_id", offerId).maybeSingle();
+    return refreshed;
+  }
+
+  return offer;
+}
+
+export async function getActiveOfferForDriver(db: SupabaseClient, driverId: string) {
+  const { data } = await db
+    .from("driver_order_offers")
+    .select("*")
+    .eq("driver_id", driverId)
+    .eq("status", "pending")
+    .gt("expires_at", new Date().toISOString())
+    .order("offered_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data;
+}
+
+export async function getOfferStatsForAdmin(db: SupabaseClient, orderId?: string) {
+  let q = db.from("driver_offer_events").select("*").order("created_at", { ascending: false }).limit(100);
+  if (orderId) q = q.eq("order_id", orderId);
+  const { data: events } = await q;
+
+  const { data: offers } = orderId
+    ? await db.from("driver_order_offers").select("*").eq("order_id", orderId).order("offered_at", { ascending: true })
+    : await db.from("driver_order_offers").select("*").order("offered_at", { ascending: false }).limit(50);
+
+  const accepted = (offers || []).filter((o) => o.status === "accepted");
+  const avgResponse =
+    accepted.length > 0
+      ? Math.round(accepted.reduce((s, o) => s + Number(o.response_ms || 0), 0) / accepted.length)
+      : null;
+
+  return { events: events || [], offers: offers || [], avg_acceptance_ms: avgResponse };
+}

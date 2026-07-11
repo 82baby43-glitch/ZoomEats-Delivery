@@ -42,6 +42,7 @@ import {
   prepareOrderDeliveryFields,
 } from "../delivery/handler";
 import { stripSensitiveOrders } from "../delivery/sanitize";
+import { handleDriverOfferRequest } from "../dispatch/offer-handler";
 import { handleUberDirectAdminRequest } from "./uberDirectAdmin";
 import { handleStripeAdminRequest } from "./stripeAdmin";
 import { handleGeocodeAdminRequest } from "./geocodeAdmin";
@@ -292,6 +293,20 @@ export async function handleApiRequest(
       },
     });
     if (deliveryWorkflowResult !== null) return deliveryWorkflowResult;
+
+    const driverOfferResult = await handleDriverOfferRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+      runtime: {
+        supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+        serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      },
+    });
+    if (driverOfferResult !== null) return driverOfferResult;
 
     // ---- Auth ----
     if (path === "/auth/me" && method === "GET") {

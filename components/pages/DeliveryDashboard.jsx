@@ -16,6 +16,11 @@ import { useAuth } from "@/lib/auth";
 import { formatMoney, sanitizeOrders, sanitizeWallet } from "@/lib/safeData";
 import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
 import DriverDeliveryWorkflow from "@/components/driver/DriverDeliveryWorkflow";
+import DriverOrderOfferModal from "@/components/driver/DriverOrderOfferModal";
+import { getDriverDeviceId } from "@/lib/driverDeviceId";
+import { useDriverOfferRealtime } from "@/lib/hooks/useDriverOfferRealtime";
+import { useWebPush } from "@/lib/useWebPush";
+import { primeDriverOfferSound } from "@/lib/driverOfferSound";
 import { logClientError } from "@/lib/clientErrorLog";
 import { ErrorState } from "@/components/ui/PageStates";
 import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
@@ -38,6 +43,8 @@ function DeliveryDashboardInner() {
   const [wallet, setWallet] = useState({ available: 0.0, pending: 0.0 });
   const [payoutAmt, setPayoutAmt] = useState(0.0);
   const [loadError, setLoadError] = useState(false);
+  const [incomingOffer, setIncomingOffer] = useState(null);
+  const deviceId = typeof window !== "undefined" ? getDriverDeviceId() : "";
   const dispatchOrders = activeDispatch?.orders ?? [];
   const activeOrder = dispatchOrders[0] ?? mine.find((o) =>
     ["assigned_internal", "arrived_at_store", "picked_up", "out_for_delivery", "arrived_at_customer", "ready"].includes(o.status)
@@ -51,6 +58,7 @@ function DeliveryDashboardInner() {
   const [founderMode, setFounderMode] = useState(false);
   const { user } = useAuth();
   const { settings: companionSettings } = useCompanionMode();
+  const { request: requestPush } = useWebPush("ZoomEats Driver");
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -102,6 +110,43 @@ function DeliveryDashboardInner() {
     refresh();
   });
 
+  const loadActiveOffer = useCallback(async () => {
+    if (!online || !driverId) return;
+    try {
+      const res = await api.get("/driver/offers/active", { params: { device_id: deviceId } });
+      const offer = res?.data?.offer ?? res?.offer;
+      if (offer && !res?.data?.locked_elsewhere && !res?.locked_elsewhere) {
+        setIncomingOffer({
+          ...offer,
+          ttl_seconds: offer.ttl_seconds ?? Math.max(0, Math.ceil((new Date(offer.expires_at).getTime() - Date.now()) / 1000)),
+        });
+      }
+    } catch (e) {
+      logClientError("delivery.activeOffer", e);
+    }
+  }, [online, driverId, deviceId]);
+
+  useEffect(() => {
+    if (online) loadActiveOffer();
+  }, [online, loadActiveOffer]);
+
+  useEffect(() => {
+    if (!online) return;
+    const t = setInterval(loadActiveOffer, 5000);
+    return () => clearInterval(t);
+  }, [online, loadActiveOffer]);
+
+  useDriverOfferRealtime(driverId, (payload) => {
+    if (payload?.event === "offer_accepted") {
+      setIncomingOffer(null);
+      refresh();
+      return;
+    }
+    if (payload?.offer_id) {
+      setIncomingOffer(payload);
+    }
+  });
+
   useCompanionRealtime({
     role: "driver",
     userId: user?.user_id,
@@ -122,6 +167,13 @@ function DeliveryDashboardInner() {
     }
     try {
       await api.post("/driver/availability", { available: next });
+      if (next) {
+        primeDriverOfferSound();
+        requestPush();
+        loadActiveOffer();
+      } else {
+        setIncomingOffer(null);
+      }
     } catch (e) {
       logClientError("delivery.toggleOnline", e);
     }
@@ -157,6 +209,13 @@ function DeliveryDashboardInner() {
   return (
     <div>
       <Header />
+      {incomingOffer && (
+        <DriverOrderOfferModal
+          offer={incomingOffer}
+          onClear={() => setIncomingOffer(null)}
+          onRefresh={refresh}
+        />
+      )}
       <div className="max-w-5xl mx-auto px-6 md:px-12 py-12">
         {founderMode && (
           <div className="card p-4 mb-6 flex flex-wrap items-center justify-between gap-3" style={{ borderColor: "var(--accent)" }} data-testid="founder-driver-banner">
