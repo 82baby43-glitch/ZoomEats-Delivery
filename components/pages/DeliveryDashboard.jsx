@@ -74,19 +74,21 @@ function DeliveryDashboardInner() {
 
   const refresh = useCallback(async () => {
     try {
-      const [a, m, act] = await Promise.all([
+      const [a, m, act] = await Promise.allSettled([
         api.get("/delivery/available"),
         api.get("/delivery/my"),
         api.get("/driver/active"),
       ]);
-      setAvailable(sanitizeOrders(a?.data));
-      setMine(sanitizeOrders(m?.data));
-      setActiveDispatch({
-        driver: act?.data?.driver ?? null,
-        orders: sanitizeOrders(act?.data?.orders),
-        route: act?.data?.route ?? null,
-      });
-      setLoadError(false);
+      if (a.status === "fulfilled") setAvailable(sanitizeOrders(a.value?.data));
+      if (m.status === "fulfilled") setMine(sanitizeOrders(m.value?.data));
+      if (act.status === "fulfilled") {
+        setActiveDispatch({
+          driver: act.value?.data?.driver ?? null,
+          orders: sanitizeOrders(act.value?.data?.orders),
+          route: act.value?.data?.route ?? null,
+        });
+      }
+      setLoadError(act.status === "rejected" && m.status === "rejected" && a.status === "rejected");
       try {
         const wb = await getWalletBalance();
         setWallet(sanitizeWallet(wb?.data));
