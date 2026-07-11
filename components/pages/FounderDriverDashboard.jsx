@@ -28,6 +28,13 @@ const TABS = [
   { id: "feedback", label: "Feedback" },
 ];
 
+function decorateOffer(offer) {
+  if (!offer) return null;
+  const expiresMs = offer.expires_at ? new Date(offer.expires_at).getTime() : 0;
+  const ttl = offer.ttl_seconds ?? (expiresMs ? Math.max(0, Math.ceil((expiresMs - Date.now()) / 1000)) : 20);
+  return { ...offer, ttl_seconds: ttl };
+}
+
 function StarRow({ value, onChange, label }) {
   return (
     <div className="flex items-center justify-between gap-2 text-sm">
@@ -174,10 +181,7 @@ export default function FounderDriverDashboard() {
         const offer = res?.data?.offer ?? res?.offer;
         if (offer && !res?.data?.locked_elsewhere && !res?.locked_elsewhere) {
           primeDriverOfferSound();
-          setIncomingOffer({
-            ...offer,
-            ttl_seconds: offer.ttl_seconds ?? Math.max(0, Math.ceil((new Date(offer.expires_at).getTime() - Date.now()) / 1000)),
-          });
+          setIncomingOffer(decorateOffer(offer));
         }
       }
       await load();
@@ -195,10 +199,7 @@ export default function FounderDriverDashboard() {
       const res = await api.get("/driver/offers/active", { params: { device_id: deviceId } });
       const offer = res?.data?.offer ?? res?.offer;
       if (offer && !res?.data?.locked_elsewhere && !res?.locked_elsewhere) {
-        setIncomingOffer({
-          ...offer,
-          ttl_seconds: offer.ttl_seconds ?? Math.max(0, Math.ceil((new Date(offer.expires_at).getTime() - Date.now()) / 1000)),
-        });
+        setIncomingOffer(decorateOffer(offer));
       }
     } catch (e) {
       console.warn(e);
@@ -300,7 +301,7 @@ export default function FounderDriverDashboard() {
       return;
     }
     if (payload?.offer_id) {
-      setIncomingOffer(payload);
+      setIncomingOffer(decorateOffer(payload));
     }
   });
 
