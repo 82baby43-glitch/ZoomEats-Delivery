@@ -30,7 +30,40 @@ export function normalizeOrderId(input: string): string {
   if (!raw) return "";
   const fromPath = raw.match(/\/orders\/([^/?#]+)/i);
   if (fromPath) return fromPath[1];
-  return raw.split(/[?#\s]/)[0];
+  const hashMatch = raw.match(/#([a-zA-Z0-9_-]+)/);
+  if (hashMatch) return hashMatch[1];
+  const orderLabel = raw.match(/^order\s+#?\s*([a-zA-Z0-9_-]+)$/i);
+  if (orderLabel) return orderLabel[1];
+  return raw.split(/\s+/)[0].replace(/^#/, "");
+}
+
+/** Resolve UI short ids (e.g. 46f166) or full order_id (ord_…) to a single orders row. */
+export async function resolveOrderId(db: SupabaseClient, input: string): Promise<string> {
+  const token = normalizeOrderId(input);
+  if (!token) throwErr("order_id required");
+
+  const { data: exact } = await db.from("orders").select("order_id").eq("order_id", token).maybeSingle();
+  if (exact?.order_id) return String(exact.order_id);
+
+  if (token.length >= 4) {
+    const { data: matches } = await db
+      .from("orders")
+      .select("order_id,created_at")
+      .ilike("order_id", `%${token}`)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    const list = matches || [];
+    const suffixHits = list.filter((o) => String(o.order_id).toLowerCase().endsWith(token.toLowerCase()));
+    const pool = suffixHits.length ? suffixHits : list;
+
+    if (pool.length === 1) return String(pool[0].order_id);
+    if (pool.length > 1) {
+      throwErr(`Multiple orders match "${token}" — paste the full order ID`, 409);
+    }
+  }
+
+  throwErr(`Order not found for "${input}"`, 404);
 }
 
 async function isFounderDriverUser(db: SupabaseClient, userId: string): Promise<boolean> {
@@ -291,7 +324,8 @@ export async function createAndBroadcastOffer(
   return { ok: true, offer_id: offerId, driver_id: String(driver.driver_id) };
 }
 
-async function loadOrderForFounderAction(db: SupabaseClient, orderId: string) {
+async function loadOrderForFounderAction(db: SupabaseClient, orderIdOrInput: string) {
+  const orderId = await resolveOrderId(db, orderIdOrInput);
   const { data: order } = await db.from("orders").select("*").eq("order_id", orderId).maybeSingle();
   if (!order) throwErr("Order not found", 404);
   if (order.driver_id) throwErr("Order already has a driver", 409);
@@ -382,7 +416,9 @@ export async function createOfferForDriver(
 }
 
 const CLAIMABLE_ORDER_STATUSES = ["placed", "accepted", "preparing", "ready", "confirmed", "pending"];
-const FOUNDER_CLAIMABLE_STATUSES = ["pending", "placed", "confirmed", "accepted", "preparing", "ready"];
+const FOUNDER_CLAIMABLE_STATUSES = [
+  "pending_payment", "pending", "placed", "confirmed", "accepted", "preparing", "ready",
+];
 
 export async function assignOrderToDriver(
   db: SupabaseClient,
@@ -401,7 +437,7 @@ export async function assignOrderToDriver(
     throwErr(`Order is ${order.status} and cannot be assigned`, 400);
   }
   if (opts.founderForce) {
-    if (!["paid", "pending", "initiated"].includes(String(order.payment_status))) {
+    if (!["paid", "pending", "initiated", "requires_payment", "processing"].includes(String(order.payment_status))) {
       throwErr(`Order payment status is ${order.payment_status} — cannot assign`, 400);
     }
   } else if (order.payment_status !== "paid") {
@@ -499,7 +535,7 @@ export async function listClaimableOrders(db: SupabaseClient, limit = 20, opts: 
 
   if (opts.founderMode) {
     q = q
-      .in("payment_status", ["paid", "pending", "initiated"])
+      .in("payment_status", ["paid", "pending", "initiated", "requires_payment", "processing"])
       .in("status", FOUNDER_CLAIMABLE_STATUSES);
   } else {
     q = q.eq("payment_status", "paid").in("status", CLAIMABLE_ORDER_STATUSES);
