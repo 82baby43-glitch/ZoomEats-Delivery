@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canAccessFounderDashboard, hasFounderDriverPermission } from "./auth";
+import { assignOrderToDriver, listClaimableOrders, recordOfferEvent } from "../dispatch/offers";
+import type { RealtimeRuntime } from "../logistics/delivery-realtime";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -21,7 +23,8 @@ async function requireFounderUser(db: SupabaseClient, userId: string) {
   return user;
 }
 
-async function ensureFounderDriverRow(db: SupabaseClient, userId: string) {
+async function ensureFounderDriverRow(db: SupabaseClient, userId: string, opts: { online?: boolean } = {}) {
+  const now = new Date().toISOString();
   const { data: existing } = await db.from("drivers").select("*").eq("user_id", userId).maybeSingle();
   if (existing) {
     await db.from("drivers").update({
@@ -29,20 +32,23 @@ async function ensureFounderDriverRow(db: SupabaseClient, userId: string) {
       agreement_complete: true,
       active: true,
       documents_complete: true,
-      updated_at: new Date().toISOString(),
+      availability: opts.online ?? existing.availability,
+      last_seen: now,
+      updated_at: now,
     }).eq("driver_id", existing.driver_id);
-    return existing;
+    const { data: refreshed } = await db.from("drivers").select("*").eq("driver_id", existing.driver_id).maybeSingle();
+    return refreshed || existing;
   }
   const driver = {
     driver_id: uid("drv"),
     user_id: userId,
-    availability: false,
+    availability: opts.online ?? false,
     workload: 0,
     approval_status: "approved",
     agreement_complete: true,
     active: true,
     documents_complete: true,
-    last_seen: new Date().toISOString(),
+    last_seen: now,
   };
   await db.from("drivers").insert(driver);
   return driver;
@@ -101,6 +107,7 @@ export async function handleFounderDriverRequest(
     body?: Record<string, unknown>;
     params?: Record<string, string>;
     requireAuth: () => Record<string, unknown>;
+    runtime?: RealtimeRuntime;
   }
 ): Promise<unknown | null> {
   const { path, method, body = {}, params = {} } = opts;
@@ -122,7 +129,9 @@ export async function handleFounderDriverRequest(
       .maybeSingle();
     const { data: driver } = await db.from("drivers").select("*").eq("user_id", userId).maybeSingle();
     const { data: activeOrders } = driver
-      ? await db.from("orders").select("*").eq("driver_id", driver.driver_id).in("status", ["assigned_internal", "picked_up"])
+      ? await db.from("orders").select("*").eq("driver_id", driver.driver_id).in("status", [
+          "assigned_internal", "arrived_at_store", "picked_up", "out_for_delivery", "arrived_at_customer",
+        ])
       : { data: [] };
     const current = (activeOrders || [])[0] || null;
     return {
@@ -158,9 +167,13 @@ export async function handleFounderDriverRequest(
         .update({ ended_at: new Date().toISOString() })
         .eq("user_id", userId)
         .is("ended_at", null);
+      const { data: driver } = await db.from("drivers").select("driver_id").eq("user_id", userId).maybeSingle();
+      if (driver) {
+        await db.from("drivers").update({ availability: false, updated_at: new Date().toISOString() }).eq("driver_id", driver.driver_id);
+      }
       return { ok: true, active: false };
     }
-    await ensureFounderDriverRow(db, userId);
+    await ensureFounderDriverRow(db, userId, { online: true });
     const sessionId = uid("fds");
     await db.from("founder_driver_sessions").insert({
       session_id: sessionId,
@@ -169,6 +182,24 @@ export async function handleFounderDriverRequest(
       shadow_dispatch: !!body.shadow_dispatch,
     });
     return { ok: true, active: true, session_id: sessionId };
+  }
+
+  if (path === "/founder-driver/claimable-orders" && method === "GET") {
+    const orders = await listClaimableOrders(db, 25);
+    return { orders };
+  }
+
+  const claimMatch = path.match(/^\/founder-driver\/claim-order$/);
+  if (claimMatch && method === "POST") {
+    const orderId = String(body.order_id || "");
+    if (!orderId) throwErr("order_id required");
+    const driver = await ensureFounderDriverRow(db, userId, { online: true });
+    const result = await assignOrderToDriver(db, orderId, driver, opts.runtime);
+    await recordOfferEvent(db, orderId, "founder_claimed", {
+      driverId: String(driver.driver_id),
+      message: "Founder driver self-assigned to order",
+    });
+    return result;
   }
 
   if (path === "/founder-driver/pickup-log" && method === "POST") {

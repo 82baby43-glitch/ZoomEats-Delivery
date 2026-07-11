@@ -257,6 +257,10 @@ export async function handleApiRequest(
       body,
       params,
       requireAuth,
+      runtime: {
+        supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+        serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      },
     });
     if (founderResult !== null) return founderResult;
 

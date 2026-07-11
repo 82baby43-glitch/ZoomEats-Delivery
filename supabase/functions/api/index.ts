@@ -278,6 +278,7 @@ Deno.serve(async (req) => {
       body,
       params,
       requireAuth,
+      runtime: { supabaseUrl, serviceKey },
     });
     if (founderResult !== null) return json(founderResult);
 
