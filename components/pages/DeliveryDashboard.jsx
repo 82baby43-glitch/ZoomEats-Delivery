@@ -223,7 +223,10 @@ function DeliveryDashboardInner() {
               <div className="label-eyebrow">Founder Driver Mode</div>
               <p className="text-sm" style={{ color: "var(--muted)" }}>Analytics active — you operate as a real driver. Payments, GPS, and dispatch unchanged.</p>
             </div>
-            <Link href="/admin/founder-driver" className="btn-secondary text-sm">Open analytics</Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/admin/founder-driver" className="btn-secondary text-sm">Open analytics</Link>
+              <Link href="/admin/founder-driver?tab=driver" className="btn-primary text-sm" data-testid="founder-claim-order-link">Claim an order</Link>
+            </div>
           </div>
         )}
         <div className="mt-4 flex flex-wrap gap-2">

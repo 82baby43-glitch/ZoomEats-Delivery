@@ -273,6 +273,113 @@ export async function createAndBroadcastOffer(
   return { ok: true, offer_id: offerId, driver_id: String(driver.driver_id) };
 }
 
+const CLAIMABLE_ORDER_STATUSES = ["placed", "accepted", "preparing", "ready"];
+
+export async function assignOrderToDriver(
+  db: SupabaseClient,
+  orderId: string,
+  driver: Record<string, unknown>,
+  runtime?: RealtimeRuntime,
+  opts: { source?: string } = {}
+) {
+  const { data: order } = await db.from("orders").select("*").eq("order_id", orderId).maybeSingle();
+  if (!order) throwErr("Order not found", 404);
+  if (order.driver_id) throwErr("Order already has a driver", 409);
+  if (order.payment_status !== "paid") throwErr("Order is not paid yet", 400);
+  if (order.delivery_type === "uber" || order.status === "assigned_uber") {
+    throwErr("Uber Direct orders cannot be claimed internally", 400);
+  }
+
+  const now = new Date().toISOString();
+  const trackingId = `trk_${orderId}`;
+
+  const { error: assignError } = await db
+    .from("orders")
+    .update({
+      driver_id: driver.driver_id,
+      status: "assigned_internal",
+      delivery_type: "internal",
+      tracking_id: trackingId,
+      current_offer_id: null,
+      updated_at: now,
+    })
+    .eq("order_id", orderId)
+    .is("driver_id", null);
+
+  if (assignError) throwErr(assignError.message, 500);
+
+  await db
+    .from("drivers")
+    .update({
+      availability: true,
+      workload: Number(driver.workload || 0) + 1,
+      last_seen: now,
+    })
+    .eq("driver_id", driver.driver_id);
+
+  const { data: existingDelivery } = await db.from("deliveries").select("delivery_id").eq("order_id", orderId).maybeSingle();
+  if (!existingDelivery) {
+    await db.from("deliveries").insert({
+      delivery_id: uid("dlv"),
+      order_id: orderId,
+      provider: "internal",
+      tracking_id: trackingId,
+      status: "assigned",
+      driver_id: driver.driver_id,
+    });
+  } else {
+    await db
+      .from("deliveries")
+      .update({ status: "assigned", driver_id: driver.driver_id, tracking_id: trackingId })
+      .eq("order_id", orderId);
+  }
+
+  await cancelPendingOffers(db, orderId);
+
+  const routingDb = createRoutingDbAdapter(db);
+  const orderRef = await routingDb.getOrderCoords?.(orderId);
+  if (orderRef) {
+    try {
+      await initializeRouteForOrder(
+        routingDb,
+        String(driver.driver_id),
+        orderRef,
+        { lat: Number(driver.latitude) || 0, lng: Number(driver.longitude) || 0 },
+        runtime
+      );
+    } catch (e) {
+      console.warn(JSON.stringify({ assign_route_init_skipped: String(e) }));
+    }
+  }
+
+  try {
+    await handleDispatchAssigned(db, orderId, String(driver.driver_id), runtime);
+  } catch (e) {
+    console.warn(JSON.stringify({ dispatch_assigned_event_skipped: String(e) }));
+  }
+
+  return {
+    ok: true,
+    order_id: orderId,
+    status: "assigned_internal",
+    driver_id: driver.driver_id,
+    navigate_to: `/driver/navigate/${orderId}`,
+  };
+}
+
+export async function listClaimableOrders(db: SupabaseClient, limit = 20) {
+  const { data } = await db
+    .from("orders")
+    .select("order_id,restaurant_name,customer_name,address,total,status,payment_status,created_at")
+    .eq("payment_status", "paid")
+    .is("driver_id", null)
+    .in("status", CLAIMABLE_ORDER_STATUSES)
+    .or("delivery_type.is.null,delivery_type.neq.uber")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  return data || [];
+}
+
 export async function acceptDriverOffer(
   db: SupabaseClient,
   offerId: string,
@@ -318,55 +425,7 @@ export async function acceptDriverOffer(
 
   if (!updated) throwErr("Could not accept offer — it may have expired", 409);
 
-  const trackingId = `trk_${offer.order_id}`;
-  const { error: assignError } = await db
-    .from("orders")
-    .update({
-      driver_id: d.driver_id,
-      status: "assigned_internal",
-      delivery_type: "internal",
-      tracking_id: trackingId,
-      current_offer_id: null,
-      updated_at: now,
-    })
-    .eq("order_id", offer.order_id)
-    .is("driver_id", null);
-
-  if (assignError) throwErr(assignError.message, 500);
-
-  await db.from("drivers").update({ workload: Number(d.workload || 0) + 1, last_seen: now }).eq("driver_id", d.driver_id);
-
-  const { data: existingDelivery } = await db.from("deliveries").select("delivery_id").eq("order_id", offer.order_id).maybeSingle();
-  if (!existingDelivery) {
-    await db.from("deliveries").insert({
-      delivery_id: uid("dlv"),
-      order_id: offer.order_id,
-      provider: "internal",
-      tracking_id: trackingId,
-      status: "assigned",
-      driver_id: d.driver_id,
-    });
-  } else {
-    await db.from("deliveries").update({ status: "assigned", driver_id: d.driver_id, tracking_id: trackingId }).eq("order_id", offer.order_id);
-  }
-
-  await cancelPendingOffers(db, offer.order_id, offerId);
-
-  const routingDb = createRoutingDbAdapter(db);
-  const orderRef = await routingDb.getOrderCoords?.(offer.order_id);
-  if (orderRef) {
-    try {
-      await initializeRouteForOrder(
-        routingDb,
-        d.driver_id,
-        orderRef,
-        { lat: Number(d.latitude) || 0, lng: Number(d.longitude) || 0 },
-        runtime
-      );
-    } catch (e) {
-      console.warn(JSON.stringify({ offer_route_init_skipped: String(e) }));
-    }
-  }
+  const result = await assignOrderToDriver(db, String(offer.order_id), d, runtime);
 
   await recordOfferEvent(db, offer.order_id, "accepted", {
     offerId,
@@ -375,20 +434,9 @@ export async function acceptDriverOffer(
     meta: { response_ms: responseMs },
   });
 
-  try {
-    await handleDispatchAssigned(db, offer.order_id, d.driver_id, runtime);
-  } catch (e) {
-    console.warn(JSON.stringify({ dispatch_assigned_event_skipped: String(e) }));
-  }
-
   await pushDriverOfferBroadcast(d.driver_id, { event: "offer_accepted", offer_id: offerId, order_id: offer.order_id }, runtime);
 
-  return {
-    ok: true,
-    order_id: offer.order_id,
-    status: "assigned_internal",
-    navigate_to: `/driver/navigate/${offer.order_id}`,
-  };
+  return result;
 }
 
 export async function declineDriverOffer(

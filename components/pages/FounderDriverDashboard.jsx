@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { setFounderDriverModeActive, setShadowDispatchActive } from "@/lib/founderDriver/session";
-import { Truck, MapPin, BarChart3, MessageSquare, Star, Camera } from "lucide-react";
+import { Truck, MapPin, BarChart3, MessageSquare, Star, Camera, ClipboardList } from "lucide-react";
 import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
 
 const TABS = [
@@ -41,7 +42,8 @@ function StarRow({ value, onChange, label }) {
 }
 
 export default function FounderDriverDashboard() {
-  const [tab, setTab] = useState("overview");
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState(() => searchParams.get("tab") || "overview");
   const [status, setStatus] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [heatmap, setHeatmap] = useState(null);
@@ -52,6 +54,9 @@ export default function FounderDriverDashboard() {
   const [error, setError] = useState(false);
   const [pickupGallery, setPickupGallery] = useState([]);
   const [msg, setMsg] = useState("");
+  const [claimableOrders, setClaimableOrders] = useState([]);
+  const [claimingId, setClaimingId] = useState("");
+  const [manualOrderId, setManualOrderId] = useState("");
 
   const [pickupForm, setPickupForm] = useState({
     order_id: "",
@@ -96,6 +101,34 @@ export default function FounderDriverDashboard() {
     }
   }, []);
 
+  const loadClaimableOrders = useCallback(async () => {
+    try {
+      const res = await api.get("/founder-driver/claimable-orders");
+      const orders = res?.data?.orders ?? res?.orders ?? [];
+      setClaimableOrders(Array.isArray(orders) ? orders : []);
+    } catch {
+      setClaimableOrders([]);
+    }
+  }, []);
+
+  const claimOrder = async (orderId) => {
+    if (!orderId) return;
+    setClaimingId(orderId);
+    try {
+      const res = await api.post("/founder-driver/claim-order", { order_id: orderId });
+      const navigateTo = res?.data?.navigate_to || res?.navigate_to || `/driver/navigate/${orderId}`;
+      setMsg(`Assigned to order ${orderId}. Opening driver navigation…`);
+      setManualOrderId("");
+      await load();
+      await loadClaimableOrders();
+      window.location.href = navigateTo;
+    } catch (e) {
+      setMsg(e?.response?.data?.error || e?.message || "Could not claim order.");
+    } finally {
+      setClaimingId("");
+    }
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -117,15 +150,21 @@ export default function FounderDriverDashboard() {
         setJournalForm((f) => ({ ...f, order_id: st.data.current_delivery.order_id }));
       }
       await loadPickupGallery();
+      await loadClaimableOrders();
     } catch (e) {
       console.warn(e);
       setError(true);
     } finally {
       setLoading(false);
     }
-  }, [loadPickupGallery]);
+  }, [loadPickupGallery, loadClaimableOrders]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t && TABS.some((x) => x.id === t)) setTab(t);
+  }, [searchParams]);
 
   const startSession = async (shadow = false) => {
     await api.post("/founder-driver/session", { action: "start", shadow_dispatch: shadow });
@@ -301,10 +340,80 @@ export default function FounderDriverDashboard() {
                   <MapPin size={12} /> {status.current_delivery.address}
                 </div>
                 <span className="badge mt-2">{status.current_delivery.status}</span>
+                <div className="mt-3">
+                  <Link href={`/driver/navigate/${status.current_delivery.order_id}`} className="btn-primary text-sm inline-flex items-center gap-2">
+                    <Truck size={14} /> Open navigation
+                  </Link>
+                </div>
               </div>
             ) : (
-              <p className="text-sm" style={{ color: "var(--muted)" }}>No active dispatch. Go online on the driver dashboard to receive orders.</p>
+              <p className="text-sm" style={{ color: "var(--muted)" }}>
+                No active delivery. Claim a paid order below or go online on the driver dashboard to receive offers.
+              </p>
             )}
+
+            <div className="rounded-xl border p-4 space-y-4" style={{ borderColor: "var(--border)" }} data-testid="founder-claim-orders">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-bold flex items-center gap-2"><ClipboardList size={16} /> Claim an order</h3>
+                <button type="button" className="btn-secondary text-sm" onClick={loadClaimableOrders} data-testid="founder-claim-refresh">
+                  Refresh list
+                </button>
+              </div>
+              <p className="text-sm" style={{ color: "var(--muted)" }}>
+                Self-assign to any paid internal order without waiting for the 20-second offer timer.
+              </p>
+
+              <div className="flex flex-wrap gap-2">
+                <input
+                  className="input-field flex-1 min-w-[200px]"
+                  placeholder="Order ID (manual claim)"
+                  value={manualOrderId}
+                  onChange={(e) => setManualOrderId(e.target.value)}
+                  data-testid="founder-claim-manual-id"
+                />
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={!manualOrderId.trim() || !!claimingId}
+                  onClick={() => claimOrder(manualOrderId.trim())}
+                  data-testid="founder-claim-manual-submit"
+                >
+                  {claimingId === manualOrderId.trim() ? "Claiming…" : "Claim by ID"}
+                </button>
+              </div>
+
+              {claimableOrders.length > 0 ? (
+                <ul className="space-y-2">
+                  {claimableOrders.map((o) => (
+                    <li
+                      key={o.order_id}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm"
+                      style={{ borderColor: "var(--border)" }}
+                      data-testid={`founder-claim-row-${o.order_id}`}
+                    >
+                      <div>
+                        <div className="font-bold">{o.restaurant_name || "Restaurant"}</div>
+                        <div style={{ color: "var(--muted)" }}>{o.customer_name} · ${Number(o.total || 0).toFixed(2)}</div>
+                        <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>
+                          {o.order_id} · {o.status}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-primary text-sm shrink-0"
+                        disabled={!!claimingId}
+                        onClick={() => claimOrder(o.order_id)}
+                        data-testid={`founder-claim-btn-${o.order_id}`}
+                      >
+                        {claimingId === o.order_id ? "Claiming…" : "Claim"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm" style={{ color: "var(--muted)" }}>No unassigned paid orders right now.</p>
+              )}
+            </div>
           </div>
         )}
 
