@@ -3,12 +3,19 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, getApiErrorMessage } from "@/lib/api";
 import Header from "@/components/Header";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { setFounderDriverModeActive, setShadowDispatchActive } from "@/lib/founderDriver/session";
-import { Truck, MapPin, BarChart3, MessageSquare, Star, Camera, ClipboardList } from "lucide-react";
+import { Truck, MapPin, BarChart3, MessageSquare, Star, Camera, ClipboardList, Power } from "lucide-react";
 import PickupPhotoInstructions from "@/components/driver/PickupPhotoInstructions";
+import DriverOrderOfferModal from "@/components/driver/DriverOrderOfferModal";
+import DriverDeliveryWorkflow from "@/components/driver/DriverDeliveryWorkflow";
+import { getDriverDeviceId } from "@/lib/driverDeviceId";
+import { useDriverOfferRealtime } from "@/lib/hooks/useDriverOfferRealtime";
+import { useDriverGpsTracking } from "@/lib/hooks/useDriverGpsTracking";
+import { primeDriverOfferSound } from "@/lib/driverOfferSound";
+import { useWebPush } from "@/lib/useWebPush";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -56,7 +63,19 @@ export default function FounderDriverDashboard() {
   const [msg, setMsg] = useState("");
   const [claimableOrders, setClaimableOrders] = useState([]);
   const [claimingId, setClaimingId] = useState("");
+  const [offeringId, setOfferingId] = useState("");
   const [manualOrderId, setManualOrderId] = useState("");
+  const [online, setOnline] = useState(false);
+  const [incomingOffer, setIncomingOffer] = useState(null);
+  const deviceId = typeof window !== "undefined" ? getDriverDeviceId() : "";
+  const driverId = status?.driver?.driver_id;
+  const { request: requestPush } = useWebPush("ZoomEats Driver");
+
+  const { coords } = useDriverGpsTracking({
+    enabled: online || Boolean(status?.current_delivery),
+    activeOrderId: status?.current_delivery?.order_id,
+    activeOrderStatus: status?.current_delivery?.status,
+  });
 
   const [pickupForm, setPickupForm] = useState({
     order_id: "",
@@ -123,9 +142,66 @@ export default function FounderDriverDashboard() {
       await loadClaimableOrders();
       window.location.href = navigateTo;
     } catch (e) {
-      setMsg(e?.response?.data?.error || e?.message || "Could not claim order.");
+      setMsg(getApiErrorMessage(e, "Could not claim order."));
     } finally {
       setClaimingId("");
+    }
+  };
+
+  const requestOffer = async (orderId) => {
+    if (!orderId) return;
+    setOfferingId(orderId);
+    try {
+      await api.post("/founder-driver/request-offer", { order_id: orderId });
+      setMsg(`Offer sent for ${orderId} — accept or decline below.`);
+      setManualOrderId("");
+      await loadActiveOffer();
+    } catch (e) {
+      setMsg(getApiErrorMessage(e, "Could not send offer."));
+    } finally {
+      setOfferingId("");
+    }
+  };
+
+  const loadActiveOffer = useCallback(async () => {
+    if (!online || !driverId) return;
+    try {
+      const res = await api.get("/driver/offers/active", { params: { device_id: deviceId } });
+      const offer = res?.data?.offer ?? res?.offer;
+      if (offer && !res?.data?.locked_elsewhere && !res?.locked_elsewhere) {
+        setIncomingOffer({
+          ...offer,
+          ttl_seconds: offer.ttl_seconds ?? Math.max(0, Math.ceil((new Date(offer.expires_at).getTime() - Date.now()) / 1000)),
+        });
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [online, driverId, deviceId]);
+
+  const toggleOnline = async () => {
+    const next = !online;
+    setOnline(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("zoomeats_driver_online", next ? "1" : "0");
+    }
+    try {
+      if (!status?.session_active && next) {
+        await api.post("/founder-driver/session", { action: "start" });
+        setFounderDriverModeActive(true);
+      }
+      await api.post("/driver/availability", { available: next });
+      if (next) {
+        primeDriverOfferSound();
+        requestPush();
+        await load();
+        await loadActiveOffer();
+      } else {
+        setIncomingOffer(null);
+      }
+      setMsg(next ? "You are online — offers will appear here with accept/decline." : "You are offline.");
+    } catch (e) {
+      setMsg(getApiErrorMessage(e, "Could not update availability."));
     }
   };
 
@@ -140,6 +216,10 @@ export default function FounderDriverDashboard() {
         api.get("/founder-driver/feedback"),
       ]);
       setStatus(st?.data || null);
+      setOnline(Boolean(st?.data?.driver?.online));
+      if (typeof window !== "undefined" && st?.data?.driver?.online) {
+        localStorage.setItem("zoomeats_driver_online", "1");
+      }
       setMetrics(met?.data || null);
       setHeatmap(hm?.data || null);
       setScorecards(Array.isArray(sc?.data) ? sc.data : []);
@@ -165,6 +245,27 @@ export default function FounderDriverDashboard() {
     const t = searchParams.get("tab");
     if (t && TABS.some((x) => x.id === t)) setTab(t);
   }, [searchParams]);
+
+  useEffect(() => {
+    if (online) loadActiveOffer();
+  }, [online, loadActiveOffer]);
+
+  useEffect(() => {
+    if (!online) return;
+    const t = setInterval(loadActiveOffer, 5000);
+    return () => clearInterval(t);
+  }, [online, loadActiveOffer]);
+
+  useDriverOfferRealtime(driverId, (payload) => {
+    if (payload?.event === "offer_accepted") {
+      setIncomingOffer(null);
+      load();
+      return;
+    }
+    if (payload?.offer_id) {
+      setIncomingOffer(payload);
+    }
+  });
 
   const startSession = async (shadow = false) => {
     await api.post("/founder-driver/session", { action: "start", shadow_dispatch: shadow });
@@ -242,6 +343,13 @@ export default function FounderDriverDashboard() {
   return (
     <div>
       <Header />
+      {incomingOffer && (
+        <DriverOrderOfferModal
+          offer={incomingOffer}
+          onClear={() => setIncomingOffer(null)}
+          onRefresh={load}
+        />
+      )}
       <div className="max-w-6xl mx-auto px-6 md:px-12 py-10">
         <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
           <div>
@@ -331,8 +439,29 @@ export default function FounderDriverDashboard() {
               Role: {status?.founder_role || "founder"} · Session: {status?.session_active ? "active" : "inactive"}
               {status?.shadow_dispatch ? " · Shadow dispatch ON" : ""}
             </p>
+
+            <div className="rounded-xl border p-4 flex flex-wrap items-center justify-between gap-4" style={{ borderColor: "var(--border)" }} data-testid="founder-online-toggle">
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-11 h-11 rounded-xl flex items-center justify-center"
+                  style={{ background: online ? "var(--primary)" : "var(--surface-2)", color: online ? "#0A0A0A" : "var(--muted)" }}
+                >
+                  <Power size={20} />
+                </div>
+                <div>
+                  <div className="font-bold">{online ? "Online" : "Offline"}</div>
+                  <div className="text-xs" style={{ color: "var(--muted)" }}>
+                    {online ? "Listening for delivery offers with accept/decline" : "Go online to receive offers"}
+                  </div>
+                </div>
+              </div>
+              <button type="button" className={online ? "btn-secondary" : "btn-primary"} onClick={toggleOnline} data-testid="founder-toggle-online">
+                {online ? "Go Offline" : "Go Online"}
+              </button>
+            </div>
+
             {status?.current_delivery ? (
-              <div className="rounded-xl border p-4" style={{ borderColor: "var(--border)" }}>
+              <div className="rounded-xl border p-4 space-y-4" style={{ borderColor: "var(--border)" }}>
                 <div className="font-bold">Current delivery</div>
                 <div className="text-sm mt-2">Order {status.current_delivery.order_id}</div>
                 <div className="text-sm">{status.current_delivery.restaurant} → {status.current_delivery.customer}</div>
@@ -340,6 +469,14 @@ export default function FounderDriverDashboard() {
                   <MapPin size={12} /> {status.current_delivery.address}
                 </div>
                 <span className="badge mt-2">{status.current_delivery.status}</span>
+                <DriverDeliveryWorkflow
+                  order={{
+                    order_id: status.current_delivery.order_id,
+                    status: status.current_delivery.status,
+                  }}
+                  coords={coords}
+                  onRefresh={load}
+                />
                 <div className="mt-3">
                   <Link href={`/driver/navigate/${status.current_delivery.order_id}`} className="btn-primary text-sm inline-flex items-center gap-2">
                     <Truck size={14} /> Open navigation
@@ -348,37 +485,46 @@ export default function FounderDriverDashboard() {
               </div>
             ) : (
               <p className="text-sm" style={{ color: "var(--muted)" }}>
-                No active delivery. Claim a paid order below or go online on the driver dashboard to receive offers.
+                No active delivery. Go online for accept/decline offers, or claim an unassigned order below.
               </p>
             )}
 
             <div className="rounded-xl border p-4 space-y-4" style={{ borderColor: "var(--border)" }} data-testid="founder-claim-orders">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="font-bold flex items-center gap-2"><ClipboardList size={16} /> Claim an order</h3>
+                <h3 className="font-bold flex items-center gap-2"><ClipboardList size={16} /> Unassigned orders</h3>
                 <button type="button" className="btn-secondary text-sm" onClick={loadClaimableOrders} data-testid="founder-claim-refresh">
                   Refresh list
                 </button>
               </div>
               <p className="text-sm" style={{ color: "var(--muted)" }}>
-                Self-assign to any paid internal order without waiting for the 20-second offer timer.
+                Send yourself an offer (accept/decline like the driver app) or claim directly to skip the timer.
               </p>
 
               <div className="flex flex-wrap gap-2">
                 <input
                   className="input-field flex-1 min-w-[200px]"
-                  placeholder="Order ID (manual claim)"
+                  placeholder="Order ID"
                   value={manualOrderId}
                   onChange={(e) => setManualOrderId(e.target.value)}
                   data-testid="founder-claim-manual-id"
                 />
                 <button
                   type="button"
+                  className="btn-secondary"
+                  disabled={!manualOrderId.trim() || !!offeringId || !!claimingId}
+                  onClick={() => requestOffer(manualOrderId.trim())}
+                  data-testid="founder-offer-manual-submit"
+                >
+                  {offeringId === manualOrderId.trim() ? "Sending…" : "Send offer"}
+                </button>
+                <button
+                  type="button"
                   className="btn-primary"
-                  disabled={!manualOrderId.trim() || !!claimingId}
+                  disabled={!manualOrderId.trim() || !!claimingId || !!offeringId}
                   onClick={() => claimOrder(manualOrderId.trim())}
                   data-testid="founder-claim-manual-submit"
                 >
-                  {claimingId === manualOrderId.trim() ? "Claiming…" : "Claim by ID"}
+                  {claimingId === manualOrderId.trim() ? "Claiming…" : "Claim now"}
                 </button>
               </div>
 
@@ -395,23 +541,34 @@ export default function FounderDriverDashboard() {
                         <div className="font-bold">{o.restaurant_name || "Restaurant"}</div>
                         <div style={{ color: "var(--muted)" }}>{o.customer_name} · ${Number(o.total || 0).toFixed(2)}</div>
                         <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>
-                          {o.order_id} · {o.status}
+                          {o.order_id} · {o.status} · {o.payment_status}
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        className="btn-primary text-sm shrink-0"
-                        disabled={!!claimingId}
-                        onClick={() => claimOrder(o.order_id)}
-                        data-testid={`founder-claim-btn-${o.order_id}`}
-                      >
-                        {claimingId === o.order_id ? "Claiming…" : "Claim"}
-                      </button>
+                      <div className="flex flex-wrap gap-2 shrink-0">
+                        <button
+                          type="button"
+                          className="btn-secondary text-sm"
+                          disabled={!!claimingId || !!offeringId}
+                          onClick={() => requestOffer(o.order_id)}
+                          data-testid={`founder-offer-btn-${o.order_id}`}
+                        >
+                          {offeringId === o.order_id ? "Sending…" : "Send offer"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-primary text-sm"
+                          disabled={!!claimingId || !!offeringId}
+                          onClick={() => claimOrder(o.order_id)}
+                          data-testid={`founder-claim-btn-${o.order_id}`}
+                        >
+                          {claimingId === o.order_id ? "Claiming…" : "Claim"}
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm" style={{ color: "var(--muted)" }}>No unassigned paid orders right now.</p>
+                <p className="text-sm" style={{ color: "var(--muted)" }}>No unassigned orders right now.</p>
               )}
             </div>
           </div>
