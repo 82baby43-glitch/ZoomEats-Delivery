@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canAccessFounderDashboard, hasFounderDriverPermission } from "./auth";
-import { assignOrderToDriver, listClaimableOrders, recordOfferEvent } from "../dispatch/offers";
+import { assignOrderToDriver, createOfferForDriver, listClaimableOrders, normalizeOrderId, recordOfferEvent } from "../dispatch/offers";
 import type { RealtimeRuntime } from "../logistics/delivery-realtime";
 
 function uid(prefix: string) {
@@ -185,20 +185,29 @@ export async function handleFounderDriverRequest(
   }
 
   if (path === "/founder-driver/claimable-orders" && method === "GET") {
-    const orders = await listClaimableOrders(db, 25);
+    const orders = await listClaimableOrders(db, 25, { founderMode: true });
     return { orders };
   }
 
   const claimMatch = path.match(/^\/founder-driver\/claim-order$/);
   if (claimMatch && method === "POST") {
-    const orderId = String(body.order_id || "");
+    const orderId = normalizeOrderId(String(body.order_id || ""));
     if (!orderId) throwErr("order_id required");
     const driver = await ensureFounderDriverRow(db, userId, { online: true });
-    const result = await assignOrderToDriver(db, orderId, driver, opts.runtime);
+    const result = await assignOrderToDriver(db, orderId, driver, opts.runtime, { founderForce: true });
     await recordOfferEvent(db, orderId, "founder_claimed", {
       driverId: String(driver.driver_id),
       message: "Founder driver self-assigned to order",
     });
+    return result;
+  }
+
+  const offerMatch = path.match(/^\/founder-driver\/request-offer$/);
+  if (offerMatch && method === "POST") {
+    const orderId = normalizeOrderId(String(body.order_id || ""));
+    if (!orderId) throwErr("order_id required");
+    const driver = await ensureFounderDriverRow(db, userId, { online: true });
+    const result = await createOfferForDriver(db, orderId, String(driver.driver_id), opts.runtime);
     return result;
   }
 

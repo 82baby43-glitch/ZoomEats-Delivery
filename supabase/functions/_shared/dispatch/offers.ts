@@ -23,6 +23,21 @@ function throwErr(message: string, status = 400): never {
   throw e;
 }
 
+const TERMINAL_ORDER_STATUSES = ["delivered", "cancelled", "failed", "refunded", "complete"];
+
+export function normalizeOrderId(input: string): string {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  const fromPath = raw.match(/\/orders\/([^/?#]+)/i);
+  if (fromPath) return fromPath[1];
+  return raw.split(/[?#\s]/)[0];
+}
+
+async function isFounderDriverUser(db: SupabaseClient, userId: string): Promise<boolean> {
+  const { data: user } = await db.from("users").select("founder_driver,role").eq("user_id", userId).maybeSingle();
+  return user?.founder_driver === true || user?.role === "admin";
+}
+
 export async function recordOfferEvent(
   db: SupabaseClient,
   orderId: string,
@@ -118,6 +133,9 @@ export async function isDriverEligibleForOffer(
     .gt("expires_at", new Date().toISOString())
     .limit(1);
   if (pendingOffer?.length) return false;
+
+  const founderBypass = await isFounderDriverUser(db, String(driver.user_id));
+  if (founderBypass) return true;
 
   const lat = Number(driver.latitude);
   const lng = Number(driver.longitude);
@@ -273,27 +291,127 @@ export async function createAndBroadcastOffer(
   return { ok: true, offer_id: offerId, driver_id: String(driver.driver_id) };
 }
 
-const CLAIMABLE_ORDER_STATUSES = ["placed", "accepted", "preparing", "ready"];
+async function loadOrderForFounderAction(db: SupabaseClient, orderId: string) {
+  const { data: order } = await db.from("orders").select("*").eq("order_id", orderId).maybeSingle();
+  if (!order) throwErr("Order not found", 404);
+  if (order.driver_id) throwErr("Order already has a driver", 409);
+  if (order.delivery_type === "uber" || order.status === "assigned_uber") {
+    throwErr("Uber Direct orders cannot be assigned internally", 400);
+  }
+  if (TERMINAL_ORDER_STATUSES.includes(String(order.status))) {
+    throwErr(`Order is ${order.status} and cannot be assigned`, 400);
+  }
+  return order;
+}
+
+export async function createOfferForDriver(
+  db: SupabaseClient,
+  orderId: string,
+  driverId: string,
+  runtime?: RealtimeRuntime
+): Promise<{ ok: boolean; offer_id?: string; driver_id?: string; reason?: string }> {
+  const order = await loadOrderForFounderAction(db, orderId);
+  const { data: driver } = await db.from("drivers").select("*").eq("driver_id", driverId).maybeSingle();
+  if (!driver) throwErr("Driver not found", 404);
+
+  await cancelPendingOffers(db, orderId);
+
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + OFFER_TTL_SECONDS * 1000);
+  const offerId = uid("offer");
+
+  const routingDb = createRoutingDbAdapter(db);
+  const orderRef = await routingDb.getOrderCoords?.(orderId);
+  const lat = Number(driver.latitude);
+  const lng = Number(driver.longitude);
+  const distKm = orderRef && Number.isFinite(lat) && Number.isFinite(lng)
+    ? haversineKm({ lat, lng }, orderRef.pickup) + haversineKm(orderRef.pickup, orderRef.dropoff)
+    : null;
+
+  await db.from("driver_order_offers").insert({
+    offer_id: offerId,
+    order_id: orderId,
+    driver_id: driverId,
+    status: "pending",
+    offered_at: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    estimated_distance_km: distKm,
+    estimated_earnings: 8.5,
+    estimated_eta_min: 20,
+    meta: {
+      restaurant_name: order.restaurant_name,
+      customer_area: String(order.address || "").split(",").slice(-2).join(",").trim() || "Customer",
+      pickup_address: order.restaurant_name,
+      founder_offer: true,
+    },
+  });
+
+  await db
+    .from("orders")
+    .update({
+      current_offer_id: offerId,
+      offer_round: Number(order.offer_round || 0) + 1,
+      updated_at: now.toISOString(),
+    })
+    .eq("order_id", orderId);
+
+  await recordOfferEvent(db, orderId, "offer_sent", {
+    offerId,
+    driverId,
+    message: "Founder driver test offer",
+    meta: { expires_at: expiresAt.toISOString(), founder_offer: true },
+  });
+
+  const payload = {
+    offer_id: offerId,
+    order_id: orderId,
+    expires_at: expiresAt.toISOString(),
+    ttl_seconds: OFFER_TTL_SECONDS,
+    restaurant_name: order.restaurant_name,
+    customer_area: String(order.address || "").split(",").slice(-2).join(",").trim() || "Customer",
+    estimated_distance_km: distKm,
+    estimated_earnings: 8.5,
+    estimated_eta_min: 20,
+    pickup_label: order.restaurant_name,
+    dropoff_label: order.address,
+  };
+
+  await pushDriverOfferBroadcast(driverId, payload, runtime);
+
+  return { ok: true, offer_id: offerId, driver_id: driverId };
+}
+
+const CLAIMABLE_ORDER_STATUSES = ["placed", "accepted", "preparing", "ready", "confirmed", "pending"];
+const FOUNDER_CLAIMABLE_STATUSES = ["pending", "placed", "confirmed", "accepted", "preparing", "ready"];
 
 export async function assignOrderToDriver(
   db: SupabaseClient,
   orderId: string,
   driver: Record<string, unknown>,
   runtime?: RealtimeRuntime,
-  opts: { source?: string } = {}
+  opts: { source?: string; founderForce?: boolean } = {}
 ) {
   const { data: order } = await db.from("orders").select("*").eq("order_id", orderId).maybeSingle();
   if (!order) throwErr("Order not found", 404);
   if (order.driver_id) throwErr("Order already has a driver", 409);
-  if (order.payment_status !== "paid") throwErr("Order is not paid yet", 400);
   if (order.delivery_type === "uber" || order.status === "assigned_uber") {
     throwErr("Uber Direct orders cannot be claimed internally", 400);
+  }
+  if (TERMINAL_ORDER_STATUSES.includes(String(order.status))) {
+    throwErr(`Order is ${order.status} and cannot be assigned`, 400);
+  }
+  if (opts.founderForce) {
+    if (!["paid", "pending", "initiated"].includes(String(order.payment_status))) {
+      throwErr(`Order payment status is ${order.payment_status} — cannot assign`, 400);
+    }
+  } else if (order.payment_status !== "paid") {
+    throwErr("Order is not paid yet", 400);
   }
 
   const now = new Date().toISOString();
   const trackingId = `trk_${orderId}`;
 
-  const { error: assignError } = await db
+  const { data: assigned, error: assignError } = await db
     .from("orders")
     .update({
       driver_id: driver.driver_id,
@@ -304,9 +422,12 @@ export async function assignOrderToDriver(
       updated_at: now,
     })
     .eq("order_id", orderId)
-    .is("driver_id", null);
+    .is("driver_id", null)
+    .select("order_id, driver_id, status")
+    .maybeSingle();
 
   if (assignError) throwErr(assignError.message, 500);
+  if (!assigned) throwErr("Order could not be assigned — it may already have a driver", 409);
 
   await db
     .from("drivers")
@@ -367,16 +488,24 @@ export async function assignOrderToDriver(
   };
 }
 
-export async function listClaimableOrders(db: SupabaseClient, limit = 20) {
-  const { data } = await db
+export async function listClaimableOrders(db: SupabaseClient, limit = 20, opts: { founderMode?: boolean } = {}) {
+  let q = db
     .from("orders")
     .select("order_id,restaurant_name,customer_name,address,total,status,payment_status,created_at")
-    .eq("payment_status", "paid")
     .is("driver_id", null)
-    .in("status", CLAIMABLE_ORDER_STATUSES)
     .or("delivery_type.is.null,delivery_type.neq.uber")
     .order("created_at", { ascending: false })
     .limit(limit);
+
+  if (opts.founderMode) {
+    q = q
+      .in("payment_status", ["paid", "pending", "initiated"])
+      .in("status", FOUNDER_CLAIMABLE_STATUSES);
+  } else {
+    q = q.eq("payment_status", "paid").in("status", CLAIMABLE_ORDER_STATUSES);
+  }
+
+  const { data } = await q;
   return data || [];
 }
 
