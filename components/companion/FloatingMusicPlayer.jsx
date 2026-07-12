@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Music, Pause, Play, SkipForward, Volume2, ChevronDown, ChevronUp } from "lucide-react";
+import { Music, Pause, Play, SkipBack, SkipForward, Volume2, ChevronDown, ChevronUp } from "lucide-react";
 import { useCompanionContext } from "./CompanionModeProvider";
 import { hasLocalTracks } from "@/lib/companionMode/localMusic";
 import { useMusicPlayback } from "@/lib/companionMode/useMusicPlayback";
@@ -17,6 +17,7 @@ export default function FloatingMusicPlayer({ className = "" }) {
     isAmbient,
     useDeviceMusic,
     onTogglePlay,
+    onSkipBack,
     onSkipForward,
     onVolume,
   } = playback;
@@ -71,6 +72,15 @@ export default function FloatingMusicPlayer({ className = "" }) {
             <div className="flex items-center gap-2 mb-3">
               <button
                 type="button"
+                className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
+                aria-label="Previous track"
+                disabled={!useDeviceMusic || localState.tracks.length < 2}
+                onClick={onSkipBack}
+              >
+                <SkipBack size={18} />
+              </button>
+              <button
+                type="button"
                 className="btn-secondary !p-2 min-w-[44px] min-h-[44px]"
                 onClick={onTogglePlay}
                 disabled={!canPlay}
@@ -81,7 +91,7 @@ export default function FloatingMusicPlayer({ className = "" }) {
               <button
                 type="button"
                 className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
-                aria-label="Skip"
+                aria-label="Next track"
                 disabled={!useDeviceMusic || localState.tracks.length < 2}
                 onClick={onSkipForward}
               >
