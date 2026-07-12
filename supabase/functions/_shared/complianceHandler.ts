@@ -38,21 +38,27 @@ async function applyUserApproval(
   const { data: user } = await db.from("users").select("*").eq("user_id", userId).maybeSingle();
   if (!user) throwErr("User not found", 404);
 
-  const role = String(user.role || "");
+  const role = normalizeRole(String(user.role || ""));
   const entityType = role === "delivery" ? "driver" : role === "vendor" ? "restaurant" : "user";
 
-  await db.from("users").update({
+  const userUpdates: Record<string, unknown> = {
     approval_status: approvalStatus,
     active,
     suspended_at: approvalStatus === "suspended" ? new Date().toISOString() : null,
-  }).eq("user_id", userId);
+  };
+  if (String(user.role) !== role) userUpdates.role = role;
+  if (approvalStatus === "approved") userUpdates.agreement_complete = true;
+
+  await db.from("users").update(userUpdates).eq("user_id", userId);
 
   if (role === "delivery") {
-    await db.from("drivers").update({
+    const driverUpdates: Record<string, unknown> = {
       approval_status: approvalStatus,
       active,
       suspended_at: approvalStatus === "suspended" ? new Date().toISOString() : null,
-    }).eq("user_id", userId);
+    };
+    if (approvalStatus === "approved") driverUpdates.agreement_complete = true;
+    await db.from("drivers").update(driverUpdates).eq("user_id", userId);
   }
 
   if (role === "vendor") {
@@ -761,11 +767,13 @@ export async function handleComplianceRequest(
       initiated_at: new Date().toISOString(),
     });
 
-    await db.from("drivers").update({
+    const verificationUpdate = {
       approval_status: "verification",
       documents_complete: false,
       updated_at: new Date().toISOString(),
-    }).eq("user_id", userId);
+    };
+    await db.from("drivers").update(verificationUpdate).eq("user_id", userId);
+    await db.from("users").update({ approval_status: "verification" }).eq("user_id", userId);
 
     await writeAuditLog(db, {
       event_type: "background_check_submitted",
