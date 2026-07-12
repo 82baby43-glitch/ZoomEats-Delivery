@@ -1,6 +1,6 @@
 "use client";
 
-import { Music, Pause, Play, Rewind, FastForward, SkipForward, Square } from "lucide-react";
+import { Music, Pause, Play, Rewind, RotateCcw, FastForward, SkipForward, Square } from "lucide-react";
 import { useCompanionContext } from "./CompanionModeProvider";
 import { hasLocalTracks } from "@/lib/companionMode/localMusic";
 import { useMusicPlayback } from "@/lib/companionMode/useMusicPlayback";
@@ -17,6 +17,7 @@ export default function CompactMusicPlayer() {
     onTogglePlay,
     onStop,
     onRewind,
+    onRestart,
     onFastForward,
     onSkipForward,
   } = playback;
@@ -66,6 +67,15 @@ export default function CompactMusicPlayer() {
           aria-label="Rewind 10 seconds"
         >
           <Rewind size={18} />
+        </button>
+        <button
+          type="button"
+          className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
+          onClick={onRestart}
+          disabled={!useDeviceMusic}
+          aria-label="Start from beginning"
+        >
+          <RotateCcw size={18} />
         </button>
         <button
           type="button"

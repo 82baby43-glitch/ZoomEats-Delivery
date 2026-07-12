@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight, FastForward, Music, Pause, Play, Rewind, Square } from "lucide-react";
+import { ChevronRight, FastForward, Music, Pause, Play, Rewind, RotateCcw, Square } from "lucide-react";
 import { useCompanionContext } from "@/components/companion/CompanionModeProvider";
 import { hasLocalTracks } from "@/lib/companionMode/localMusic";
 import { useMusicPlayback } from "@/lib/companionMode/useMusicPlayback";
@@ -12,7 +12,7 @@ export default function DriverMiniPlayerDock() {
   const pathname = usePathname();
   const { settings, audio, updateSettings } = useCompanionContext();
   const playback = useMusicPlayback({ settings, audio, updateSettings });
-  const { localState, playing, canPlay, isAmbient, useDeviceMusic, onTogglePlay, onStop, onRewind, onFastForward } =
+  const { localState, playing, canPlay, isAmbient, useDeviceMusic, onTogglePlay, onStop, onRewind, onRestart, onFastForward } =
     playback;
 
   const onDriverRoute =
@@ -59,6 +59,15 @@ export default function DriverMiniPlayerDock() {
           aria-label="Rewind 10 seconds"
         >
           <Rewind size={16} />
+        </button>
+        <button
+          type="button"
+          className="btn-ghost !p-2 min-w-[40px] min-h-[40px] shrink-0"
+          onClick={onRestart}
+          disabled={!useDeviceMusic}
+          aria-label="Start from beginning"
+        >
+          <RotateCcw size={16} />
         </button>
         <button
           type="button"
