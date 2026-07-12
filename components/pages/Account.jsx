@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { LogOut, Repeat, User as UserIcon } from "lucide-react";
 import Header from "@/components/Header";
-import InstallAppCard from "@/components/account/InstallAppCard";
+import InstallAppCard from "@/components/account/AddToHomeScreenCard";
 import { useAuth } from "@/lib/auth";
 import { getClientAppType, getPwaConfig } from "@/lib/pwa/appContext";
 import { normalizeRole } from "@/lib/compliance/authz";

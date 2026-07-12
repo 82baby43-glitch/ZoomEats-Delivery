@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, ShoppingBag, ClipboardList, User, Bike, Map, LayoutDashboard } from "lucide-react";
+import { Bike, Map, User, Home, ShoppingBag, ClipboardList, Music, LayoutDashboard } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getClientAppType, getPwaConfig } from "@/lib/pwa/appContext";
 import { normalizeRole } from "@/lib/compliance/authz";
@@ -46,6 +46,7 @@ export default function MobileTabBar() {
         <div className="flex max-w-lg mx-auto">
           <Tab href="/driver/dashboard" label="Drive" icon={Bike} active={isActive("/driver/dashboard")} />
           <Tab href="/driver/live-map" label="Map" icon={Map} active={isActive("/driver/live-map")} />
+          <Tab href="/driver/player" label="Player" icon={Music} active={isActive("/driver/player")} />
           <Tab href={accountPath} label="Account" icon={User} active={accountActive} />
         </div>
       </nav>

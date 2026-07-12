@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { User as UserIcon, LogOut, Repeat, Download } from "lucide-react";
+import { User as UserIcon, LogOut, Repeat, Smartphone } from "lucide-react";
 import { signInWithGoogle } from "@/lib/auth";
-import { usePwaInstall } from "@/lib/pwa/useInstallPrompt";
+import { isMobileDevice, isStandaloneMode } from "@/lib/pwa/appContext";
 
 const startLogin = () => {
   signInWithGoogle().catch((e) => console.error("[auth] login failed:", e));
@@ -13,11 +13,11 @@ const startLogin = () => {
 export default function UserMenu({ user, logout }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
-  const { canShowInstall, openInstallPrompt, config } = usePwaInstall();
+  const showHomeScreenHint = typeof window !== "undefined" && isMobileDevice() && !isStandaloneMode();
 
   if (!user) {
     return (
-      <button className="btn-primary" onClick={startLogin} data-testid="login-button">
+      <button className="btn-primary login-header-btn" onClick={startLogin} data-testid="login-button">
         Sign in
       </button>
     );
@@ -50,18 +50,25 @@ export default function UserMenu({ user, logout }) {
           </div>
           <button
             className="w-full text-left px-4 py-3 flex items-center gap-2 text-sm hover:bg-black/40"
+            onClick={() => { setOpen(false); router.push("/account"); }}
+            data-testid="account-menu-link"
+          >
+            <UserIcon size={16} /> Account
+          </button>
+          <button
+            className="w-full text-left px-4 py-3 flex items-center gap-2 text-sm hover:bg-black/40"
             onClick={() => { setOpen(false); router.push("/onboarding"); }}
             data-testid="switch-mode-button"
           >
             <Repeat size={16} /> Switch mode
           </button>
-          {canShowInstall && (
+          {showHomeScreenHint && (
             <button
               className="w-full text-left px-4 py-3 flex items-center gap-2 text-sm hover:bg-black/40"
-              onClick={() => { setOpen(false); openInstallPrompt(); }}
+              onClick={() => { setOpen(false); router.push("/account"); }}
               data-testid="install-app-button"
             >
-              <Download size={16} /> {config.installButton}
+              <Smartphone size={16} /> Add to Home Screen
             </button>
           )}
           <button

@@ -79,14 +79,15 @@ export default function LoginPage({ title, subtitle, defaultRedirect = "/", sign
   return (
     <div>
       <Header />
-      <div className="max-w-md mx-auto px-6 py-16">
+      <div className="max-w-md mx-auto px-6 py-16 login-page">
+        <div className="login-auth-card card p-6 md:p-8">
         <h1 className="font-display text-3xl font-bold">{title}</h1>
         <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>{subtitle}</p>
 
         {error && <div className="mt-4 text-sm text-red-400">{error}</div>}
         {message && <div className="mt-4 text-sm text-green-400">{message}</div>}
 
-        <button className="btn-primary w-full mt-6" onClick={onGoogle} disabled={busy}>
+        <button className="btn-primary w-full mt-6 login-auth-btn" onClick={onGoogle} disabled={busy}>
           Continue with Google
         </button>
 
@@ -115,7 +116,7 @@ export default function LoginPage({ title, subtitle, defaultRedirect = "/", sign
               Remember me
             </label>
           )}
-          <button className="btn-primary w-full" type="submit" disabled={busy}>
+          <button className="btn-primary w-full login-auth-btn" type="submit" disabled={busy}>
             {mode === "login" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset link"}
           </button>
         </form>
@@ -131,6 +132,7 @@ export default function LoginPage({ title, subtitle, defaultRedirect = "/", sign
             <button type="button" className="text-left hover:underline" onClick={() => setMode("login")}>Back to sign in</button>
           )}
           <Link href="/" className="hover:underline">← Back to home</Link>
+        </div>
         </div>
       </div>
     </div>

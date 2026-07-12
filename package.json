@@ -13,6 +13,7 @@
     "auth:google": "node scripts/configure-google-auth.mjs",
     "functions:deploy": "supabase functions deploy api && supabase functions deploy stripe-webhook --no-verify-jwt && supabase functions deploy dispatch-order --no-verify-jwt && supabase functions deploy routing-engine --no-verify-jwt && supabase functions deploy reconcile-payments --no-verify-jwt",
     "stripe:supabase": "node scripts/setup-stripe-supabase.mjs",
+    "stripe:webhook-register": "node scripts/register-stripe-webhook.mjs",
     "compliance:test": "node scripts/compliance-test.mjs",
     "auth:redirects": "node scripts/sync-auth-redirects.mjs",
     "pwa:icons": "node scripts/generate-pwa-icons.mjs",
