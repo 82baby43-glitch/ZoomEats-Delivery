@@ -7,7 +7,6 @@ import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
 import { MapPin, Power, Truck, Navigation } from "lucide-react";
 import CompanionModeButton from "@/components/companion/CompanionModeButton";
-import { CompanionModeProvider } from "@/components/companion/CompanionModeProvider";
 import FloatingMusicPlayer from "@/components/companion/FloatingMusicPlayer";
 import DriverSafetyMode from "@/components/companion/DriverSafetyMode";
 import { useCompanionMode } from "@/lib/hooks/useCompanionMode";
@@ -28,11 +27,7 @@ import { useDriverGpsTracking } from "@/lib/hooks/useDriverGpsTracking";
 import { TRACKING_INTERVAL_MS, resolveTrackingMode } from "@/lib/logistics/driver-location-service";
 
 export default function DeliveryDashboard() {
-  return (
-    <CompanionModeProvider>
-      <DeliveryDashboardInner />
-    </CompanionModeProvider>
-  );
+  return <DeliveryDashboardInner />;
 }
 
 function DeliveryDashboardInner() {
@@ -447,7 +442,7 @@ function DeliveryDashboardInner() {
           )}
         </div>
       </div>
-      <FloatingMusicPlayer />
+      <FloatingMusicPlayer className="hidden md:block" />
     </div>
   );
 }

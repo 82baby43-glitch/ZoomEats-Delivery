@@ -2,7 +2,6 @@
 
 import Header from "@/components/Header";
 import Link from "next/link";
-import { CompanionModeProvider } from "@/components/companion/CompanionModeProvider";
 import CompanionModePanel from "@/components/companion/CompanionModePanel";
 import FloatingMusicPlayer from "@/components/companion/FloatingMusicPlayer";
 import DriverSafetyMode from "@/components/companion/DriverSafetyMode";
@@ -82,7 +81,7 @@ function DriverCompanionInner() {
         </div>
       )}
       <CompanionModePanel role="driver" />
-      <FloatingMusicPlayer />
+      <FloatingMusicPlayer className="hidden md:block" />
     </>
   );
 }
@@ -101,9 +100,7 @@ export default function DriverCompanionPage() {
           </div>
           <Link href="/driver/dashboard" className="btn-ghost text-sm">← Driver dashboard</Link>
         </div>
-        <CompanionModeProvider>
-          <DriverCompanionInner />
-        </CompanionModeProvider>
+        <DriverCompanionInner />
       </div>
     </div>
   );

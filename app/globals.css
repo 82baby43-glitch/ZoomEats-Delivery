@@ -90,6 +90,25 @@ body {
 }
 .btn-ghost:hover { color: var(--text); background: var(--surface); }
 
+.login-header-btn {
+  min-width: 5.75rem;
+  min-height: 2.5rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  white-space: nowrap;
+}
+
+.login-auth-card .login-auth-btn {
+  width: 100%;
+  min-height: 3rem;
+  border-radius: 0.75rem;
+  justify-content: center;
+}
+
+.login-page .login-auth-card {
+  border-radius: 1rem;
+}
+
 .input-field {
   width: 100%;
   background: var(--surface);

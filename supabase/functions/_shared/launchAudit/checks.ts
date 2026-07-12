@@ -448,6 +448,46 @@ export async function runPaymentChecks(db: SupabaseClient): Promise<AuditCheck[]
     webhookSecret ? "Configured" : "STRIPE_WEBHOOK_SECRET missing"
   ));
 
+  const supabaseUrl = (getSupabasePublicUrl() || "").replace(/\/$/, "");
+  const webhookUrl = supabaseUrl ? `${supabaseUrl}/functions/v1/stripe-webhook` : null;
+
+  if (webhookUrl) {
+    try {
+      const res = await fetch(webhookUrl, { method: "OPTIONS" });
+      checks.push(mk(
+        "pay_webhook_reachable",
+        "payment_system",
+        "Stripe webhook endpoint reachable",
+        res.status < 500 ? "pass" : "fail",
+        "high",
+        `HTTP ${res.status} on OPTIONS ${webhookUrl}`
+      ));
+    } catch (e) {
+      checks.push(mk("pay_webhook_reachable", "payment_system", "Stripe webhook endpoint reachable", "fail", "high", String(e)));
+    }
+  }
+
+  if (stripeKey && webhookUrl) {
+    try {
+      const res = await fetch("https://api.stripe.com/v1/webhook_endpoints?limit=100", {
+        headers: { Authorization: `Bearer ${stripeKey}` },
+      });
+      const data = await res.json();
+      const registered = Array.isArray(data?.data)
+        && data.data.some((w: { url?: string; status?: string }) => w.url === webhookUrl && w.status === "enabled");
+      checks.push(mk(
+        "pay_webhook_registered",
+        "payment_system",
+        "Stripe webhook registered",
+        registered ? "pass" : "fail",
+        "high",
+        registered ? `Registered at ${webhookUrl}` : `No enabled webhook for ${webhookUrl} — run npm run stripe:webhook-register`
+      ));
+    } catch (e) {
+      checks.push(mk("pay_webhook_registered", "payment_system", "Stripe webhook registered", "warn", "high", String(e)));
+    }
+  }
+
   const eventLogExists = await tableExists(db, "stripe_event_log");
   checks.push(mk("pay_webhook_log", "payment_system", "Webhook event log", eventLogExists ? "pass" : "warn", "medium", eventLogExists ? "stripe_event_log ready" : "Table missing"));
 
@@ -669,6 +709,7 @@ export async function runEdgeFunctionChecks(): Promise<AuditCheck[]> {
 
 export async function runApiHealthChecks(db: SupabaseClient): Promise<AuditCheck[]> {
   const checks: AuditCheck[] = [];
+  const anon = getSupabaseAnonKey();
   const endpoints = [
     { path: "/", method: "GET", label: "API root health" },
     { path: "/restaurants", method: "GET", label: "Restaurants list" },
@@ -681,9 +722,14 @@ export async function runApiHealthChecks(db: SupabaseClient): Promise<AuditCheck
 
   for (const ep of endpoints) {
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (anon) {
+        headers.Authorization = `Bearer ${anon}`;
+        headers.apikey = anon;
+      }
       const res = await fetch(fnBase, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ path: ep.path, method: ep.method }),
       });
       const data = await res.json().catch(() => ({}));
