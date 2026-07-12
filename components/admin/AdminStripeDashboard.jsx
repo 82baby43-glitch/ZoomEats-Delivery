@@ -103,9 +103,16 @@ export default function AdminStripeDashboard() {
 
           <div className="mt-6 flex flex-wrap gap-3">
             <StatusPill ok={data.configured} label={data.configured ? "API key set" : "Not configured"} />
+            <StatusPill ok={data.webhook_registered} label={data.webhook_registered ? "Webhook registered" : "Webhook not registered"} />
             <StatusPill ok={data.webhook_configured} label={data.webhook_configured ? "Webhook secret" : "No webhook secret"} />
             <StatusPill ok={data.auth?.ok} label={data.auth?.ok ? `Connected (${data.auth.mode || "test"})` : "Auth failed"} />
           </div>
+
+          {data.webhook_registration_detail && (
+            <div className="mt-3 text-sm" style={{ color: "var(--muted)" }}>
+              Stripe webhook: {data.webhook_registration_detail}
+            </div>
+          )}
 
           {(data.api_key_preview || data.publishable_key_preview) && (
             <div className="mt-4 text-sm grid grid-cols-1 sm:grid-cols-2 gap-2" style={{ color: "var(--muted)" }}>

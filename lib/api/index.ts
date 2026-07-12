@@ -16,9 +16,13 @@ function isCacheableGet(path: string) {
   return path.startsWith("/checkout/status/") || path === "/orders/my";
 }
 
-/** Launch audit reads Stripe secrets from Supabase edge — not Vercel env. */
+/** Launch audit and Stripe admin read secrets from Supabase edge — not Vercel env. */
 function prefersSupabaseEdge(path: string) {
-  return path.startsWith("/admin/launch-audit") || path.startsWith("/admin/system-health");
+  return (
+    path.startsWith("/admin/launch-audit") ||
+    path.startsWith("/admin/system-health") ||
+    path.startsWith("/admin/stripe")
+  );
 }
 
 async function getAccessToken() {
