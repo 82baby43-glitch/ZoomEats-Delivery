@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Music, Pause, Play, SkipBack, SkipForward, Volume2, ChevronDown, ChevronUp } from "lucide-react";
+import { Music, Pause, Play, Rewind, RotateCcw, FastForward, Square, Volume2, ChevronDown, ChevronUp } from "lucide-react";
 import { useCompanionContext } from "./CompanionModeProvider";
 import { hasLocalTracks } from "@/lib/companionMode/localMusic";
 import { useMusicPlayback } from "@/lib/companionMode/useMusicPlayback";
@@ -17,8 +17,10 @@ export default function FloatingMusicPlayer({ className = "" }) {
     isAmbient,
     useDeviceMusic,
     onTogglePlay,
-    onSkipBack,
-    onSkipForward,
+    onStop,
+    onRewind,
+    onRestart,
+    onFastForward,
     onVolume,
   } = playback;
 
@@ -72,33 +74,51 @@ export default function FloatingMusicPlayer({ className = "" }) {
             <div className="flex items-center gap-2 mb-3">
               <button
                 type="button"
-                className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
-                aria-label="Previous track"
-                disabled={!useDeviceMusic || localState.tracks.length < 2}
-                onClick={onSkipBack}
+                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                onClick={onRewind}
+                disabled={!useDeviceMusic}
+                aria-label="Rewind 10 seconds"
               >
-                <SkipBack size={18} />
+                <Rewind size={16} />
               </button>
               <button
                 type="button"
-                className="btn-secondary !p-2 min-w-[44px] min-h-[44px]"
+                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                onClick={onRestart}
+                disabled={!useDeviceMusic}
+                aria-label="Start from beginning"
+              >
+                <RotateCcw size={16} />
+              </button>
+              <button
+                type="button"
+                className="btn-secondary !p-2 min-w-[40px] min-h-[40px]"
                 onClick={onTogglePlay}
                 disabled={!canPlay}
                 aria-label={playing ? "Pause" : "Play"}
               >
-                {playing ? <Pause size={18} /> : <Play size={18} />}
+                {playing ? <Pause size={16} /> : <Play size={16} />}
               </button>
               <button
                 type="button"
-                className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
-                aria-label="Next track"
-                disabled={!useDeviceMusic || localState.tracks.length < 2}
-                onClick={onSkipForward}
+                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                onClick={onStop}
+                disabled={!playing}
+                aria-label="Stop"
               >
-                <SkipForward size={18} />
+                <Square size={14} />
               </button>
-              <div className="flex-1 flex items-center gap-2">
-                <Volume2 size={14} style={{ color: "var(--muted)" }} />
+              <button
+                type="button"
+                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                onClick={onFastForward}
+                disabled={!useDeviceMusic}
+                aria-label="Fast forward 10 seconds"
+              >
+                <FastForward size={16} />
+              </button>
+              <div className="flex-1 flex items-center gap-2 min-w-0">
+                <Volume2 size={14} style={{ color: "var(--muted)" }} className="shrink-0" />
                 <input
                   type="range"
                   min={0}

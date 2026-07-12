@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight, FastForward, Music, Pause, Play, Rewind, RotateCcw, SkipBack, SkipForward, Square } from "lucide-react";
+import { ChevronRight, FastForward, Music, Pause, Play, Rewind, RotateCcw, Square } from "lucide-react";
 import { useCompanionContext } from "@/components/companion/CompanionModeProvider";
 import { hasLocalTracks } from "@/lib/companionMode/localMusic";
 import { useMusicPlayback } from "@/lib/companionMode/useMusicPlayback";
@@ -12,10 +12,8 @@ export default function DriverMiniPlayerDock() {
   const pathname = usePathname();
   const { settings, audio, updateSettings } = useCompanionContext();
   const playback = useMusicPlayback({ settings, audio, updateSettings });
-  const { localState, playing, canPlay, isAmbient, useDeviceMusic, onTogglePlay, onStop, onRewind, onRestart, onFastForward, onSkipBack, onSkipForward } =
+  const { localState, playing, canPlay, isAmbient, useDeviceMusic, onTogglePlay, onStop, onRewind, onRestart, onFastForward } =
     playback;
-
-  const canSkipTracks = useDeviceMusic && localState.tracks.length >= 2;
 
   const onDriverRoute =
     pathname.startsWith("/driver") ||
@@ -53,15 +51,6 @@ export default function DriverMiniPlayerDock() {
       data-testid="driver-mini-player-dock"
     >
       <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          className="btn-ghost !p-2 min-w-[40px] min-h-[40px] shrink-0"
-          onClick={onSkipBack}
-          disabled={!canSkipTracks}
-          aria-label="Previous track"
-        >
-          <SkipBack size={16} />
-        </button>
         <button
           type="button"
           className="btn-ghost !p-2 min-w-[40px] min-h-[40px] shrink-0"
@@ -107,15 +96,6 @@ export default function DriverMiniPlayerDock() {
           aria-label="Fast forward 10 seconds"
         >
           <FastForward size={16} />
-        </button>
-        <button
-          type="button"
-          className="btn-ghost !p-2 min-w-[40px] min-h-[40px] shrink-0"
-          onClick={onSkipForward}
-          disabled={!canSkipTracks}
-          aria-label="Next track"
-        >
-          <SkipForward size={16} />
         </button>
 
         <Link href="/driver/player" className="flex-1 min-w-0 flex items-center gap-2 ml-1">
