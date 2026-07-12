@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FastForward, Music, Pause, Play, Rewind, RotateCcw, Square } from "lucide-react";
+import { FastForward, Music, Pause, Play, Rewind, SkipBack, SkipForward, Square } from "lucide-react";
 import { useCompanionContext } from "@/components/companion/CompanionModeProvider";
 import { hasLocalTracks } from "@/lib/companionMode/localMusic";
 import { useMusicPlayback } from "@/lib/companionMode/useMusicPlayback";
@@ -25,9 +25,12 @@ export default function DriverMiniPlayerDock() {
     onTogglePlay,
     onStop,
     onRewind,
-    onRestart,
     onFastForward,
+    onSkipBack,
+    onSkipForward,
   } = playback;
+
+  const canSkipTracks = useDeviceMusic && localState.tracks.length >= 2;
 
   const onDriverRoute =
     pathname.startsWith("/driver") ||
@@ -73,7 +76,7 @@ export default function DriverMiniPlayerDock() {
             borderColor: "var(--border)",
           }}
         >
-          <div className="px-3 py-3 flex flex-col gap-2.5 w-[min(72vw,240px)]">
+          <div className="px-3 py-3 flex flex-col gap-2.5 w-[min(80vw,280px)]">
             <Link
               href="/driver/player"
               onClick={() => setOpen(false)}
@@ -83,10 +86,19 @@ export default function DriverMiniPlayerDock() {
               <div className="text-[10px] truncate" style={{ color: "var(--muted)" }}>{subtitle}</div>
             </Link>
 
-            <div className="flex items-center justify-between gap-1">
+            <div className="flex items-center justify-between gap-0.5">
               <button
                 type="button"
-                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                className="btn-ghost !p-2 min-w-[38px] min-h-[38px]"
+                onClick={onSkipBack}
+                disabled={!canSkipTracks}
+                aria-label="Previous song"
+              >
+                <SkipBack size={16} />
+              </button>
+              <button
+                type="button"
+                className="btn-ghost !p-2 min-w-[38px] min-h-[38px]"
                 onClick={onRewind}
                 disabled={!useDeviceMusic}
                 aria-label="Rewind 10 seconds"
@@ -95,16 +107,7 @@ export default function DriverMiniPlayerDock() {
               </button>
               <button
                 type="button"
-                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
-                onClick={onRestart}
-                disabled={!useDeviceMusic}
-                aria-label="Start from beginning"
-              >
-                <RotateCcw size={16} />
-              </button>
-              <button
-                type="button"
-                className="!p-2 min-w-[40px] min-h-[40px] rounded-lg flex items-center justify-center shrink-0"
+                className="!p-2 min-w-[38px] min-h-[38px] rounded-lg flex items-center justify-center shrink-0"
                 style={{ background: "var(--primary)", color: "#0A0A0A" }}
                 onClick={onTogglePlay}
                 disabled={!canPlay}
@@ -114,7 +117,7 @@ export default function DriverMiniPlayerDock() {
               </button>
               <button
                 type="button"
-                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                className="btn-ghost !p-2 min-w-[38px] min-h-[38px]"
                 onClick={onStop}
                 disabled={!playing}
                 aria-label="Stop"
@@ -123,12 +126,21 @@ export default function DriverMiniPlayerDock() {
               </button>
               <button
                 type="button"
-                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                className="btn-ghost !p-2 min-w-[38px] min-h-[38px]"
                 onClick={onFastForward}
                 disabled={!useDeviceMusic}
                 aria-label="Fast forward 10 seconds"
               >
                 <FastForward size={16} />
+              </button>
+              <button
+                type="button"
+                className="btn-ghost !p-2 min-w-[38px] min-h-[38px]"
+                onClick={onSkipForward}
+                disabled={!canSkipTracks}
+                aria-label="Next song"
+              >
+                <SkipForward size={16} />
               </button>
             </div>
           </div>
