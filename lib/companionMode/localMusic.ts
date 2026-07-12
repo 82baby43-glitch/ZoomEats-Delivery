@@ -347,16 +347,33 @@ export function toggleLocalMusic() {
   return true;
 }
 
-export function skipLocalMusic(delta = 1) {
+export async function skipLocalMusic(delta = 1) {
   if (tracks.length === 0) return;
   currentIndex = (currentIndex + delta + tracks.length) % tracks.length;
+  const track = tracks[currentIndex];
+  if (!track) return;
+
   const audio = getAudio();
-  if (audio && playing) {
-    audio.src = tracks[currentIndex].url;
-    applyVolume();
-    applyEq();
-    void audio.play();
+  if (!audio) return;
+
+  const ctxOk = await resumeAudioContext();
+  if (!ctxOk) {
+    emit();
+    return;
   }
+
+  audio.src = track.url;
+  applyVolume();
+  applyEq();
+
+  if (playing) {
+    try {
+      await audio.play();
+    } catch {
+      playing = false;
+    }
+  }
+
   emit();
 }
 

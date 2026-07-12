@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Music, Pause, Play, Rewind, RotateCcw, FastForward, Square, Volume2, ChevronDown, ChevronUp } from "lucide-react";
+import { Music, Pause, Play, Rewind, FastForward, SkipBack, SkipForward, Square, Volume2, ChevronDown, ChevronUp } from "lucide-react";
 import { useCompanionContext } from "./CompanionModeProvider";
 import { hasLocalTracks } from "@/lib/companionMode/localMusic";
 import { useMusicPlayback } from "@/lib/companionMode/useMusicPlayback";
@@ -19,10 +19,13 @@ export default function FloatingMusicPlayer({ className = "" }) {
     onTogglePlay,
     onStop,
     onRewind,
-    onRestart,
     onFastForward,
+    onSkipBack,
+    onSkipForward,
     onVolume,
   } = playback;
+
+  const canSkipTracks = useDeviceMusic && localState.tracks.length >= 2;
 
   if (!settings) return null;
 
@@ -71,7 +74,16 @@ export default function FloatingMusicPlayer({ className = "" }) {
               )}
             </div>
 
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+              <button
+                type="button"
+                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                onClick={onSkipBack}
+                disabled={!canSkipTracks}
+                aria-label="Previous song"
+              >
+                <SkipBack size={16} />
+              </button>
               <button
                 type="button"
                 className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
@@ -80,15 +92,6 @@ export default function FloatingMusicPlayer({ className = "" }) {
                 aria-label="Rewind 10 seconds"
               >
                 <Rewind size={16} />
-              </button>
-              <button
-                type="button"
-                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
-                onClick={onRestart}
-                disabled={!useDeviceMusic}
-                aria-label="Start from beginning"
-              >
-                <RotateCcw size={16} />
               </button>
               <button
                 type="button"
@@ -117,7 +120,16 @@ export default function FloatingMusicPlayer({ className = "" }) {
               >
                 <FastForward size={16} />
               </button>
-              <div className="flex-1 flex items-center gap-2 min-w-0">
+              <button
+                type="button"
+                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                onClick={onSkipForward}
+                disabled={!canSkipTracks}
+                aria-label="Next song"
+              >
+                <SkipForward size={16} />
+              </button>
+              <div className="flex-1 flex items-center gap-2 min-w-[120px]">
                 <Volume2 size={14} style={{ color: "var(--muted)" }} className="shrink-0" />
                 <input
                   type="range"

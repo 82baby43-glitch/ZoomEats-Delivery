@@ -1,6 +1,6 @@
 "use client";
 
-import { Music, Pause, Play, Rewind, RotateCcw, FastForward, Square } from "lucide-react";
+import { Music, Pause, Play, Rewind, FastForward, SkipBack, SkipForward, Square } from "lucide-react";
 import { useCompanionContext } from "./CompanionModeProvider";
 import { hasLocalTracks } from "@/lib/companionMode/localMusic";
 import { useMusicPlayback } from "@/lib/companionMode/useMusicPlayback";
@@ -17,9 +17,12 @@ export default function CompactMusicPlayer() {
     onTogglePlay,
     onStop,
     onRewind,
-    onRestart,
     onFastForward,
+    onSkipBack,
+    onSkipForward,
   } = playback;
+
+  const canSkipTracks = useDeviceMusic && localState.tracks.length >= 2;
 
   if (!settings) {
     return (
@@ -57,7 +60,16 @@ export default function CompactMusicPlayer() {
           </p>
         )}
       </div>
-      <div className="flex items-center justify-center gap-2">
+      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+        <button
+          type="button"
+          className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
+          onClick={onSkipBack}
+          disabled={!canSkipTracks}
+          aria-label="Previous song"
+        >
+          <SkipBack size={18} />
+        </button>
         <button
           type="button"
           className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
@@ -66,15 +78,6 @@ export default function CompactMusicPlayer() {
           aria-label="Rewind 10 seconds"
         >
           <Rewind size={18} />
-        </button>
-        <button
-          type="button"
-          className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
-          onClick={onRestart}
-          disabled={!useDeviceMusic}
-          aria-label="Start from beginning"
-        >
-          <RotateCcw size={18} />
         </button>
         <button
           type="button"
@@ -102,6 +105,15 @@ export default function CompactMusicPlayer() {
           aria-label="Fast forward 10 seconds"
         >
           <FastForward size={18} />
+        </button>
+        <button
+          type="button"
+          className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
+          onClick={onSkipForward}
+          disabled={!canSkipTracks}
+          aria-label="Next song"
+        >
+          <SkipForward size={18} />
         </button>
       </div>
     </div>
