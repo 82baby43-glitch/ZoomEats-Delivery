@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bike, Map, User, Home, ShoppingBag, ClipboardList, Music, LayoutDashboard } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { getClientAppType, getPwaConfig } from "@/lib/pwa/appContext";
+import { getClientAppType, getPwaConfig, isDriverAppContext } from "@/lib/pwa/appContext";
 import { normalizeRole } from "@/lib/compliance/authz";
 
 function accountHref(user, appType) {
@@ -12,16 +12,16 @@ function accountHref(user, appType) {
   return getPwaConfig(appType).loginPath;
 }
 
-function Tab({ href, label, icon: Icon, active }) {
+function Tab({ href, label, icon: Icon, active, shortLabel }) {
   return (
     <Link
       href={href}
-      className={`flex flex-1 flex-col items-center justify-center gap-1 py-2 text-xs transition-colors ${active ? "font-bold" : ""}`}
+      className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] sm:text-xs transition-colors min-w-0 ${active ? "font-bold" : ""}`}
       style={{ color: active ? "var(--primary)" : "var(--muted)" }}
       data-testid={`mobile-tab-${label.toLowerCase().replace(/\s+/g, "-")}`}
     >
-      <Icon size={20} />
-      <span>{label}</span>
+      <Icon size={20} className="shrink-0" />
+      <span className="truncate max-w-full px-0.5">{shortLabel || label}</span>
     </Link>
   );
 }
@@ -39,14 +39,15 @@ export default function MobileTabBar() {
 
   const accountPath = accountHref(user, appType);
   const accountActive = isActive("/account") || isActive(accountPath);
+  const driverApp = isDriverAppContext(pathname, appType, role);
 
-  if (appType === "driver" || role === "delivery") {
+  if (driverApp) {
     return (
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t backdrop-blur-xl safe-area-pb" style={{ background: "rgba(10,10,10,0.92)", borderColor: "var(--border)" }} aria-label="Driver navigation">
         <div className="flex max-w-lg mx-auto">
           <Tab href="/driver/dashboard" label="Drive" icon={Bike} active={isActive("/driver/dashboard")} />
           <Tab href="/driver/live-map" label="Map" icon={Map} active={isActive("/driver/live-map")} />
-          <Tab href="/driver/player" label="Player" icon={Music} active={isActive("/driver/player")} />
+          <Tab href="/driver/player" label="ZoomEats Player" shortLabel="Player" icon={Music} active={isActive("/driver/player")} />
           <Tab href={accountPath} label="Account" icon={User} active={accountActive} />
         </div>
       </nav>
