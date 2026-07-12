@@ -8,8 +8,9 @@ import { useAuth } from "@/lib/auth";
 export default function InstallPrompt() {
   const { user } = useAuth();
   const {
-    canInstall,
+    canShowInstall,
     canAutoPrompt,
+    canNativeInstall,
     config,
     install,
     snooze,
@@ -27,7 +28,7 @@ export default function InstallPrompt() {
     setAutoVisible(false);
   }, [canAutoPrompt, user, manualOpen]);
 
-  const visible = Boolean(user) && canInstall && !installed && (manualOpen || autoVisible);
+  const visible = Boolean(user) && canShowInstall && !installed && (manualOpen || autoVisible);
   if (!visible) return null;
 
   const close = () => {
@@ -58,15 +59,19 @@ export default function InstallPrompt() {
           <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>{config.installTitle}</p>
         </div>
       </div>
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex gap-2 flex-wrap">
         {iosHint ? (
           <p className="text-sm flex items-center gap-2" style={{ color: "var(--muted)" }}>
             <Share size={16} /> Tap Share, then &quot;Add to Home Screen&quot;
           </p>
-        ) : (
+        ) : canNativeInstall ? (
           <button type="button" className="btn-primary flex-1 flex items-center justify-center gap-2" onClick={install}>
             <Download size={16} /> {config.installButton}
           </button>
+        ) : (
+          <p className="text-sm flex-1" style={{ color: "var(--muted)" }}>
+            Open your browser menu (⋮) and choose <strong>Add to Home screen</strong> or <strong>Install app</strong>.
+          </p>
         )}
         <button type="button" className="btn-ghost text-sm" onClick={close}>
           Not now
