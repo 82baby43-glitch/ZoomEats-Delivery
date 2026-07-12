@@ -22,9 +22,109 @@ function throwErr(message: string, status = 400): never {
 function resolveApprovalAction(action: string) {
   if (action === "approve") return { approvalStatus: "approved", reviewStatus: "approved", active: true };
   if (action === "reject") return { approvalStatus: "rejected", reviewStatus: "rejected", active: false };
+  if (action === "revoke" || action === "unapprove") return { approvalStatus: "pending", reviewStatus: "pending", active: false };
   if (action === "request_info") return { approvalStatus: "documents_missing", reviewStatus: "pending", active: false };
   if (action === "suspend") return { approvalStatus: "suspended", reviewStatus: "suspended", active: false };
   throwErr("Invalid action");
+}
+
+const PARTNER_ROLE_ALIASES: Record<string, string[]> = {
+  delivery: ["delivery", "driver"],
+  vendor: ["vendor", "restaurant"],
+};
+
+const PENDING_APPROVAL_STATUSES = ["pending", "review", "verification", "documents_missing"];
+const OPEN_REVIEW_STATUSES = ["pending", "review", "verification"];
+
+async function syncDriverApprovalRow(
+  db: SupabaseClient,
+  userId: string,
+  approvalStatus: string,
+  active: boolean
+) {
+  const driverUpdates: Record<string, unknown> = {
+    approval_status: approvalStatus,
+    active,
+    suspended_at: approvalStatus === "suspended" ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString(),
+  };
+  if (approvalStatus === "approved") {
+    driverUpdates.agreement_complete = true;
+    driverUpdates.documents_complete = true;
+  }
+  if (approvalStatus === "pending" || approvalStatus === "rejected") {
+    driverUpdates.agreement_complete = false;
+  }
+
+  const { data: existing } = await db.from("drivers").select("driver_id").eq("user_id", userId).maybeSingle();
+  if (existing) {
+    await db.from("drivers").update(driverUpdates).eq("user_id", userId);
+    return;
+  }
+
+  await db.from("drivers").insert({
+    driver_id: uid("drv"),
+    user_id: userId,
+    approval_status: approvalStatus,
+    agreement_complete: approvalStatus === "approved",
+    documents_complete: approvalStatus === "approved",
+    availability: false,
+    workload: 0,
+    active,
+  });
+}
+
+async function enrichPartnerUsers(
+  db: SupabaseClient,
+  users: Record<string, unknown>[],
+  partnerRole: "delivery" | "vendor"
+) {
+  const enriched = [];
+  for (const u of users) {
+    let extra: Record<string, unknown> = {};
+    const role = normalizeRole(String(u.role || ""));
+    if (partnerRole === "delivery" && role === "delivery") {
+      const { data: driver } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
+      extra = { driver };
+    }
+    if (partnerRole === "vendor" && role === "vendor") {
+      const { data: restaurant } = await db
+        .from("restaurants")
+        .select("restaurant_id,name,cuisine,address,approved,approval_status,active,owner_id")
+        .eq("owner_id", u.user_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      extra = { restaurant };
+    }
+    const { data: review } = await db
+      .from("compliance_reviews")
+      .select("review_id,status,approval_status,created_at,reviewed_at")
+      .eq("user_id", u.user_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    enriched.push({ ...u, ...extra, review });
+  }
+  return enriched;
+}
+
+async function listPartnerApprovals(
+  db: SupabaseClient,
+  partnerRole: "delivery" | "vendor",
+  statusFilter: string
+) {
+  const roleValues = PARTNER_ROLE_ALIASES[partnerRole];
+  let query = db.from("users").select("*").in("role", roleValues);
+  if (statusFilter === "pending") {
+    query = query.in("approval_status", PENDING_APPROVAL_STATUSES);
+  } else if (statusFilter === "approved") {
+    query = query.eq("approval_status", "approved");
+  } else if (statusFilter === "rejected") {
+    query = query.eq("approval_status", "rejected");
+  }
+  const { data: users } = await query.order("created_at", { ascending: false });
+  return enrichPartnerUsers(db, users || [], partnerRole);
 }
 
 async function applyUserApproval(
@@ -52,22 +152,24 @@ async function applyUserApproval(
   await db.from("users").update(userUpdates).eq("user_id", userId);
 
   if (role === "delivery") {
-    const driverUpdates: Record<string, unknown> = {
-      approval_status: approvalStatus,
-      active,
-      suspended_at: approvalStatus === "suspended" ? new Date().toISOString() : null,
-    };
-    if (approvalStatus === "approved") driverUpdates.agreement_complete = true;
-    await db.from("drivers").update(driverUpdates).eq("user_id", userId);
+    await syncDriverApprovalRow(db, userId, approvalStatus, active);
   }
 
   if (role === "vendor") {
     const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", userId).maybeSingle();
-    await db.from("restaurants").update({
+    const restaurantUpdates: Record<string, unknown> = {
       approval_status: approvalStatus,
       approved: approvalStatus === "approved",
       active: approvalStatus === "approved",
-    }).eq("owner_id", userId);
+      updated_at: new Date().toISOString(),
+    };
+    if (approvalStatus === "approved") restaurantUpdates.agreement_complete = true;
+    if (approvalStatus === "pending" || approvalStatus === "rejected") {
+      restaurantUpdates.approved = false;
+      restaurantUpdates.active = false;
+      restaurantUpdates.accepting_orders = false;
+    }
+    await db.from("restaurants").update(restaurantUpdates).eq("owner_id", userId);
     if (approvalStatus === "approved" && rest?.restaurant_id) {
       await syncRestaurantLaunchState(db, rest.restaurant_id);
     }
@@ -80,7 +182,26 @@ async function applyUserApproval(
     reviewed_at: new Date().toISOString(),
     notes: notes || null,
     updated_at: new Date().toISOString(),
-  }).eq("user_id", userId).in("status", ["pending", "review"]);
+  }).eq("user_id", userId).in("status", OPEN_REVIEW_STATUSES);
+
+  if (approvalStatus === "pending" || approvalStatus === "rejected") {
+    const { data: openReview } = await db
+      .from("compliance_reviews")
+      .select("review_id")
+      .eq("user_id", userId)
+      .in("status", OPEN_REVIEW_STATUSES)
+      .maybeSingle();
+    if (!openReview) {
+      await db.from("compliance_reviews").insert({
+        review_id: uid("rev"),
+        user_id: userId,
+        entity_type: entityType,
+        entity_id: userId,
+        status: "pending",
+        approval_status: approvalStatus === "rejected" ? "rejected" : "review",
+      });
+    }
+  }
 
   await writeAuditLog(db, {
     event_type: "approval_changed",
@@ -389,38 +510,30 @@ export async function handleComplianceRequest(
     const { data: users } = await db
       .from("users")
       .select("*")
-      .in("role", ["delivery", "vendor"])
-      .in("approval_status", ["pending", "review", "verification", "documents_missing"])
+      .in("role", [...PARTNER_ROLE_ALIASES.delivery, ...PARTNER_ROLE_ALIASES.vendor])
+      .in("approval_status", PENDING_APPROVAL_STATUSES)
       .order("created_at", { ascending: false });
 
-    const enriched = [];
-    for (const u of users || []) {
-      let extra: Record<string, unknown> = {};
-      if (u.role === "delivery") {
-        const { data: driver } = await db.from("drivers").select("*").eq("user_id", u.user_id).maybeSingle();
-        extra = { driver };
-      }
-      if (u.role === "vendor") {
-        const { data: restaurant } = await db
-          .from("restaurants")
-          .select("restaurant_id,name,cuisine,address,approved,approval_status")
-          .eq("owner_id", u.user_id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        extra = { restaurant };
-      }
-      const { data: review } = await db
-        .from("compliance_reviews")
-        .select("review_id,status,approval_status,created_at")
-        .eq("user_id", u.user_id)
-        .in("status", ["pending"])
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      enriched.push({ ...u, ...extra, review });
-    }
+    const deliveryUsers = (users || []).filter((u) => normalizeRole(String(u.role)) === "delivery");
+    const vendorUsers = (users || []).filter((u) => normalizeRole(String(u.role)) === "vendor");
+    const enriched = [
+      ...(await enrichPartnerUsers(db, deliveryUsers, "delivery")),
+      ...(await enrichPartnerUsers(db, vendorUsers, "vendor")),
+    ];
+    enriched.sort((a, b) => new Date(String(b.created_at)).getTime() - new Date(String(a.created_at)).getTime());
     return enriched;
+  }
+
+  if (path === "/admin/approvals/drivers" && method === "GET") {
+    requireRole("admin");
+    const statusFilter = String(params.status || "pending");
+    return listPartnerApprovals(db, "delivery", statusFilter);
+  }
+
+  if (path === "/admin/approvals/restaurants" && method === "GET") {
+    requireRole("admin");
+    const statusFilter = String(params.status || "pending");
+    return listPartnerApprovals(db, "vendor", statusFilter);
   }
 
   const userApprovalMatch = path.match(/^\/admin\/approvals\/users\/([^/]+)\/action$/);
@@ -459,7 +572,7 @@ export async function handleComplianceRequest(
   if (path === "/admin/compliance/dashboard" && method === "GET") {
     requireRole("admin");
     const [{ data: pendingUsers }, { data: acceptances }, { data: driverDocs }, { data: bgChecks }] = await Promise.all([
-      db.from("users").select("user_id,role,approval_status,agreement_complete").in("role", ["delivery", "vendor"]).in("approval_status", ["pending", "review", "verification", "documents_missing"]),
+      db.from("users").select("user_id,role,approval_status,agreement_complete").in("role", [...PARTNER_ROLE_ALIASES.delivery, ...PARTNER_ROLE_ALIASES.vendor]).in("approval_status", PENDING_APPROVAL_STATUSES),
       db.from("agreement_acceptances").select("acceptance_id"),
       db.from("driver_documents").select("document_id,status,expires_at,document_type"),
       db.from("background_checks").select("check_id,status"),

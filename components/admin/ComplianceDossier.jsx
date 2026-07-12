@@ -42,6 +42,20 @@ export default function ComplianceDossier({ userId, onClose, onAction }) {
     }
   };
 
+  const setApproval = async (action) => {
+    setBusy(true);
+    try {
+      await api.post(`/admin/approvals/users/${userId}/action`, { action });
+      const r = await api.get(`/admin/compliance/users/${userId}/dossier`);
+      setData(r?.data);
+      onAction?.();
+    } catch (e) {
+      alert(e?.message || "Approval action failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!userId) return null;
 
   return (
@@ -59,6 +73,39 @@ export default function ComplianceDossier({ userId, onClose, onAction }) {
           <>
             <h2 className="font-display text-2xl font-bold pr-10">{data.user?.name}</h2>
             <p className="text-sm" style={{ color: "var(--muted)" }}>{data.user?.email} · {data.user?.role}</p>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs">
+              <span className={`badge ${data.user?.approval_status === "approved" ? "text-green-400" : "text-amber-400"}`}>
+                Account: {data.user?.approval_status || "pending"}
+              </span>
+              <span className={`badge ${data.user?.agreement_complete ? "text-green-400" : "text-amber-400"}`}>
+                Agreements: {data.user?.agreement_complete ? "complete" : "incomplete"}
+              </span>
+            </div>
+
+            {(data.user?.role === "delivery" || data.user?.role === "driver" || data.user?.role === "vendor" || data.user?.role === "restaurant") && (
+              <section className="mt-6 p-4 rounded-lg" style={{ background: "var(--surface-2)" }}>
+                <h3 className="font-bold mb-3">Partner approval</h3>
+                <div className="flex flex-wrap gap-2">
+                  {data.user?.approval_status !== "approved" ? (
+                    <>
+                      <button className="btn-primary !py-2 text-sm" disabled={busy} onClick={() => setApproval("approve")}>
+                        Approve partner
+                      </button>
+                      <button className="btn-ghost !py-2 text-sm" disabled={busy} onClick={() => setApproval("request_info")}>
+                        Request info
+                      </button>
+                      <button className="btn-ghost !py-2 text-sm text-red-400" disabled={busy} onClick={() => setApproval("reject")}>
+                        Reject
+                      </button>
+                    </>
+                  ) : (
+                    <button className="btn-ghost !py-2 text-sm text-amber-400" disabled={busy} onClick={() => setApproval("revoke")}>
+                      Revoke approval
+                    </button>
+                  )}
+                </div>
+              </section>
+            )}
 
             <section className="mt-6">
               <h3 className="font-bold flex items-center gap-2"><FileText size={18} /> Signed Agreements</h3>
