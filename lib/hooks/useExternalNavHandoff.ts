@@ -1,19 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useWebPush } from "@/lib/useWebPush";
 import { isMobileDevice } from "@/lib/logistics/externalNavigation";
 import type { ExternalNavProvider } from "@/lib/logistics/externalNavSession";
 import {
   clearExternalNavSession,
-  getExternalNavSession,
   isExternalNavSessionActive,
   startExternalNavSession,
 } from "@/lib/logistics/externalNavSession";
-import { isExternalNavReturnPingEnabled } from "@/lib/logistics/externalNavPreferences";
-
-const RETURN_PING_MS = 2500;
-const RETURN_PING_TAG = "zoomeats-external-nav-return";
 
 type OpenNavigationArgs = {
   provider: ExternalNavProvider;
@@ -34,52 +28,18 @@ async function requestScreenWakeLock() {
 }
 
 export function useExternalNavHandoff(orderId?: string | null) {
-  const { request, fire } = useWebPush("ZoomEats");
   const [handoffActive, setHandoffActive] = useState(false);
-  const [returned, setReturned] = useState(false);
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
-  const pingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pingCountRef = useRef(0);
 
   useEffect(() => {
     setHandoffActive(isExternalNavSessionActive());
   }, []);
-
-  const scheduleReturnPing = useCallback(() => {
-    if (!isExternalNavReturnPingEnabled()) return;
-    if (pingTimerRef.current) clearTimeout(pingTimerRef.current);
-    if (pingCountRef.current >= 3) return;
-    pingTimerRef.current = setTimeout(() => {
-      if (!document.hidden || !isExternalNavSessionActive()) return;
-      const session = getExternalNavSession();
-      fire(
-        "ZoomEats delivery active",
-        "Tap to return — your location is still shared with the customer.",
-        {
-          tag: RETURN_PING_TAG,
-          onClick: () => {
-            window.focus();
-            setReturned(true);
-          },
-        }
-      );
-      pingCountRef.current += 1;
-      if (session?.orderId === orderId && pingCountRef.current < 3) {
-        pingTimerRef.current = setTimeout(scheduleReturnPing, 45_000);
-      }
-    }, RETURN_PING_MS);
-  }, [fire, orderId]);
 
   useEffect(() => {
     const onVis = () => {
       if (document.hidden) return;
       if (!isExternalNavSessionActive()) return;
       setHandoffActive(true);
-      setReturned(true);
-      if (pingTimerRef.current) {
-        clearTimeout(pingTimerRef.current);
-        pingTimerRef.current = null;
-      }
       wakeLockRef.current?.release().catch(() => {});
       wakeLockRef.current = null;
     };
@@ -89,7 +49,6 @@ export function useExternalNavHandoff(orderId?: string | null) {
 
   useEffect(() => {
     return () => {
-      if (pingTimerRef.current) clearTimeout(pingTimerRef.current);
       wakeLockRef.current?.release().catch(() => {});
     };
   }, []);
@@ -98,12 +57,6 @@ export function useExternalNavHandoff(orderId?: string | null) {
     async ({ provider, webUrl, nativeUrl }: OpenNavigationArgs) => {
       startExternalNavSession({ orderId: orderId ?? undefined, provider });
       setHandoffActive(true);
-      setReturned(false);
-      pingCountRef.current = 0;
-
-      if (isExternalNavReturnPingEnabled()) {
-        await request();
-      }
       wakeLockRef.current = await requestScreenWakeLock();
 
       const useNative = isMobileDevice() && nativeUrl;
@@ -112,25 +65,18 @@ export function useExternalNavHandoff(orderId?: string | null) {
       } else {
         window.open(webUrl, "_blank", "noopener,noreferrer");
       }
-
-      scheduleReturnPing();
     },
-    [orderId, request, scheduleReturnPing]
+    [orderId]
   );
 
   const dismissHandoff = useCallback(() => {
     clearExternalNavSession();
     setHandoffActive(false);
-    setReturned(false);
-    if (pingTimerRef.current) {
-      clearTimeout(pingTimerRef.current);
-      pingTimerRef.current = null;
-    }
   }, []);
 
   return {
     handoffActive,
-    returned,
+    returned: false,
     openNavigation,
     dismissHandoff,
     isMobile: isMobileDevice(),
