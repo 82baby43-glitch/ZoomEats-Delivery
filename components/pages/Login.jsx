@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
+import { useAuth } from "@/lib/auth";
 import {
   signInWithGoogle,
   signInWithEmail,
@@ -14,6 +15,7 @@ import {
 export default function LoginPage({ title, subtitle, defaultRedirect = "/", signupMode = false }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { refresh } = useAuth();
   const redirect = searchParams.get("redirect") || defaultRedirect;
   const errorCode = searchParams.get("error");
   const errorReason = searchParams.get("reason");
@@ -57,6 +59,7 @@ export default function LoginPage({ title, subtitle, defaultRedirect = "/", sign
     try {
       if (mode === "login") {
         await signInWithEmail(email, password, { remember });
+        await refresh();
         finish();
       } else if (mode === "signup") {
         await signUpWithEmail(email, password, { name });

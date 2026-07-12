@@ -57,8 +57,12 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) 
       setAppDone(Boolean(appData?.legal_name || appData?.business_name));
       const bgData = bg?.data ?? bg;
       setBgDone(Boolean(bgData?.submitted));
+      const stillPending = list.filter((a) => a.required && !a.accepted);
+      if (stillPending.length === 0 && list.length > 0) {
+        onAllComplete?.();
+      }
     }).catch((e) => setError(e?.message || "Failed to load"));
-  }, [user, role]);
+  }, [user, role, onAllComplete]);
 
   const currentStep = steps[step];
   const pending = agreements.filter((a) => a.required && !a.accepted);

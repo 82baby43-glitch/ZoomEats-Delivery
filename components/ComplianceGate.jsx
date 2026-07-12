@@ -58,7 +58,7 @@ export function ComplianceGate({
         const status = res?.data;
         if (!cancelled) {
           setCompliance(status);
-          if (status?.redirect_to && roles?.length) {
+          if (status?.redirect_to && !status?.can_access_dashboard && roles?.length) {
             router.replace(status.redirect_to);
           }
         }
@@ -87,7 +87,16 @@ export function ComplianceGate({
     );
   }
 
-  if (!user) return null;
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div
+          className="w-8 h-8 rounded-full border-4 border-t-transparent animate-spin"
+          style={{ borderColor: "var(--primary)" }}
+        />
+      </div>
+    );
+  }
 
   if (roles && !roleMatches(user.role, roles)) {
     const needsDriver = roles.some((r) => r === "delivery" || r === "driver");

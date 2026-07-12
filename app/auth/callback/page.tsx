@@ -8,7 +8,9 @@ import { ensureUserProfile, getCurrentUser } from "@/lib/auth";
 const ROLE_HOME: Record<string, string> = {
   admin: "/admin",
   delivery: "/driver/dashboard",
+  driver: "/driver/dashboard",
   vendor: "/restaurant/dashboard",
+  restaurant: "/restaurant/dashboard",
   dispatcher: "/dispatcher",
   customer: "/",
 };

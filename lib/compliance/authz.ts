@@ -18,6 +18,39 @@ export function roleMatches(userRole: string, allowed: string[]): boolean {
   return expanded.includes(userRole) || expanded.includes(normalized);
 }
 
+const STALE_ENTITY_APPROVAL = ["verification", "review", "pending", "documents_missing"];
+
+/** Prefer admin-approved user status when the entity row was not synced. */
+export function mergeApprovalStatus(entityStatus?: string | null, userStatus?: string | null): string {
+  const entity = entityStatus || null;
+  const user = userStatus || null;
+  if (user === "approved" && entity && STALE_ENTITY_APPROVAL.includes(entity)) return "approved";
+  if (entity === "approved" || user === "approved") return "approved";
+  if (entity === "suspended" || user === "suspended") return "suspended";
+  if (entity === "rejected" || user === "rejected") return "rejected";
+  return entity || user || "pending";
+}
+
+function mergeAgreementComplete(
+  entityComplete?: boolean,
+  userComplete?: boolean,
+  missingCount = 0
+): boolean {
+  return (Boolean(entityComplete) || Boolean(userComplete)) && missingCount === 0;
+}
+
+function mergeActive(
+  entityActive?: boolean,
+  userActive?: boolean,
+  entityApproval?: string,
+  userApproval?: string
+): boolean {
+  const approval = mergeApprovalStatus(entityApproval, userApproval);
+  if (approval === "approved") return entityActive ?? userActive ?? true;
+  if (entityActive === false || userActive === false) return false;
+  return entityActive ?? userActive ?? true;
+}
+
 export type ComplianceRecord = {
   approval_status: string;
   agreement_complete: boolean;
@@ -80,16 +113,20 @@ export function computeComplianceStatus(opts: {
 
   if (role === "delivery") {
     const driver = opts.driver;
-    const approval = driver?.approval_status || opts.user?.approval_status || "pending";
-    const agreementComplete = driver?.agreement_complete ?? opts.user?.agreement_complete ?? false;
-    const active = driver?.active ?? opts.user?.active ?? true;
+    const approval = mergeApprovalStatus(driver?.approval_status, opts.user?.approval_status);
+    const agreementComplete = mergeAgreementComplete(
+      driver?.agreement_complete,
+      opts.user?.agreement_complete,
+      missing.length
+    );
+    const active = mergeActive(driver?.active, opts.user?.active, driver?.approval_status, opts.user?.approval_status);
     const suspended = Boolean(driver?.suspended_at || opts.user?.suspended_at) || approval === "suspended";
     const docsComplete = driver?.documents_complete ?? false;
 
     return resolveGate({
       ...base,
       approval_status: approval,
-      agreement_complete: agreementComplete && missing.length === 0,
+      agreement_complete: agreementComplete,
       active,
       suspended,
       documents_complete: docsComplete,
