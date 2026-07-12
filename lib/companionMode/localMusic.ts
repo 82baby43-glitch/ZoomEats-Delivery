@@ -368,6 +368,36 @@ export function seekLocalMusic(deltaSeconds: number) {
   emit();
 }
 
+/** Jump to the start of the current track and play from the beginning. */
+export async function restartLocalMusic() {
+  const track = tracks[currentIndex];
+  if (!track) return false;
+
+  const audio = getAudio();
+  if (!audio) return false;
+
+  const ctxOk = await resumeAudioContext();
+  if (!ctxOk) return false;
+
+  if (audio.src !== track.url) {
+    audio.src = track.url;
+  }
+
+  audio.currentTime = 0;
+  applyVolume();
+  applyEq();
+  try {
+    await audio.play();
+    playing = true;
+    emit();
+    return true;
+  } catch {
+    playing = false;
+    emit();
+    return false;
+  }
+}
+
 export function setLocalMusicVolume(pct: number) {
   volumePct = Math.max(0, Math.min(100, pct));
   applyVolume();
