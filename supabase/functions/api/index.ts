@@ -235,7 +235,7 @@ Deno.serve(async (req) => {
       path,
       method,
       body,
-      user: u,
+      user,
       requireAuth,
     });
     if (pwaResult !== null) return json(pwaResult);
