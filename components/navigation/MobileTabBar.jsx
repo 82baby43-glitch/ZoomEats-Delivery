@@ -4,8 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Home, ShoppingBag, ClipboardList, User, Bike, Map, LayoutDashboard } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { getClientAppType } from "@/lib/pwa/appContext";
+import { getClientAppType, getPwaConfig } from "@/lib/pwa/appContext";
 import { normalizeRole } from "@/lib/compliance/authz";
+
+function accountHref(user, appType) {
+  if (user) return "/account";
+  return getPwaConfig(appType).loginPath;
+}
 
 function Tab({ href, label, icon: Icon, active }) {
   return (
@@ -32,13 +37,16 @@ export default function MobileTabBar() {
 
   const isActive = (href) => pathname === href || (href !== "/" && pathname.startsWith(href));
 
+  const accountPath = accountHref(user, appType);
+  const accountActive = isActive("/account") || isActive(accountPath);
+
   if (appType === "driver" || role === "delivery") {
     return (
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t backdrop-blur-xl safe-area-pb" style={{ background: "rgba(10,10,10,0.92)", borderColor: "var(--border)" }} aria-label="Driver navigation">
         <div className="flex max-w-lg mx-auto">
           <Tab href="/driver/dashboard" label="Drive" icon={Bike} active={isActive("/driver/dashboard")} />
           <Tab href="/driver/live-map" label="Map" icon={Map} active={isActive("/driver/live-map")} />
-          <Tab href="/driver/login" label="Account" icon={User} active={isActive("/driver/login")} />
+          <Tab href={accountPath} label="Account" icon={User} active={accountActive} />
         </div>
       </nav>
     );
@@ -50,7 +58,7 @@ export default function MobileTabBar() {
         <div className="flex max-w-lg mx-auto">
           <Tab href="/restaurant/dashboard" label="Orders" icon={LayoutDashboard} active={isActive("/restaurant/dashboard")} />
           <Tab href="/restaurant/live-map" label="Map" icon={Map} active={isActive("/restaurant/live-map")} />
-          <Tab href="/restaurant/login" label="Account" icon={User} active={isActive("/restaurant/login")} />
+          <Tab href={accountPath} label="Account" icon={User} active={accountActive} />
         </div>
       </nav>
     );
@@ -62,7 +70,7 @@ export default function MobileTabBar() {
         <Tab href="/" label="Home" icon={Home} active={pathname === "/"} />
         <Tab href="/orders" label="Orders" icon={ClipboardList} active={isActive("/orders")} />
         <Tab href="/cart" label="Cart" icon={ShoppingBag} active={isActive("/cart")} />
-        <Tab href={user ? "/onboarding" : "/login"} label="Account" icon={User} active={isActive("/login") || isActive("/onboarding")} />
+        <Tab href={accountPath} label="Account" icon={User} active={accountActive} />
       </div>
     </nav>
   );
