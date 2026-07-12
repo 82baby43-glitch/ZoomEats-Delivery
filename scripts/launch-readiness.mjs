@@ -8,7 +8,12 @@ import { createClient } from "@supabase/supabase-js";
 const PROD = "https://zoom-eats-delivery.vercel.app";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const STRIPE_KEY = process.env.STRIPE_API_KEY || process.env.STRIPE_SECRET_KEY;
+const STRIPE_KEY =
+  process.env.STRIPE_API_KEY ||
+  process.env.STRIPE_SECRET_KEY ||
+  process.env.Stripe_Secret_Key ||
+  process.env.Stripe_Api_Token ||
+  "";
 const UBER_CLIENT_ID = process.env.UBER_DIRECT_CLIENT_ID;
 const UBER_CLIENT_SECRET = process.env.UBER_DIRECT_CLIENT_SECRET;
 
@@ -100,17 +105,24 @@ async function main() {
   }
 
   const sampleRest = restaurants?.[0];
+  let menuRest = sampleRest;
   let menuCount = 0;
-  if (sampleRest) {
+  let menuRestName = sampleRest?.name || "unknown";
+  for (const rest of restaurants || []) {
     const { data: menu } = await db
       .from("menu_items")
       .select("item_id")
-      .eq("restaurant_id", sampleRest.restaurant_id)
+      .eq("restaurant_id", rest.restaurant_id)
       .eq("available", true);
-    menuCount = menu?.length || 0;
-    if (menuCount > 0) pass("Menu items", `${menuCount} available at ${sampleRest.name}`);
-    else fail("Menu items", `no available items at ${sampleRest.name}`);
+    if ((menu?.length || 0) > 0) {
+      menuCount = menu.length;
+      menuRestName = rest.name;
+      menuRest = rest;
+      break;
+    }
   }
+  if (menuCount > 0) pass("Menu items", `${menuCount} available at ${menuRestName}`);
+  else fail("Menu items", `no available items at approved restaurants (checked ${restaurants?.length || 0})`);
 
   const { data: drivers } = await db.from("drivers").select("driver_id,availability,latitude,longitude").limit(20);
   const availDrivers = (drivers || []).filter((d) => d.availability);
@@ -174,13 +186,13 @@ async function main() {
 
   // --- Dispatch simulation ---
   console.log("\n--- Dispatch simulation ---");
-  if (!sampleRest || menuCount === 0) {
+  if (!menuRest || menuCount === 0) {
     warn("Dispatch simulation", "skipped — no restaurant/menu");
   } else {
     const { data: menuItem } = await db
       .from("menu_items")
       .select("*")
-      .eq("restaurant_id", sampleRest.restaurant_id)
+      .eq("restaurant_id", menuRest.restaurant_id)
       .eq("available", true)
       .limit(1)
       .maybeSingle();
@@ -191,8 +203,8 @@ async function main() {
       order_id: testOrderId,
       customer_id: "launch_test_user",
       customer_name: "Launch Test",
-      restaurant_id: sampleRest.restaurant_id,
-      restaurant_name: sampleRest.name,
+      restaurant_id: menuRest.restaurant_id,
+      restaurant_name: menuRest.name,
       items: [{ item_id: menuItem.item_id, name: menuItem.name, price: menuItem.price, quantity: 1 }],
       subtotal: menuItem.price,
       delivery_fee: 2.99,
