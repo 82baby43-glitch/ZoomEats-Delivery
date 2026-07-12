@@ -1,10 +1,12 @@
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://zoom-eats-delivery.vercel.app";
+
 export function LocalBusinessJsonLd({ restaurants = [] }) {
   const items = restaurants.slice(0, 20).map((r) => ({
     "@type": "Restaurant",
     name: r.name,
     servesCuisine: r.cuisine,
     address: r.address ? { "@type": "PostalAddress", streetAddress: r.address } : undefined,
-    url: `https://zoomeats.com/r/${r.restaurant_id}`,
+    url: `${SITE_URL}/r/${r.restaurant_id}`,
   }));
 
   const json = {
@@ -13,8 +15,8 @@ export function LocalBusinessJsonLd({ restaurants = [] }) {
       {
         "@type": "Organization",
         name: "ZoomEats",
-        url: "https://zoomeats.com",
-        logo: "https://zoomeats.com/icons/icon-512.png",
+        url: SITE_URL,
+        logo: `${SITE_URL}/icons/icon-512.png`,
         description: "Food delivery in Columbia, Missouri — local restaurants delivered fast.",
         areaServed: {
           "@type": "City",
@@ -25,10 +27,10 @@ export function LocalBusinessJsonLd({ restaurants = [] }) {
       {
         "@type": "WebSite",
         name: "ZoomEats",
-        url: "https://zoomeats.com",
+        url: SITE_URL,
         potentialAction: {
           "@type": "SearchAction",
-          target: "https://zoomeats.com/?q={search_term_string}",
+          target: `${SITE_URL}/?q={search_term_string}`,
           "query-input": "required name=search_term_string",
         },
       },
