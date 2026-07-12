@@ -2,23 +2,38 @@
 
 import { useEffect, useState } from "react";
 import { X, Download, Share } from "lucide-react";
-import { useInstallPrompt } from "@/lib/pwa/useInstallPrompt";
+import { usePwaInstall } from "@/lib/pwa/useInstallPrompt";
 import { useAuth } from "@/lib/auth";
 
 export default function InstallPrompt() {
   const { user } = useAuth();
-  const { canPrompt, config, install, dismiss, iosHint, installed } = useInstallPrompt();
-  const [visible, setVisible] = useState(false);
+  const {
+    canInstall,
+    canAutoPrompt,
+    config,
+    install,
+    snooze,
+    iosHint,
+    installed,
+    manualOpen,
+  } = usePwaInstall();
+  const [autoVisible, setAutoVisible] = useState(false);
 
   useEffect(() => {
-    if (canPrompt && user) {
-      const t = setTimeout(() => setVisible(true), 1200);
+    if (canAutoPrompt && user && !manualOpen) {
+      const t = setTimeout(() => setAutoVisible(true), 1200);
       return () => clearTimeout(t);
     }
-    setVisible(false);
-  }, [canPrompt, user]);
+    setAutoVisible(false);
+  }, [canAutoPrompt, user, manualOpen]);
 
-  if (!visible || installed) return null;
+  const visible = Boolean(user) && canInstall && !installed && (manualOpen || autoVisible);
+  if (!visible) return null;
+
+  const close = () => {
+    snooze();
+    setAutoVisible(false);
+  };
 
   return (
     <div
@@ -31,7 +46,7 @@ export default function InstallPrompt() {
       <button
         type="button"
         className="absolute top-3 right-3 btn-ghost p-1"
-        onClick={() => { dismiss(); setVisible(false); }}
+        onClick={close}
         aria-label="Dismiss"
       >
         <X size={18} />
@@ -53,7 +68,7 @@ export default function InstallPrompt() {
             <Download size={16} /> {config.installButton}
           </button>
         )}
-        <button type="button" className="btn-ghost text-sm" onClick={() => { dismiss(); setVisible(false); }}>
+        <button type="button" className="btn-ghost text-sm" onClick={close}>
           Not now
         </button>
       </div>

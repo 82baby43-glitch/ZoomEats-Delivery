@@ -7,6 +7,7 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 import SupabaseConfigBanner from "@/components/SupabaseConfigBanner";
 import OfflineBanner from "@/components/OfflineBanner";
 import PwaShell from "@/components/pwa/PwaShell";
+import { PwaInstallProvider } from "@/lib/pwa/useInstallPrompt";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,10 +25,12 @@ export function Providers({ children }) {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <CartProvider>
-          <SupabaseConfigBanner />
-          <OfflineBanner />
-          <PwaShell />
-          <ErrorBoundary>{children}</ErrorBoundary>
+          <PwaInstallProvider>
+            <SupabaseConfigBanner />
+            <OfflineBanner />
+            <PwaShell />
+            <ErrorBoundary>{children}</ErrorBoundary>
+          </PwaInstallProvider>
         </CartProvider>
       </AuthProvider>
     </QueryClientProvider>
