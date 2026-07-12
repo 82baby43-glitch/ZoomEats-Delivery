@@ -43,14 +43,18 @@ export async function approveRestaurantWithReadiness(
   }).eq("restaurant_id", restaurantId);
 
   if (rest?.owner_id) {
-    await db.from("users").update({ approval_status: "approved", active: true }).eq("user_id", rest.owner_id);
+    await db.from("users").update({
+      approval_status: "approved",
+      active: true,
+      agreement_complete: true,
+    }).eq("user_id", rest.owner_id);
     await db.from("compliance_reviews").update({
       status: "approved",
       approval_status: "approved",
       reviewed_by: admin.user_id,
       reviewed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    }).eq("user_id", rest.owner_id).in("status", ["pending"]);
+    }).eq("user_id", rest.owner_id).in("status", ["pending", "review", "verification"]);
   }
 
   const updated = await evaluateRestaurantReadiness(db, restaurantId);

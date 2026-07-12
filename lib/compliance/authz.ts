@@ -34,8 +34,10 @@ export function mergeApprovalStatus(entityStatus?: string | null, userStatus?: s
 function mergeAgreementComplete(
   entityComplete?: boolean,
   userComplete?: boolean,
-  missingCount = 0
+  missingCount = 0,
+  approvalStatus?: string
 ): boolean {
+  if (approvalStatus === "approved") return true;
   return (Boolean(entityComplete) || Boolean(userComplete)) && missingCount === 0;
 }
 
@@ -117,7 +119,8 @@ export function computeComplianceStatus(opts: {
     const agreementComplete = mergeAgreementComplete(
       driver?.agreement_complete,
       opts.user?.agreement_complete,
-      missing.length
+      missing.length,
+      approval
     );
     const active = mergeActive(driver?.active, opts.user?.active, driver?.approval_status, opts.user?.approval_status);
     const suspended = Boolean(driver?.suspended_at || opts.user?.suspended_at) || approval === "suspended";
@@ -138,15 +141,21 @@ export function computeComplianceStatus(opts: {
 
   if (role === "vendor") {
     const restaurant = opts.restaurant;
-    const approval = restaurant?.approval_status || (restaurant?.approved ? "approved" : "pending") || "pending";
-    const agreementComplete = restaurant?.agreement_complete ?? false;
-    const active = restaurant?.active ?? true;
-    const suspended = Boolean(restaurant?.suspended_at) || approval === "suspended";
+    const entityApproval = restaurant?.approval_status || (restaurant?.approved ? "approved" : null);
+    const approval = mergeApprovalStatus(entityApproval, opts.user?.approval_status);
+    const agreementComplete = mergeAgreementComplete(
+      restaurant?.agreement_complete,
+      opts.user?.agreement_complete,
+      missing.length,
+      approval
+    );
+    const active = mergeActive(restaurant?.active, opts.user?.active, entityApproval, opts.user?.approval_status);
+    const suspended = Boolean(restaurant?.suspended_at || opts.user?.suspended_at) || approval === "suspended";
 
     return resolveGate({
       ...base,
       approval_status: approval,
-      agreement_complete: agreementComplete && missing.length === 0,
+      agreement_complete: agreementComplete,
       active,
       suspended,
       documents_complete: true,
@@ -162,6 +171,8 @@ export function computeComplianceStatus(opts: {
 function resolveGate(
   s: ComplianceStatus & { dashboardPath: string }
 ): ComplianceStatus {
+  const isApproved = s.approval_status === "approved";
+
   if (s.suspended || s.approval_status === "suspended") {
     return {
       ...s,
@@ -170,7 +181,7 @@ function resolveGate(
       message: "Account suspended",
     };
   }
-  if (!s.agreement_complete || s.missing_agreements.length > 0) {
+  if (!isApproved && (!s.agreement_complete || s.missing_agreements.length > 0)) {
     return {
       ...s,
       can_access_dashboard: false,
@@ -194,7 +205,7 @@ function resolveGate(
       message: "Account not approved",
     };
   }
-  if (!s.active) {
+  if (!s.active && !isApproved) {
     return {
       ...s,
       can_access_dashboard: false,
@@ -202,7 +213,14 @@ function resolveGate(
       message: "Account inactive",
     };
   }
-  return { ...s, can_access_dashboard: true, redirect_to: null, message: null };
+  return {
+    ...s,
+    can_access_dashboard: true,
+    redirect_to: null,
+    message: null,
+    agreement_complete: isApproved ? true : s.agreement_complete,
+    missing_agreements: isApproved ? [] : s.missing_agreements,
+  };
 }
 
 export const PROTECTED_ROUTE_ROLES: Record<string, string[]> = {

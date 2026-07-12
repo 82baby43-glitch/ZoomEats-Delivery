@@ -11,6 +11,7 @@ import AttentionSummary from "@/components/admin/AttentionSummary";
 import ActivityFeed from "@/components/admin/ActivityFeed";
 import AttentionTab from "@/components/admin/AttentionTab";
 import ApprovalsTab from "@/components/admin/ApprovalsTab";
+import PartnerApprovalsPanel from "@/components/admin/PartnerApprovalsPanel";
 import ComplianceDossier from "@/components/admin/ComplianceDossier";
 import GeocodeRestaurantsButton from "@/components/admin/GeocodeRestaurantsButton";
 import RestaurantLocationEditor from "@/components/admin/RestaurantLocationEditor";
@@ -35,14 +36,20 @@ export default function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [pendingDrivers, setPendingDrivers] = useState(0);
   const [dossierUserId, setDossierUserId] = useState(null);
   const [locationRestaurantId, setLocationRestaurantId] = useState(null);
 
   const loadApprovals = useCallback(async () => {
     try {
-      const r = await api.get("/admin/approvals/pending");
-      const list = Array.isArray(r?.data) ? r.data : [];
-      setPendingApprovals(list.length);
+      const [pending, drivers] = await Promise.all([
+        api.get("/admin/approvals/pending"),
+        api.get("/admin/approvals/drivers", { params: { status: "pending" } }),
+      ]);
+      const pendingList = Array.isArray(pending?.data) ? pending.data : [];
+      const driverList = Array.isArray(drivers?.data) ? drivers.data : [];
+      setPendingApprovals(pendingList.length);
+      setPendingDrivers(driverList.length);
     } catch (e) {
       logClientError("admin.approvals", e);
     }
@@ -133,6 +140,7 @@ export default function AdminPanel() {
   const tabs = [
     { id: "pulse", label: "Pulse" },
     { id: "approvals", label: `Approvals${pendingApprovals ? ` · ${pendingApprovals}` : ""}` },
+    { id: "drivers", label: `Drivers${pendingDrivers ? ` · ${pendingDrivers}` : ""}` },
     { id: "attention", label: `Attention${counts.pending + counts.stuck + counts.failed ? ` · ${counts.pending + counts.stuck + counts.failed}` : ""}` },
     { id: "users", label: "Users" },
     { id: "restaurants", label: "Restaurants" },
@@ -218,6 +226,15 @@ export default function AdminPanel() {
                   {pendingApprovals}
                 </span>
               )}
+              {t.id === "drivers" && pendingDrivers > 0 && (
+                <span
+                  className="text-xs font-bold rounded-full w-5 h-5 inline-flex items-center justify-center"
+                  style={{ background: "var(--primary)", color: "#0A0A0A" }}
+                  data-testid="drivers-pending-badge"
+                >
+                  {pendingDrivers}
+                </span>
+              )}
               {t.id === "attention" && (counts.pending + counts.stuck + counts.failed) > 0 && (
                 <span
                   className="text-xs font-bold rounded-full w-5 h-5 inline-flex items-center justify-center"
@@ -246,14 +263,34 @@ export default function AdminPanel() {
               {tab === "approvals" && (
                 <ApprovalsTab onChanged={refreshAll} onReview={setDossierUserId} />
               )}
+              {tab === "drivers" && (
+                <PartnerApprovalsPanel
+                  partnerType="drivers"
+                  onChanged={refreshAll}
+                  onReview={setDossierUserId}
+                />
+              )}
               {tab === "attention" && <AttentionTab attention={attention} onApprove={approve} />}
               {tab === "users" && <UsersTable users={users} />}
               {tab === "restaurants" && (
-                <RestaurantsList
-                  restaurants={restaurants}
-                  onApprove={approve}
-                  onEditLocation={setLocationRestaurantId}
-                />
+                <div className="space-y-8">
+                  <div>
+                    <h2 className="font-display text-xl font-bold mb-4">Restaurant partners</h2>
+                    <PartnerApprovalsPanel
+                      partnerType="restaurants"
+                      onChanged={refreshAll}
+                      onReview={setDossierUserId}
+                    />
+                  </div>
+                  <div>
+                    <h2 className="font-display text-xl font-bold mb-4">Restaurant listings</h2>
+                    <RestaurantsList
+                      restaurants={restaurants}
+                      onApprove={approve}
+                      onEditLocation={setLocationRestaurantId}
+                    />
+                  </div>
+                </div>
               )}
               {tab === "orders" && <OrdersTable orders={orders} />}
             </>
