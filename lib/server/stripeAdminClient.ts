@@ -57,3 +57,38 @@ export function getStripeConfigSummary() {
     webhook_url: supabaseUrl ? `${supabaseUrl.replace(/\/$/, "")}/functions/v1/stripe-webhook` : null,
   };
 }
+
+export async function verifyStripeWebhookRegistration(): Promise<{
+  registered: boolean;
+  endpoint_id?: string;
+  detail: string;
+}> {
+  const apiKey = getStripeApiKey();
+  const webhookUrl = getStripeConfigSummary().webhook_url;
+  if (!apiKey || !webhookUrl) {
+    return { registered: false, detail: "Stripe API key or webhook URL not configured" };
+  }
+
+  try {
+    const res = await fetch("https://api.stripe.com/v1/webhook_endpoints?limit=100", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = typeof data?.error?.message === "string" ? data.error.message : `stripe_${res.status}`;
+      return { registered: false, detail: msg };
+    }
+    const match = (data.data || []).find(
+      (w: { url?: string; status?: string; id?: string }) => w.url === webhookUrl && w.status === "enabled"
+    );
+    if (match) {
+      return { registered: true, endpoint_id: match.id, detail: `Registered (${match.id})` };
+    }
+    return {
+      registered: false,
+      detail: `No enabled endpoint for ${webhookUrl} — run npm run stripe:webhook-register`,
+    };
+  } catch (e) {
+    return { registered: false, detail: String(e) };
+  }
+}

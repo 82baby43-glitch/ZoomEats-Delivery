@@ -2,6 +2,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1
 import {
   getStripeConfigSummary,
   verifyStripeConnection,
+  verifyStripeWebhookRegistration,
 } from "./stripeAdminClient.ts";
 
 type AdminCtx = {
@@ -28,6 +29,7 @@ async function safeQuery<T>(fn: () => Promise<{ data: T | null }>): Promise<T | 
 async function buildStripeOverview(db: SupabaseClient) {
   const config = getStripeConfigSummary();
   const auth = config.configured ? await verifyStripeConnection() : { ok: false, error: "not_configured" };
+  const webhook = config.configured ? await verifyStripeWebhookRegistration() : { registered: false, detail: "not_configured" };
 
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -120,6 +122,9 @@ async function buildStripeOverview(db: SupabaseClient) {
   return {
     ...config,
     auth,
+    webhook_registered: webhook.registered,
+    webhook_endpoint_id: webhook.endpoint_id || null,
+    webhook_registration_detail: webhook.detail,
     stats: {
       total_revenue: Math.round(totalRevenue * 100) / 100,
       total_paid_orders: paidList.length,
