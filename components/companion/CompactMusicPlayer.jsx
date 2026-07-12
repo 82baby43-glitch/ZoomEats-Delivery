@@ -1,6 +1,6 @@
 "use client";
 
-import { Music, Pause, Play, Rewind, RotateCcw, FastForward, SkipBack, SkipForward, Square } from "lucide-react";
+import { Music, Pause, Play, Rewind, RotateCcw, FastForward, Square } from "lucide-react";
 import { useCompanionContext } from "./CompanionModeProvider";
 import { hasLocalTracks } from "@/lib/companionMode/localMusic";
 import { useMusicPlayback } from "@/lib/companionMode/useMusicPlayback";
@@ -19,8 +19,6 @@ export default function CompactMusicPlayer() {
     onRewind,
     onRestart,
     onFastForward,
-    onSkipBack,
-    onSkipForward,
   } = playback;
 
   if (!settings) {
@@ -59,16 +57,7 @@ export default function CompactMusicPlayer() {
           </p>
         )}
       </div>
-      <div className="flex items-center justify-center gap-2 flex-wrap">
-        <button
-          type="button"
-          className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
-          aria-label="Previous track"
-          disabled={!useDeviceMusic || localState.tracks.length < 2}
-          onClick={onSkipBack}
-        >
-          <SkipBack size={18} />
-        </button>
+      <div className="flex items-center justify-center gap-2">
         <button
           type="button"
           className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
@@ -113,15 +102,6 @@ export default function CompactMusicPlayer() {
           aria-label="Fast forward 10 seconds"
         >
           <FastForward size={18} />
-        </button>
-        <button
-          type="button"
-          className="btn-ghost !p-2 min-w-[44px] min-h-[44px]"
-          aria-label="Next track"
-          disabled={!useDeviceMusic || localState.tracks.length < 2}
-          onClick={onSkipForward}
-        >
-          <SkipForward size={18} />
         </button>
       </div>
     </div>

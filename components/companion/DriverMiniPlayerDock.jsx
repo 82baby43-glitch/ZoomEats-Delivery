@@ -1,21 +1,33 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight, FastForward, Music, Pause, Play, Rewind, RotateCcw, SkipBack, SkipForward, Square } from "lucide-react";
+import { FastForward, Music, Pause, Play, Rewind, RotateCcw, Square } from "lucide-react";
 import { useCompanionContext } from "@/components/companion/CompanionModeProvider";
 import { hasLocalTracks } from "@/lib/companionMode/localMusic";
 import { useMusicPlayback } from "@/lib/companionMode/useMusicPlayback";
 
-/** Slim ZoomEats Player bar above the mobile tab bar on driver routes. */
+const TAB_WIDTH_PX = 44;
+
+/** Collapsible side dock — slim tab on the right; tap to slide controls out to the left. */
 export default function DriverMiniPlayerDock() {
   const pathname = usePathname();
   const { settings, audio, updateSettings } = useCompanionContext();
   const playback = useMusicPlayback({ settings, audio, updateSettings });
-  const { localState, playing, canPlay, isAmbient, useDeviceMusic, onTogglePlay, onStop, onRewind, onRestart, onFastForward, onSkipBack, onSkipForward } =
-    playback;
-
-  const canSkipTracks = useDeviceMusic && localState.tracks.length >= 2;
+  const [open, setOpen] = useState(false);
+  const {
+    localState,
+    playing,
+    canPlay,
+    isAmbient,
+    useDeviceMusic,
+    onTogglePlay,
+    onStop,
+    onRewind,
+    onRestart,
+    onFastForward,
+  } = playback;
 
   const onDriverRoute =
     pathname.startsWith("/driver") ||
@@ -36,101 +48,115 @@ export default function DriverMiniPlayerDock() {
     ? "Now playing"
     : isAmbient
       ? hasLocalTracks()
-        ? "Tap title for full player"
+        ? "Tap for full player"
         : "Add music in Player tab"
       : settings?.music_connected
-        ? "Tap title for player"
+        ? "Tap for player"
         : "Set up in Player tab";
 
   return (
     <div
-      className="md:hidden fixed inset-x-0 z-40 border-t px-3 py-2"
-      style={{
-        bottom: "calc(3.5rem + env(safe-area-inset-bottom, 0px))",
-        background: "rgba(10,10,10,0.96)",
-        borderColor: "var(--border)",
-      }}
+      className="md:hidden fixed right-0 z-40 flex items-center pointer-events-none"
+      style={{ top: "50%", transform: "translateY(-50%)" }}
       data-testid="driver-mini-player-dock"
     >
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          className="btn-ghost !p-2 min-w-[40px] min-h-[40px] shrink-0"
-          onClick={onSkipBack}
-          disabled={!canSkipTracks}
-          aria-label="Previous track"
+      <div
+        className="flex items-stretch pointer-events-auto transition-transform duration-300 ease-out"
+        style={{
+          transform: open ? "translateX(0)" : `translateX(calc(100% - ${TAB_WIDTH_PX}px))`,
+        }}
+      >
+        <div
+          className="border border-r-0 rounded-l-2xl shadow-xl overflow-hidden"
+          style={{
+            background: "rgba(10,10,10,0.97)",
+            borderColor: "var(--border)",
+          }}
         >
-          <SkipBack size={16} />
-        </button>
-        <button
-          type="button"
-          className="btn-ghost !p-2 min-w-[40px] min-h-[40px] shrink-0"
-          onClick={onRewind}
-          disabled={!useDeviceMusic}
-          aria-label="Rewind 10 seconds"
-        >
-          <Rewind size={16} />
-        </button>
-        <button
-          type="button"
-          className="btn-ghost !p-2 min-w-[40px] min-h-[40px] shrink-0"
-          onClick={onRestart}
-          disabled={!useDeviceMusic}
-          aria-label="Start from beginning"
-        >
-          <RotateCcw size={16} />
-        </button>
-        <button
-          type="button"
-          className="!p-2 min-w-[40px] min-h-[40px] shrink-0 rounded-lg flex items-center justify-center"
-          style={{ background: "var(--primary)", color: "#0A0A0A" }}
-          onClick={onTogglePlay}
-          disabled={!canPlay}
-          aria-label={playing ? "Pause" : "Play"}
-        >
-          {playing ? <Pause size={18} /> : <Play size={18} />}
-        </button>
-        <button
-          type="button"
-          className="btn-ghost !p-2 min-w-[40px] min-h-[40px] shrink-0"
-          onClick={onStop}
-          disabled={!playing}
-          aria-label="Stop"
-        >
-          <Square size={14} />
-        </button>
-        <button
-          type="button"
-          className="btn-ghost !p-2 min-w-[40px] min-h-[40px] shrink-0"
-          onClick={onFastForward}
-          disabled={!useDeviceMusic}
-          aria-label="Fast forward 10 seconds"
-        >
-          <FastForward size={16} />
-        </button>
-        <button
-          type="button"
-          className="btn-ghost !p-2 min-w-[40px] min-h-[40px] shrink-0"
-          onClick={onSkipForward}
-          disabled={!canSkipTracks}
-          aria-label="Next track"
-        >
-          <SkipForward size={16} />
-        </button>
+          <div className="px-3 py-3 flex flex-col gap-2.5 w-[min(72vw,240px)]">
+            <Link
+              href="/driver/player"
+              onClick={() => setOpen(false)}
+              className="min-w-0 block rounded-lg px-2 py-1.5 -mx-1 hover:bg-white/5 transition-colors"
+            >
+              <div className="text-xs font-bold truncate">{trackName}</div>
+              <div className="text-[10px] truncate" style={{ color: "var(--muted)" }}>{subtitle}</div>
+            </Link>
 
-        <Link href="/driver/player" className="flex-1 min-w-0 flex items-center gap-2 ml-1">
-          <span
-            className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 hidden xs:flex"
-            style={{ background: "rgba(255,255,255,0.08)" }}
-          >
-            <Music size={14} />
-          </span>
-          <div className="flex-1 min-w-0">
-            <div className="text-xs font-bold truncate">{trackName}</div>
-            <div className="text-[10px] truncate" style={{ color: "var(--muted)" }}>{subtitle}</div>
+            <div className="flex items-center justify-between gap-1">
+              <button
+                type="button"
+                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                onClick={onRewind}
+                disabled={!useDeviceMusic}
+                aria-label="Rewind 10 seconds"
+              >
+                <Rewind size={16} />
+              </button>
+              <button
+                type="button"
+                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                onClick={onRestart}
+                disabled={!useDeviceMusic}
+                aria-label="Start from beginning"
+              >
+                <RotateCcw size={16} />
+              </button>
+              <button
+                type="button"
+                className="!p-2 min-w-[40px] min-h-[40px] rounded-lg flex items-center justify-center shrink-0"
+                style={{ background: "var(--primary)", color: "#0A0A0A" }}
+                onClick={onTogglePlay}
+                disabled={!canPlay}
+                aria-label={playing ? "Pause" : "Play"}
+              >
+                {playing ? <Pause size={18} /> : <Play size={18} />}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                onClick={onStop}
+                disabled={!playing}
+                aria-label="Stop"
+              >
+                <Square size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn-ghost !p-2 min-w-[40px] min-h-[40px]"
+                onClick={onFastForward}
+                disabled={!useDeviceMusic}
+                aria-label="Fast forward 10 seconds"
+              >
+                <FastForward size={16} />
+              </button>
+            </div>
           </div>
-          <ChevronRight size={16} style={{ color: "var(--muted)" }} className="shrink-0" />
-        </Link>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex flex-col items-center justify-center gap-1.5 shrink-0 border border-r-0 rounded-l-xl shadow-lg"
+          style={{
+            width: TAB_WIDTH_PX,
+            minHeight: 96,
+            background: playing ? "var(--primary)" : "rgba(10,10,10,0.97)",
+            color: playing ? "#0A0A0A" : "var(--primary)",
+            borderColor: "var(--border)",
+          }}
+          aria-label={open ? "Hide ZoomEats player" : "Show ZoomEats player"}
+          aria-expanded={open}
+          data-testid="driver-mini-player-tab"
+        >
+          <Music size={18} className={playing ? "" : "opacity-90"} />
+          <span
+            className="text-[9px] font-bold uppercase tracking-widest leading-none"
+            style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+          >
+            ZE
+          </span>
+        </button>
       </div>
     </div>
   );
