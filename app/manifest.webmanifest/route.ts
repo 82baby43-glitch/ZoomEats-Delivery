@@ -4,7 +4,7 @@ import { buildWebManifest } from "@/lib/pwa/manifest";
 import { detectAppTypeFromHost } from "@/lib/pwa/appContext";
 
 export async function GET(request: NextRequest) {
-  const host = request.headers.get("host") || "zoomeats.com";
+  const host = request.headers.get("host") || "zoom-eats-delivery.vercel.app";
   const appHeader = request.headers.get("x-zoomeats-app");
   const appType = appHeader || detectAppTypeFromHost(host);
   const origin = request.nextUrl.origin;
