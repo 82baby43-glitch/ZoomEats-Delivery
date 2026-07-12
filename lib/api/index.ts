@@ -16,6 +16,11 @@ function isCacheableGet(path: string) {
   return path.startsWith("/checkout/status/") || path === "/orders/my";
 }
 
+/** Launch audit reads Stripe secrets from Supabase edge — not Vercel env. */
+function prefersSupabaseEdge(path: string) {
+  return path.startsWith("/admin/launch-audit") || path.startsWith("/admin/system-health");
+}
+
 async function getAccessToken() {
   try {
     const { data } = await supabase.auth.getSession();
@@ -55,6 +60,20 @@ function parseApiResponse(res: Response, data: unknown) {
  * Prefer Supabase Edge `api` — Stripe secrets and service role live there.
  * Fall back to Next.js `/api/backend` when Supabase is not configured (local dev).
  */
+async function fetchSupabaseEdgeApi(payload: string, token: string | null) {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/api`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token || SUPABASE_ANON_KEY}`,
+    },
+    body: payload,
+  });
+  const data = await res.json().catch(() => null);
+  return parseApiResponse(res, data);
+}
+
 async function fetchLocalBackend(payload: string, token: string | null) {
   const res = await fetch("/api/backend", {
     method: "POST",
@@ -78,8 +97,11 @@ async function invokeBackendApi(
   const payload = JSON.stringify({ path, method, body, params });
 
   // Browser: prefer same-origin /api/backend so logistics + API ship with the Vercel deploy.
-  // Supabase Edge can lag behind and has a separate bundle lifecycle.
+  // Launch audit runs on Supabase edge where Stripe secrets are configured.
   if (typeof window !== "undefined") {
+    if (prefersSupabaseEdge(path) && isSupabaseConfigured) {
+      return fetchSupabaseEdgeApi(payload, token);
+    }
     return fetchLocalBackend(payload, token);
   }
 

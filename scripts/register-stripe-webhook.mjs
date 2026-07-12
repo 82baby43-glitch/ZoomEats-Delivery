@@ -42,6 +42,7 @@ const stripeKey =
   process.env.STRIPE_SECRET_KEY ||
   process.env.STRIPE_API_KEY ||
   process.env.Stripe_Secret_Key ||
+  process.env.Stripe_Api_Token ||
   "";
 
 const supabaseUrl =
