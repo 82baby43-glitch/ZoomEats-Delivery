@@ -11,7 +11,6 @@ import { Search, Star, Clock, Sparkles } from "lucide-react";
 import Chatbot from "@/components/Chatbot";
 import { LocalBusinessJsonLd } from "@/components/seo/StructuredData";
 import LocalPartnerSpotlight from "@/components/spotlight/LocalPartnerSpotlight";
-import SpotlightNotificationPrefs from "@/components/spotlight/SpotlightNotificationPrefs";
 import { sanitizeRestaurants } from "@/lib/safeData";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { logClientError } from "@/lib/clientErrorLog";
@@ -220,13 +219,10 @@ export default function Landing() {
         )}
       </section>
 
-      <footer className="max-w-7xl mx-auto px-6 md:px-12 pb-10 pt-4">
-        <div className="flex flex-wrap items-end justify-between gap-6">
-          <p className="text-xs" style={{ color: "var(--muted)" }}>
-            ZoomEats L.L.C.
-          </p>
-          {user && <SpotlightNotificationPrefs inline />}
-        </div>
+      <footer className="max-w-7xl mx-auto px-6 md:px-12 pb-10 pt-4 text-center">
+        <p className="text-xs" style={{ color: "var(--muted)" }}>
+          ZOOMEATS LLC Since 2026
+        </p>
       </footer>
 
       {user && <Chatbot />}
