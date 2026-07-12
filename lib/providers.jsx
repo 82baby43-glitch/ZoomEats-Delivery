@@ -6,6 +6,7 @@ import { CartProvider } from "@/lib/cart";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import SupabaseConfigBanner from "@/components/SupabaseConfigBanner";
 import OfflineBanner from "@/components/OfflineBanner";
+import PwaShell from "@/components/pwa/PwaShell";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,6 +26,7 @@ export function Providers({ children }) {
         <CartProvider>
           <SupabaseConfigBanner />
           <OfflineBanner />
+          <PwaShell />
           <ErrorBoundary>{children}</ErrorBoundary>
         </CartProvider>
       </AuthProvider>

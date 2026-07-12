@@ -46,7 +46,7 @@ export default function OfflineBanner() {
       }}
     >
       {offline
-        ? "No internet connection. Your data will sync when connection returns."
+        ? "You are offline. Some features will return when connection is restored."
         : "Connection restored. Syncing…"}
     </div>
   );

@@ -17,6 +17,7 @@ import {
 import { handleMenuImageRequest } from "../menuImages/handler";
 import { handleSpotlightRequest } from "../spotlight/handler";
 import { handleComplianceRequest } from "./complianceHandler";
+import { handlePwaRequest } from "./pwaHandler";
 import { handleDreamlandRequest } from "./dreamlandHandler";
 import { handleFounderDriverRequest } from "../founderDriver/handler";
 import { canUseDriverApis } from "../founderDriver/auth";
@@ -208,6 +209,15 @@ export async function handleApiRequest(
 
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return complianceResult;
+
+    const pwaResult = await handlePwaRequest(db, {
+      path,
+      method,
+      body,
+      user,
+      requireAuth,
+    });
+    if (pwaResult !== null) return pwaResult;
 
     const uberDirectResult = await handleUberDirectAdminRequest(db, complianceCtx);
     if (uberDirectResult !== null) return uberDirectResult;
