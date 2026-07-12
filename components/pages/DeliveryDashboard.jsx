@@ -5,7 +5,7 @@ import { isFounderDriverModeActive } from "@/lib/founderDriver/session";
 import Link from "next/link";
 import { api, getWalletBalance, requestWalletPayout } from "@/lib/api";
 import Header from "@/components/Header";
-import { MapPin, Power, Truck, Navigation } from "lucide-react";
+import { MapPin, Power, Truck, Navigation, Music } from "lucide-react";
 import CompanionModeButton from "@/components/companion/CompanionModeButton";
 import FloatingMusicPlayer from "@/components/companion/FloatingMusicPlayer";
 import DriverSafetyMode from "@/components/companion/DriverSafetyMode";
@@ -213,7 +213,7 @@ function DeliveryDashboardInner() {
           onRefresh={refresh}
         />
       )}
-      <div className="max-w-5xl mx-auto px-6 md:px-12 py-12">
+      <div className="max-w-5xl mx-auto px-6 md:px-12 py-12 pb-32 md:pb-12">
         {founderMode && (
           <div className="card p-4 mb-6 flex flex-wrap items-center justify-between gap-3" style={{ borderColor: "var(--accent)" }} data-testid="founder-driver-banner">
             <div>
@@ -229,6 +229,9 @@ function DeliveryDashboardInner() {
         <div className="mt-4 flex flex-wrap gap-2">
           <Link href="/driver/live-map" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="driver-live-map-link">
             <MapPin size={16} /> Live Map Dashboard
+          </Link>
+          <Link href="/driver/player" className="btn-primary inline-flex items-center gap-2 text-sm md:hidden" data-testid="driver-player-link">
+            <Music size={16} /> ZoomEats Player
           </Link>
           <Link href="/driver/navigate" className="btn-secondary inline-flex items-center gap-2 text-sm" data-testid="driver-navigation-link">
             <Navigation size={16} /> Navigation

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Header from "@/components/Header";
 import CompactMusicPlayer from "@/components/companion/CompactMusicPlayer";
 import DeviceMusicLibrary from "@/components/companion/DeviceMusicLibrary";
 import { useCompanionContext } from "@/components/companion/CompanionModeProvider";
@@ -10,7 +11,9 @@ export default function DriverPlayerPage() {
   const isAmbient = settings?.music_connected && !settings?.music_provider;
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-6 pb-24 space-y-4" data-testid="driver-player-page">
+    <>
+      <Header />
+      <div className="max-w-lg mx-auto px-4 py-6 pb-28 space-y-4" data-testid="driver-player-page">
       <div>
         <h1 className="font-display text-2xl font-bold">ZoomEats Player</h1>
         <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
@@ -36,6 +39,7 @@ export default function DriverPlayerPage() {
       <Link href="/driver/companion" className="btn-ghost w-full text-center text-sm block">
         Full companion settings →
       </Link>
-    </div>
+      </div>
+    </>
   );
 }
