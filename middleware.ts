@@ -7,6 +7,8 @@ const PUBLIC_PREFIXES = [
   "/auth/callback",
   "/cart",
   "/checkout",
+  "/offline",
+  "/manifest.webmanifest",
   "/r/",
   "/api/",
 ];
@@ -25,21 +27,70 @@ function isPublic(pathname: string) {
   return PUBLIC_PREFIXES.some((p) => p !== "/" && pathname.startsWith(p));
 }
 
+function detectAppType(host: string): "customer" | "driver" | "restaurant" {
+  const h = host.toLowerCase().split(":")[0];
+  if (h.startsWith("driver.")) return "driver";
+  if (h.startsWith("restaurant.")) return "restaurant";
+  return "customer";
+}
+
+function applyAppContext(response: NextResponse, appType: string) {
+  response.headers.set("x-zoomeats-app", appType);
+  response.cookies.set("zoomeats_app", appType, { path: "/", sameSite: "lax" });
+  return response;
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const host = request.headers.get("host") || "";
+  const appType = detectAppType(host);
+
+  // Subdomain root → role dashboard/login
+  if (pathname === "/" && appType === "driver") {
+    return applyAppContext(
+      NextResponse.redirect(new URL("/driver/dashboard", request.url)),
+      appType
+    );
+  }
+  if (pathname === "/" && appType === "restaurant") {
+    return applyAppContext(
+      NextResponse.redirect(new URL("/restaurant/dashboard", request.url)),
+      appType
+    );
+  }
 
   // Legacy path aliases
   if (pathname === "/driver") {
-    return NextResponse.redirect(new URL("/driver/dashboard", request.url));
+    return applyAppContext(
+      NextResponse.redirect(new URL("/driver/dashboard", request.url)),
+      appType
+    );
   }
   if (pathname === "/restaurant") {
-    return NextResponse.redirect(new URL("/restaurant/dashboard", request.url));
+    return applyAppContext(
+      NextResponse.redirect(new URL("/restaurant/dashboard", request.url)),
+      appType
+    );
+  }
+
+  // Subdomain login shortcuts
+  if (appType === "driver" && pathname === "/login") {
+    return applyAppContext(
+      NextResponse.redirect(new URL("/driver/login", request.url)),
+      appType
+    );
+  }
+  if (appType === "restaurant" && pathname === "/login") {
+    return applyAppContext(
+      NextResponse.redirect(new URL("/restaurant/login", request.url)),
+      appType
+    );
   }
 
   const response = NextResponse.next();
   response.headers.set("x-zoomeats-path", pathname);
+  applyAppContext(response, appType);
 
-  // Full auth/compliance checks run client-side via ComplianceGate (Supabase session in localStorage)
   if (isPublic(pathname)) return response;
 
   for (const [prefix, roles] of Object.entries(ROLE_ROUTE_PREFIXES)) {
@@ -53,5 +104,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icons|splash.svg|logo.svg|sw.js|workbox).*)"],
 };

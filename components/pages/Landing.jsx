@@ -9,6 +9,7 @@ import { signInWithGoogle } from "@/lib/auth";
 import Header from "@/components/Header";
 import { Search, Star, Clock, Sparkles } from "lucide-react";
 import Chatbot from "@/components/Chatbot";
+import { LocalBusinessJsonLd } from "@/components/seo/StructuredData";
 import LocalPartnerSpotlight from "@/components/spotlight/LocalPartnerSpotlight";
 import SpotlightNotificationPrefs from "@/components/spotlight/SpotlightNotificationPrefs";
 import { sanitizeRestaurants } from "@/lib/safeData";
@@ -66,6 +67,7 @@ export default function Landing() {
 
   return (
     <div>
+      <LocalBusinessJsonLd restaurants={restaurants} />
       <Header />
       <section className="max-w-7xl mx-auto px-6 md:px-12 pt-12 md:pt-20 pb-16">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">

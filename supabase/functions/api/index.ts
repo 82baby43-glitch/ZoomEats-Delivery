@@ -25,6 +25,7 @@ import {
 } from "../_shared/googlePlacesImport.ts";
 import { runOpenStreetMapImport } from "../_shared/openStreetMapImport.ts";
 import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
+import { handlePwaRequest } from "../_shared/pwaHandler.ts";
 import { handleMenuImageRequest } from "../_shared/menuImages/handler.ts";
 import { handleSpotlightRequest } from "../_shared/spotlight/handler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
@@ -229,6 +230,15 @@ Deno.serve(async (req) => {
 
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return json(complianceResult);
+
+    const pwaResult = await handlePwaRequest(db, {
+      path,
+      method,
+      body,
+      user: u,
+      requireAuth,
+    });
+    if (pwaResult !== null) return json(pwaResult);
 
     const uberDirectResult = await handleUberDirectAdminRequest(db, complianceCtx);
     if (uberDirectResult !== null) return json(uberDirectResult);
