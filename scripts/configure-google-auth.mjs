@@ -64,5 +64,18 @@ if (!res.ok) {
 }
 
 console.log("✅ Google OAuth enabled on Supabase Auth");
-console.log(`   Redirect URI (add in Google Cloud Console if not set):`);
-console.log(`   https://${PROJECT_REF}.supabase.co/auth/v1/callback`);
+console.log(`   Supabase callback (YouTube Music / legacy): https://${PROJECT_REF}.supabase.co/auth/v1/callback`);
+console.log(`   Branded login callbacks (ZoomEats domain — add ALL in Google Cloud Console):`);
+for (const host of [
+  "https://www.zoomeats.net",
+  "https://zoomeats.net",
+  "https://driver.zoomeats.net",
+  "https://restaurant.zoomeats.net",
+  "https://www.zoomeats.com",
+  "https://driver.zoomeats.com",
+  "https://restaurant.zoomeats.com",
+  "http://localhost:3000",
+]) {
+  console.log(`     ${host}/auth/callback/google`);
+}
+console.log(`   OAuth consent screen → App name: ZoomEats | Authorized domains: zoomeats.net, zoomeats.com`);
