@@ -38,9 +38,10 @@ async function generatePkce(): Promise<{ verifier: string; challenge: string }> 
   return { verifier, challenge };
 }
 
-export function getGoogleOAuthRedirectUri(origin?: string): string {
+/** Single canonical callback — register only this URI in Google Cloud Console. */
+export function getGoogleOAuthRedirectUri(): string {
   const base =
-    origin ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
     (typeof window !== "undefined" ? window.location.origin : "https://www.zoomeats.net");
   return `${base.replace(/\/$/, "")}/auth/callback/google`;
 }

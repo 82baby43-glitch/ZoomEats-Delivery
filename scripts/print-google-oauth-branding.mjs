@@ -42,11 +42,14 @@ https://console.cloud.google.com/apis/credentials
 ${HOSTS.map((h) => `  ${h}`).join("\n")}
 
 ── 3. OAuth client — Authorized redirect URIs ──
-  Branded login (required):
-${HOSTS.map((h) => `  ${h}/auth/callback/google`).join("\n")}
+  Branded login (REQUIRED — add this exact URI):
+  ${SITE}/auth/callback/google
 
-  YouTube Music / legacy Supabase path (keep if using companion mode):
+  Optional legacy Supabase path (YouTube Music companion mode only):
   https://${PROJECT_REF}.supabase.co/auth/v1/callback
+
+  Note: Login from driver/restaurant subdomains still uses the www callback above.
+  After sign-in, users return to the app they started from automatically.
 
 ── 4. Publish app (when ready for all users) ──
 OAuth consent screen → Publish app → Production
