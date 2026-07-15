@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Providers } from "@/lib/providers";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://zoom-eats-delivery.vercel.app";
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://www.zoomeats.net";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),

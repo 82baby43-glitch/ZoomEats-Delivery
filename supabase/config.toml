@@ -20,8 +20,12 @@ port = 54323
 
 [auth]
 enabled = true
-site_url = "https://zoom-eats-delivery.vercel.app"
+site_url = "https://www.zoomeats.net"
 additional_redirect_urls = [
+  "https://www.zoomeats.net/auth/callback",
+  "https://zoomeats.net/auth/callback",
+  "https://driver.zoomeats.net/auth/callback",
+  "https://restaurant.zoomeats.net/auth/callback",
   "https://zoomeats.com/auth/callback",
   "https://driver.zoomeats.com/auth/callback",
   "https://restaurant.zoomeats.com/auth/callback",

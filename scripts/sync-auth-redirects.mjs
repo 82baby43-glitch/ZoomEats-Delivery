@@ -4,7 +4,7 @@
  * Usage: node scripts/sync-auth-redirects.mjs
  */
 const PROJECT_REF = "njrrhckegbfqhwkqkzvw";
-const PRODUCTION = process.env.NEXT_PUBLIC_SITE_URL || "https://zoom-eats-delivery.vercel.app";
+const PRODUCTION = process.env.NEXT_PUBLIC_SITE_URL || "https://www.zoomeats.net";
 
 const token = process.env.SUPABASE_ACCESS_TOKEN;
 if (!token) {
@@ -21,7 +21,14 @@ const redirectUrls = [
   "http://localhost:3000/",
   "http://localhost:3000/driver/companion",
   "http://localhost:3000/companion/oauth/callback",
-  // Custom PWA subdomains
+  // Custom PWA subdomains (.com legacy + .net primary)
+  "https://www.zoomeats.net/auth/callback",
+  "https://zoomeats.net/auth/callback",
+  "https://driver.zoomeats.net/auth/callback",
+  "https://restaurant.zoomeats.net/auth/callback",
+  "https://www.zoomeats.net/**",
+  "https://driver.zoomeats.net/**",
+  "https://restaurant.zoomeats.net/**",
   "https://zoomeats.com/auth/callback",
   "https://www.zoomeats.com/auth/callback",
   "https://driver.zoomeats.com/auth/callback",
