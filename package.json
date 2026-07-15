@@ -11,6 +11,7 @@
     "db:migrate": "node scripts/apply-rls-migration.mjs",
     "db:validate-pricing": "node scripts/validate-pricing-engine.mjs",
     "auth:google": "node scripts/configure-google-auth.mjs",
+    "auth:google-branding": "node scripts/print-google-oauth-branding.mjs",
     "functions:deploy": "supabase functions deploy api && supabase functions deploy stripe-webhook --no-verify-jwt && supabase functions deploy dispatch-order --no-verify-jwt && supabase functions deploy routing-engine --no-verify-jwt && supabase functions deploy reconcile-payments --no-verify-jwt",
     "stripe:supabase": "node scripts/setup-stripe-supabase.mjs",
     "stripe:webhook-register": "node scripts/register-stripe-webhook.mjs",
