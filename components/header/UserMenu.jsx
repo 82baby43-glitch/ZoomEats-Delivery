@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { User as UserIcon, LogOut, Repeat, Smartphone } from "lucide-react";
+import { User as UserIcon, LogOut, Repeat, Download } from "lucide-react";
 import { signInWithGoogle } from "@/lib/auth";
-import { isMobileDevice, isStandaloneMode } from "@/lib/pwa/appContext";
+import { usePwaInstall } from "@/lib/pwa/useInstallPrompt";
 
 const startLogin = () => {
   signInWithGoogle().catch((e) => console.error("[auth] login failed:", e));
@@ -13,7 +13,7 @@ const startLogin = () => {
 export default function UserMenu({ user, logout }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
-  const showHomeScreenHint = typeof window !== "undefined" && isMobileDevice() && !isStandaloneMode();
+  const { canInstall, openInstallPrompt, config } = usePwaInstall();
 
   if (!user) {
     return (
@@ -62,13 +62,13 @@ export default function UserMenu({ user, logout }) {
           >
             <Repeat size={16} /> Switch mode
           </button>
-          {showHomeScreenHint && (
+          {canInstall && (
             <button
               className="w-full text-left px-4 py-3 flex items-center gap-2 text-sm hover:bg-black/40"
-              onClick={() => { setOpen(false); router.push("/account"); }}
+              onClick={() => { setOpen(false); openInstallPrompt(); }}
               data-testid="install-app-button"
             >
-              <Smartphone size={16} /> Add to Home Screen
+              <Download size={16} /> {config.installButton}
             </button>
           )}
           <button
