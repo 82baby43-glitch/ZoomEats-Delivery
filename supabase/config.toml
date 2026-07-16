@@ -20,19 +20,18 @@ port = 54323
 
 [auth]
 enabled = true
-site_url = "https://www.zoomeats.net"
+site_url = "https://zoomeats.net"
 additional_redirect_urls = [
-  "https://www.zoomeats.net/auth/callback",
   "https://zoomeats.net/auth/callback",
+  "https://zoomeats.net/**",
+  "https://www.zoomeats.net/auth/callback",
+  "https://www.zoomeats.net/**",
   "https://driver.zoomeats.net/auth/callback",
+  "https://driver.zoomeats.net/**",
   "https://restaurant.zoomeats.net/auth/callback",
-  "https://zoomeats.com/auth/callback",
-  "https://driver.zoomeats.com/auth/callback",
-  "https://restaurant.zoomeats.com/auth/callback",
-  "https://zoom-eats-delivery.vercel.app/auth/callback",
+  "https://restaurant.zoomeats.net/**",
   "http://localhost:3000/auth/callback",
-  "https://*.vercel.app/auth/callback",
-  "https://zoom-eats-delivery-82baby43-6212s-projects.vercel.app/auth/callback"
+  "http://localhost:3000/**"
 ]
 
 # Google OAuth is configured in Supabase Dashboard (Auth → Providers → Google).

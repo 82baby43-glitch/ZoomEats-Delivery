@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Sync Supabase Auth redirect URLs for production + custom domains + Vercel previews.
- * Usage: node scripts/sync-auth-redirects.mjs
+ * Sync Supabase Auth site URL + redirect allow list for zoomeats.net production.
+ * Usage: NEXT_PUBLIC_SITE_URL=https://zoomeats.net node scripts/sync-auth-redirects.mjs
  */
 const PROJECT_REF = "njrrhckegbfqhwkqkzvw";
-const PRODUCTION = process.env.NEXT_PUBLIC_SITE_URL || "https://www.zoomeats.net";
+const PRODUCTION = (process.env.NEXT_PUBLIC_SITE_URL || "https://zoomeats.net").replace(/\/$/, "");
 
 const token = process.env.SUPABASE_ACCESS_TOKEN;
 if (!token) {
@@ -12,35 +12,23 @@ if (!token) {
   process.exit(1);
 }
 
-const bases = [PRODUCTION];
-const paths = ["/auth/callback", "/", "/driver/companion", "/companion/oauth/callback"];
-
 const redirectUrls = [
-  ...bases.flatMap((base) => paths.map((p) => `${base}${p}`)),
-  "http://localhost:3000/auth/callback",
-  "http://localhost:3000/",
-  "http://localhost:3000/driver/companion",
-  "http://localhost:3000/companion/oauth/callback",
-  // Custom PWA subdomains (.com legacy + .net primary)
+  `${PRODUCTION}/auth/callback`,
+  `${PRODUCTION}/`,
+  `${PRODUCTION}/driver/companion`,
+  `${PRODUCTION}/companion/oauth/callback`,
+  `${PRODUCTION}/**`,
   "https://www.zoomeats.net/auth/callback",
-  "https://zoomeats.net/auth/callback",
-  "https://driver.zoomeats.net/auth/callback",
-  "https://restaurant.zoomeats.net/auth/callback",
   "https://www.zoomeats.net/**",
+  "https://driver.zoomeats.net/auth/callback",
   "https://driver.zoomeats.net/**",
+  "https://restaurant.zoomeats.net/auth/callback",
   "https://restaurant.zoomeats.net/**",
-  "https://zoomeats.com/auth/callback",
-  "https://www.zoomeats.com/auth/callback",
-  "https://driver.zoomeats.com/auth/callback",
-  "https://restaurant.zoomeats.com/auth/callback",
-  "https://zoomeats.com/**",
-  "https://driver.zoomeats.com/**",
-  "https://restaurant.zoomeats.com/**",
-  // Vercel preview deployments
-  "https://*.vercel.app/auth/callback",
-  "https://*-*-*.vercel.app/auth/callback",
-  "https://zoom-eats-delivery-82baby43-6212s-projects.vercel.app/auth/callback",
-  "https://zoom-eats-delivery-82baby43-6212s-projects.vercel.app/**",
+  // Local development only
+  "http://localhost:3000/auth/callback",
+  "http://localhost:3000/**",
+  "http://127.0.0.1:3000/auth/callback",
+  "http://127.0.0.1:3000/**",
 ];
 
 const res = await fetch(`https://api.supabase.com/v1/projects/${PROJECT_REF}/config/auth`, {
@@ -62,4 +50,5 @@ if (!res.ok) {
 }
 
 console.log("✅ Supabase auth redirects updated");
-console.log("   production URL:", `${PRODUCTION}/`);
+console.log("   site_url:", `${PRODUCTION}/`);
+console.log("   allow list entries:", redirectUrls.length);

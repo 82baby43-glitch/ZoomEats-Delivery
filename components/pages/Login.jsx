@@ -28,9 +28,16 @@ export default function LoginPage({ title, subtitle, defaultRedirect = "/", sign
   const [message, setMessage] = useState("");
   const [error, setError] = useState(() => {
     if (errorCode === "auth_failed") {
-      return errorReason
-        ? `Sign in failed: ${decodeURIComponent(errorReason)}`
-        : "Sign in failed. If using Google on a preview URL, ensure Supabase redirect URLs include this domain's /auth/callback.";
+      const reason = errorReason ? decodeURIComponent(errorReason) : "";
+      if (/redirect_uri_mismatch/i.test(reason)) {
+        return "Google sign-in failed: redirect URI mismatch. Contact support if this continues.";
+      }
+      if (/access_denied|access blocked/i.test(reason)) {
+        return "Google sign-in was blocked. Try again or use email sign-in.";
+      }
+      return reason
+        ? `Sign in failed: ${reason}`
+        : "Sign in failed. Please try again or use email sign-in.";
     }
     if (errorCode === "session_expired") return "Your session has expired. Please sign in again.";
     if (errorCode === "account_suspended") return "Your account has been suspended.";
@@ -46,7 +53,8 @@ export default function LoginPage({ title, subtitle, defaultRedirect = "/", sign
       sessionStorage.setItem("auth_redirect", redirect);
       await signInWithGoogle();
     } catch (e) {
-      setError(e?.message || "Google sign-in failed");
+      console.error("[auth] Google sign-in error:", e);
+      setError(e?.message || "Google sign-in failed. Please try again.");
       setBusy(false);
     }
   };

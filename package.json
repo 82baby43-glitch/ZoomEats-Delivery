@@ -17,6 +17,7 @@
     "stripe:webhook-register": "node scripts/register-stripe-webhook.mjs",
     "compliance:test": "node scripts/compliance-test.mjs",
     "auth:redirects": "node scripts/sync-auth-redirects.mjs",
+    "auth:audit": "node scripts/audit-auth-env.mjs",
     "pwa:icons": "node scripts/generate-pwa-icons.mjs",
     "signup:test": "node scripts/signup-test.mjs",
     "geocode:restaurants": "node scripts/geocode-restaurants.mjs",

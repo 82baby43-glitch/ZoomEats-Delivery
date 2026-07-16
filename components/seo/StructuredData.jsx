@@ -1,4 +1,4 @@
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://www.zoomeats.net";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://zoomeats.net";
 
 export function LocalBusinessJsonLd({ restaurants = [] }) {
   const items = restaurants.slice(0, 20).map((r) => ({

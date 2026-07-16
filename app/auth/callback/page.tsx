@@ -67,6 +67,7 @@ export default function AuthCallbackPage() {
         const authError = params.get("error_description") || params.get("error");
 
         if (authError) {
+          console.error("[auth] OAuth callback error:", authError);
           fail(String(authError));
           return;
         }
@@ -91,6 +92,7 @@ export default function AuthCallbackPage() {
           await complete();
         }
       } catch (e) {
+        console.error("[auth] callback failed:", e);
         fail(e instanceof Error ? e.message : "callback_failed");
       }
     })();
