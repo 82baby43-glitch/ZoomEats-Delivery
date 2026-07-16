@@ -1,61 +1,44 @@
 #!/usr/bin/env node
 /**
- * Print Google OAuth branding setup so login shows "ZoomEats" / zoomeats.net
- * instead of supabase.co on the account picker.
+ * Google OAuth setup for Supabase Auth (login via supabase.auth.signInWithOAuth).
+ * Google redirect URI is Supabase callback — NOT zoomeats.net directly.
  *
  * Usage: node scripts/print-google-oauth-branding.mjs
  */
-const SITE = process.env.NEXT_PUBLIC_SITE_URL || "https://www.zoomeats.net";
+const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://zoomeats.net").replace(/\/$/, "");
 const PROJECT_REF = process.env.SUPABASE_PROJECT_REF || "njrrhckegbfqhwkqkzvw";
-
-const HOSTS = [
-  "https://www.zoomeats.net",
-  "https://zoomeats.net",
-  "https://driver.zoomeats.net",
-  "https://restaurant.zoomeats.net",
-  "https://www.zoomeats.com",
-  "https://driver.zoomeats.com",
-  "https://restaurant.zoomeats.com",
-  "http://localhost:3000",
-];
+const SUPABASE_CALLBACK = `https://${PROJECT_REF}.supabase.co/auth/v1/callback`;
 
 console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
-║  Google OAuth branding — show ZoomEats instead of supabase.co    ║
+║  ZoomEats Google OAuth (Supabase Auth)                           ║
 ╚══════════════════════════════════════════════════════════════════╝
 
-ZoomEats login uses direct Google OAuth on your domain (PKCE).
-Google will show: "Choose an account to continue to zoomeats.net"
+Login flow: App → Supabase → Google → Supabase → ${SITE}/auth/callback
 
-── 1. OAuth consent screen (App name + logo) ──
+── 1. OAuth consent screen ──
 https://console.cloud.google.com/auth/branding
-  App name:     ZoomEats
-  User support: support@zoomeats.com (or your email)
-  App logo:     Upload ZoomEats icon
-  Authorized domains:
-    zoomeats.net
-    zoomeats.com
+  App name: ZoomEats
+  Authorized domains: zoomeats.net
 
-── 2. OAuth client — Authorized JavaScript origins ──
+── 2. OAuth client — Authorized redirect URIs (required) ──
 https://console.cloud.google.com/apis/credentials
-→ Your Web client → Authorized JavaScript origins:
-${HOSTS.map((h) => `  ${h}`).join("\n")}
+  ${SUPABASE_CALLBACK}
 
-── 3. OAuth client — Authorized redirect URIs ──
-  Branded login (REQUIRED — add this exact URI):
-  ${SITE}/auth/callback/google
+── 3. OAuth client — Authorized JavaScript origins ──
+  ${SITE}
+  https://www.zoomeats.net
+  https://driver.zoomeats.net
+  https://restaurant.zoomeats.net
+  http://localhost:3000
 
-  Optional legacy Supabase path (YouTube Music companion mode only):
-  https://${PROJECT_REF}.supabase.co/auth/v1/callback
+── 4. Supabase Auth (run: npm run auth:redirects) ──
+  site_url: ${SITE}/
+  allow: ${SITE}/**, https://www.zoomeats.net/**
 
-  Note: Login from driver/restaurant subdomains still uses the www callback above.
-  After sign-in, users return to the app they started from automatically.
-
-── 4. Publish app (when ready for all users) ──
-OAuth consent screen → Publish app → Production
-
-── 5. Env var (already on Vercel if auth:google was run) ──
-  NEXT_PUBLIC_GOOGLE_CLIENT_ID=<same Web client ID as Supabase Google provider>
-
-Primary site: ${SITE}
+── 5. Vercel production env (public only) ──
+  NEXT_PUBLIC_SITE_URL=${SITE}
+  NEXT_PUBLIC_SUPABASE_URL=https://${PROJECT_REF}.supabase.co
+  NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
+  (Do NOT set GOOGLE_CLIENT_SECRET or service role key as NEXT_PUBLIC_*)
 `);
