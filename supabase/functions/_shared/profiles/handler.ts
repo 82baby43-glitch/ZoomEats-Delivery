@@ -215,10 +215,16 @@ export async function handleProfileRequest(
     await db.from("users").update({
       profile_photo_url: null,
       thumbnail_photo_url: null,
+      picture: null,
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
 
-    return { ok: true };
+    return {
+      ok: true,
+      profile_photo_url: null,
+      thumbnail_photo_url: null,
+      picture: null,
+    };
   }
 
   if (path === "/admin/profiles" && method === "GET") {
