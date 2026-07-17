@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { roleMatches } from "@/lib/compliance/authz";
+import { resolveEffectiveRole } from "@/lib/auth/roleRouting";
 import { hasFounderDriverPermission, isDeliveryRole } from "@/lib/founderDriver/auth";
 
 const ERROR_MESSAGES = {
@@ -128,7 +129,8 @@ export function ComplianceGate({
   }
 
   if (roles) {
-    const roleOk = roleMatches(user.role, roles);
+    const effectiveRole = resolveEffectiveRole(user);
+    const roleOk = roleMatches(user.role, roles) || roleMatches(effectiveRole, roles);
     const driverGate = needsDriverRoles(roles);
     const founderGate = alsoAllowFounderDriver || driverGate;
     const founderDriverOk = founderGate && hasFounderDriverPermission(user);
