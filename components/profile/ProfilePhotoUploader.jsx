@@ -53,8 +53,8 @@ export default function ProfilePhotoUploader({ profile, onUpdated }) {
     setBusy(true);
     setError("");
     try {
-      await api.delete("/profile/photo");
-      onUpdated?.({ profile_photo_url: null, thumbnail_photo_url: null });
+      const result = await api.delete("/profile/photo");
+      onUpdated?.(result?.data ?? { profile_photo_url: null, thumbnail_photo_url: null, picture: null });
     } catch (e) {
       setError(e?.message || "Could not remove photo");
     } finally {
