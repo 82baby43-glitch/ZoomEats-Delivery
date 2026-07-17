@@ -72,7 +72,7 @@ export async function resolveOrderId(db: SupabaseClient, input: string): Promise
 async function isFounderDriverUser(db: SupabaseClient, userId: string): Promise<boolean> {
   const { data: user } = await db
     .from("users")
-    .select("founder_driver,role,email,is_founder,roles")
+    .select("founder_driver,role,email,is_founder")
     .eq("user_id", userId)
     .maybeSingle();
   return hasFounderDriverPermission(user);
