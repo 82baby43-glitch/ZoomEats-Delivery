@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     const hasServiceRole = Boolean(
       process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
     );
-    if (!hasServiceRole) {
+    if (!hasServiceRole || path.startsWith("/admin/uber-direct")) {
       return proxyToSupabaseEdge(req, payload);
     }
 

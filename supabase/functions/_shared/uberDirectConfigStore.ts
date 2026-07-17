@@ -14,7 +14,11 @@ export type UberDirectConfigSaveInput = {
 };
 
 export async function loadUberDirectConfigRow(db: SupabaseClient): Promise<UberDirectConfigRow | null> {
-  const { data } = await db.from("uber_direct_config").select("*").eq("id", CONFIG_ID).maybeSingle();
+  const { data, error } = await db.from("uber_direct_config").select("*").eq("id", CONFIG_ID).maybeSingle();
+  if (error) {
+    if (error.code === "42P01") return null;
+    throw new Error(error.message);
+  }
   return (data as UberDirectConfigRow | null) ?? null;
 }
 
@@ -22,8 +26,26 @@ function hasCredentials(row: Partial<UberDirectConfigRow> | null): boolean {
   return Boolean(row?.client_id?.trim() && row?.client_secret?.trim() && row?.customer_id?.trim());
 }
 
+async function syncUberDirectConfigFromEnvIfNeeded(db: SupabaseClient): Promise<void> {
+  const row = await loadUberDirectConfigRow(db);
+  if (hasCredentials(row)) return;
+
+  const fromEnv = getUberDirectConfigFromEnv();
+  if (!fromEnv) return;
+
+  await saveUberDirectConfig(db, {
+    enabled: fromEnv.enabled,
+    backup_enabled: fromEnv.backupEnabled,
+    environment: fromEnv.environment,
+    client_id: fromEnv.clientId,
+    client_secret: fromEnv.clientSecret,
+    customer_id: fromEnv.customerId,
+  });
+}
+
 export async function resolveUberDirectConfig(db?: SupabaseClient | null): Promise<UberDirectConfig | null> {
   if (db) {
+    await syncUberDirectConfigFromEnvIfNeeded(db);
     const row = await loadUberDirectConfigRow(db);
     if (row && hasCredentials(row)) {
       let clientSecret = "";
@@ -41,7 +63,7 @@ export async function resolveUberDirectConfig(db?: SupabaseClient | null): Promi
         clientId: row.client_id!.trim(),
         clientSecret,
         defaultPhone: Deno.env.get("UBER_DIRECT_DEFAULT_PHONE") || "+15555550100",
-        configured: Boolean(row.configured),
+        configured: hasCredentials(row),
       };
     }
   }
@@ -116,6 +138,6 @@ export function buildUberDirectAdminConfigView(row: UberDirectConfigRow | null) 
     client_id: row?.client_id || "",
     customer_id: row?.customer_id || "",
     has_client_secret: Boolean(row?.client_secret),
-    configured: Boolean(row?.configured),
+    configured: hasCredentials(row),
   };
 }
