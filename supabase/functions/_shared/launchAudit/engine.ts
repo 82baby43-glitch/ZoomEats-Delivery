@@ -181,7 +181,6 @@ export async function runLaunchAudit(
     pricing_engine,
     admin_panel,
     security,
-    perfResult,
     edge_functions,
     api_health,
     realtime,
@@ -199,12 +198,14 @@ export async function runLaunchAudit(
     runPricingChecks(db),
     runAdminChecks(),
     runSecurityChecks(db),
-    runPerformanceChecks(db),
     runEdgeFunctionChecks(),
     runApiHealthChecks(db),
     runRealtimeChecks(),
     runStorageChecks(),
   ]);
+
+  // Measure DB latency after parallel checks so the probe is not competing with the full audit.
+  const perfResult = await runPerformanceChecks(db);
 
   const e2e_simulation = options.simulate_e2e
     ? (await runFullDeliverySimulation(db)).checks
