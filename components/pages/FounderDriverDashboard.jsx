@@ -226,7 +226,7 @@ export default function FounderDriverDashboard() {
       } else {
         setIncomingOffer(null);
       }
-      setMsg(next ? "You are online — offers will appear here with accept/decline." : "You are offline.");
+      setMsg(next ? "Founder Driver Mode activated. You are online — offers will appear here with accept/decline." : "You are offline.");
     } catch (e) {
       setMsg(getApiErrorMessage(e, "Could not update availability."));
     }
@@ -309,7 +309,7 @@ export default function FounderDriverDashboard() {
     await api.post("/founder-driver/session", { action: "start", shadow_dispatch: shadow });
     setFounderDriverModeActive(true);
     setShadowDispatchActive(shadow);
-    setMsg(shadow ? "Shadow dispatch enabled — founder driver session started." : "Founder driver session started.");
+    setMsg(shadow ? "Shadow dispatch enabled — Founder Driver Mode activated." : "Founder Driver Mode activated.");
     await load();
   };
 

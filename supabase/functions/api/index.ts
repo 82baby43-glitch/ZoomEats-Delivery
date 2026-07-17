@@ -32,7 +32,11 @@ import { handleProfileRequest } from "../_shared/profiles/handler.ts";
 import { handleVehicleRequest } from "../_shared/vehicles/handler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
 import { handleFounderDriverRequest } from "../_shared/founderDriverHandler.ts";
-import { canUseDriverApis } from "../_shared/founderDriverAuth.ts";
+import {
+  canUseDriverApis,
+  satisfiesRoleRequirement,
+  type FounderUser,
+} from "../_shared/founderDriverAuth.ts";
 import { handleLogisticsRequest } from "../_shared/logisticsHandler.ts";
 import { buildCustomerTrackingView } from "../_shared/logistics/customer-tracking.ts";
 import {
@@ -172,18 +176,22 @@ Deno.serve(async (req) => {
   };
   const requireRole = (...roles: string[]) => {
     const u = requireAuth();
-    const userRole = normalizeRole(String(u.role || ""));
-    const expanded = roles.flatMap((r) => [r, normalizeRole(r)]);
-    if (!expanded.includes(userRole) && !expanded.includes(u.role as string)) {
-      throw { status: 403, message: `Requires role: ${roles.join(", ")}` };
+    if (!satisfiesRoleRequirement(u as FounderUser, roles, adminEmails)) {
+      const needsDriver = roles.some((r) => normalizeRole(r) === "delivery" || r === "driver");
+      throw {
+        status: 403,
+        message: needsDriver
+          ? "Driver access requires delivery permissions."
+          : `Requires role: ${roles.join(", ")}`,
+      };
     }
     return u;
   };
 
   const requireDriverOrFounder = () => {
     const u = requireAuth();
-    if (!canUseDriverApis(u as { user_id: string; role?: string; founder_driver?: boolean })) {
-      throw { status: 403, message: "Requires delivery role or Founder Driver permission" };
+    if (!canUseDriverApis(u as FounderUser, adminEmails)) {
+      throw { status: 403, message: "Driver access requires delivery permissions." };
     }
     return u;
   };
