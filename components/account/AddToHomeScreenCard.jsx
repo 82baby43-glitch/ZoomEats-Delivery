@@ -1,13 +1,20 @@
 "use client";
 
 import { Share, Smartphone } from "lucide-react";
+import { useAuth } from "@/lib/auth";
 import { getClientAppType, getPwaConfig, isIosSafari, isMobileDevice, isStandaloneMode } from "@/lib/pwa/appContext";
+import { canUserAccessAppType } from "@/lib/pwa/roleAccess";
 
 export default function AddToHomeScreenCard() {
+  const { user } = useAuth();
+
   if (typeof window !== "undefined" && isStandaloneMode()) return null;
   if (typeof window !== "undefined" && !isMobileDevice()) return null;
 
-  const config = getPwaConfig(getClientAppType());
+  const appType = getClientAppType();
+  if (!user || !canUserAccessAppType(user, appType)) return null;
+
+  const config = getPwaConfig(appType);
   const ios = isIosSafari();
 
   return (
@@ -22,13 +29,13 @@ export default function AddToHomeScreenCard() {
         <div className="min-w-0">
           <p className="font-bold">Add {config.shortName} to your home screen</p>
           <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
-            Open ZoomEats from your home screen for faster access — no app store download needed.
+            Open {config.name} from your home screen for faster access — no app store download needed.
           </p>
         </div>
       </div>
 
       <ol className="mt-4 space-y-2 text-sm list-decimal list-inside" style={{ color: "var(--muted)" }}>
-        <li>Open <strong className="text-white">ZoomEats in your phone browser</strong> (Safari or Chrome).</li>
+        <li>Open <strong className="text-white">{config.name} in your phone browser</strong> (Safari or Chrome).</li>
         {ios ? (
           <li className="flex items-start gap-2 list-none -ml-0">
             <Share size={16} className="shrink-0 mt-0.5" />
