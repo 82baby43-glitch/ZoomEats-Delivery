@@ -16,7 +16,7 @@ function throwErr(message: string, status = 400): never {
 async function requireFounderUser(db: SupabaseClient, userId: string) {
   const { data: user } = await db
     .from("users")
-    .select("user_id,role,email,founder_driver,founder_driver_role,is_founder,roles")
+    .select("user_id,role,email,founder_driver,founder_driver_role,is_founder")
     .eq("user_id", userId)
     .maybeSingle();
   if (!user || !hasFounderDriverPermission(user)) throwErr("Founder Driver access required", 403);

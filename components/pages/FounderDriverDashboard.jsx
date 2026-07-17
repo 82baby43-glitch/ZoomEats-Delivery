@@ -67,6 +67,7 @@ export default function FounderDriverDashboard() {
   const [dispatchInsight, setDispatchInsight] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [errorDetail, setErrorDetail] = useState("");
   const [pickupGallery, setPickupGallery] = useState([]);
   const [msg, setMsg] = useState("");
   const [claimableOrders, setClaimableOrders] = useState([]);
@@ -262,6 +263,7 @@ export default function FounderDriverDashboard() {
       setScorecards(Array.isArray(sc?.data) ? sc.data : []);
       setFeedbackList(Array.isArray(fb?.data) ? fb.data : []);
       setError(false);
+      setErrorDetail("");
       if (st?.data?.current_delivery?.order_id) {
         setPickupForm((f) => ({ ...f, order_id: st.data.current_delivery.order_id }));
         setJournalForm((f) => ({ ...f, order_id: st.data.current_delivery.order_id }));
@@ -272,6 +274,7 @@ export default function FounderDriverDashboard() {
     } catch (e) {
       console.warn(e);
       setError(true);
+      setErrorDetail(getApiErrorMessage(e, "Could not load Founder Driver Mode."));
     } finally {
       setLoading(false);
     }
@@ -370,7 +373,11 @@ export default function FounderDriverDashboard() {
       <div>
         <Header />
         <div className="max-w-6xl mx-auto px-6 py-12">
-          <ErrorState title="Founder Driver unavailable" description="You may not have founder_driver permission." onRetry={load} />
+          <ErrorState
+            title="Founder Driver unavailable"
+            description={errorDetail || "You may not have founder_driver permission."}
+            onRetry={load}
+          />
         </div>
       </div>
     );
