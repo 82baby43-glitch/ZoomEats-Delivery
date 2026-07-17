@@ -16,6 +16,7 @@ import {
 } from "../dispatch/routing/uber-routing-ai";
 import { handleMenuImageRequest } from "../menuImages/handler";
 import { handleSpotlightRequest } from "../spotlight/handler";
+import { handlePartnerRequest } from "../partners/handler";
 import { handleComplianceRequest } from "./complianceHandler";
 import { handlePwaRequest } from "./pwaHandler";
 import { handleDreamlandRequest } from "./dreamlandHandler";
@@ -206,6 +207,16 @@ export async function handleApiRequest(
       requireRole,
     });
     if (spotlightResult !== null) return spotlightResult;
+
+    const partnerResult = await handlePartnerRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (partnerResult !== null) return partnerResult;
 
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return complianceResult;

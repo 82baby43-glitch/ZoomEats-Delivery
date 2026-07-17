@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
+import RestaurantSelector from "@/components/restaurants/RestaurantSelector";
+import PartnerBadge from "@/components/restaurants/PartnerBadge";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { SPOTLIGHT_FILTER_LABELS } from "@/lib/spotlight/types";
 import { Archive, CheckCircle2, Plus, Sparkles } from "lucide-react";
@@ -13,9 +15,9 @@ const TAGS = Object.keys(SPOTLIGHT_FILTER_LABELS);
 export default function AdminSpotlight() {
   const [spotlights, setSpotlights] = useState([]);
   const [analytics, setAnalytics] = useState(null);
-  const [restaurants, setRestaurants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [selectedRestaurant, setSelectedRestaurant] = useState(null);
   const [form, setForm] = useState({
     restaurant_id: "",
     title: "",
@@ -28,14 +30,12 @@ export default function AdminSpotlight() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, a, r] = await Promise.all([
+      const [s, a] = await Promise.all([
         api.get("/admin/spotlight"),
         api.get("/admin/spotlight/analytics", { params: { days: "30" } }),
-        api.get("/admin/restaurants"),
       ]);
       setSpotlights(Array.isArray(s?.data) ? s.data : []);
       setAnalytics(a?.data || null);
-      setRestaurants(Array.isArray(r?.data) ? r.data : []);
       setError(false);
     } catch {
       setError(true);
@@ -62,6 +62,7 @@ export default function AdminSpotlight() {
     if (!form.restaurant_id) return;
     await api.post("/admin/spotlight", { ...form, status: "draft" });
     setForm({ restaurant_id: "", title: "", story: "", owner_message: "", promotion_text: "", spotlight_tags: [] });
+    setSelectedRestaurant(null);
     load();
   };
 
@@ -110,16 +111,19 @@ export default function AdminSpotlight() {
 
         <div className="card p-6 mt-6 space-y-4">
           <h2 className="font-display text-xl font-bold flex items-center gap-2"><Plus size={18} /> Create spotlight</h2>
-          <select
-            className="input-field"
+          <RestaurantSelector
             value={form.restaurant_id}
-            onChange={(e) => setForm({ ...form, restaurant_id: e.target.value })}
-          >
-            <option value="">Choose restaurant…</option>
-            {restaurants.map((r) => (
-              <option key={r.restaurant_id} value={r.restaurant_id}>{r.name}</option>
-            ))}
-          </select>
+            onChange={(restaurantId) => setForm({ ...form, restaurant_id: restaurantId })}
+            onSelectRestaurant={setSelectedRestaurant}
+            showPartnerBadge
+            placeholder="Choose restaurant…"
+          />
+          {selectedRestaurant && (
+            <div className="text-sm flex items-center gap-2" style={{ color: "var(--muted)" }}>
+              <span>Ownership status:</span>
+              <PartnerBadge status={selectedRestaurant.partner_status} />
+            </div>
+          )}
           <input className="input-field" placeholder="Title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           <textarea className="input-field" rows={3} placeholder="Story" value={form.story} onChange={(e) => setForm({ ...form, story: e.target.value })} />
           <textarea className="input-field" rows={2} placeholder="Owner message" value={form.owner_message} onChange={(e) => setForm({ ...form, owner_message: e.target.value })} />
@@ -149,8 +153,9 @@ export default function AdminSpotlight() {
               <div key={s.id} className="card p-5 flex flex-wrap justify-between gap-4">
                 <div>
                   <div className="font-display text-xl font-bold">{s.title || r.name}</div>
-                  <div className="text-sm mt-1" style={{ color: "var(--muted)" }}>
-                    {r.name} · <span className="badge">{s.status}</span>
+                  <div className="text-sm mt-1 flex flex-wrap items-center gap-2" style={{ color: "var(--muted)" }}>
+                    <span>{r.name} · <span className="badge">{s.status}</span></span>
+                    <PartnerBadge status={r.partner_status || s.restaurant?.partner_status} />
                     {s.slug && (
                       <Link href={`/local-partners/${s.slug}`} className="ml-2 underline">
                         /local-partners/{s.slug}

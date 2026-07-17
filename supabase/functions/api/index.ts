@@ -28,6 +28,7 @@ import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
 import { handlePwaRequest } from "../_shared/pwaHandler.ts";
 import { handleMenuImageRequest } from "../_shared/menuImages/handler.ts";
 import { handleSpotlightRequest } from "../_shared/spotlight/handler.ts";
+import { handlePartnerRequest } from "../_shared/partners/handler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
 import { handleFounderDriverRequest } from "../_shared/founderDriverHandler.ts";
 import { canUseDriverApis } from "../_shared/founderDriverAuth.ts";
@@ -227,6 +228,16 @@ Deno.serve(async (req) => {
       requireRole,
     });
     if (spotlightResult !== null) return json(spotlightResult);
+
+    const partnerResult = await handlePartnerRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (partnerResult !== null) return json(partnerResult);
 
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return json(complianceResult);

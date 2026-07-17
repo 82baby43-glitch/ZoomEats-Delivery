@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import PartnerBadge from "@/components/restaurants/PartnerBadge";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { api, safeGet } from "@/lib/api";
@@ -111,11 +112,12 @@ export default function LocalPartnerDetail() {
             <h1 className="font-display text-4xl md:text-5xl font-black tracking-tight mt-1">
               {spotlight.title || restaurant.name}
             </h1>
-            <p className="mt-2 flex flex-wrap gap-3 text-sm" style={{ color: "var(--muted)" }}>
+            <p className="mt-2 flex flex-wrap gap-3 text-sm items-center" style={{ color: "var(--muted)" }}>
               {restaurant.cuisine && <span>{restaurant.cuisine}</span>}
               {restaurant.city && <span className="flex items-center gap-1"><MapPin size={14} /> {restaurant.city}</span>}
               {restaurant.rating != null && <span className="flex items-center gap-1"><Star size={14} /> {restaurant.rating}</span>}
               {restaurant.delivery_time_min != null && <span className="flex items-center gap-1"><Clock size={14} /> {restaurant.delivery_time_min} min</span>}
+              {restaurant.partner_status && <PartnerBadge status={restaurant.partner_status} />}
             </p>
           </div>
           <button type="button" className="btn-secondary flex items-center gap-2" onClick={share}>
@@ -160,6 +162,15 @@ export default function LocalPartnerDetail() {
           >
             View menu
           </Link>
+          {restaurant.partner_status === "unclaimed" || !restaurant.partner_status ? (
+            <Link
+              href={`/restaurant/claim?restaurant_id=${restaurant.restaurant_id}`}
+              className="btn-ghost"
+              data-testid="own-this-restaurant"
+            >
+              Own This Restaurant?
+            </Link>
+          ) : null}
         </div>
 
         <p className="mt-8 text-sm text-center" style={{ color: "var(--muted)" }}>
