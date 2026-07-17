@@ -4,16 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { ensureUserProfile, getCurrentUser } from "@/lib/auth";
-
-const ROLE_HOME: Record<string, string> = {
-  admin: "/admin",
-  delivery: "/driver/dashboard",
-  driver: "/driver/dashboard",
-  vendor: "/restaurant/dashboard",
-  restaurant: "/restaurant/dashboard",
-  dispatcher: "/dispatcher",
-  customer: "/",
-};
+import { getPostLoginPath } from "@/lib/auth/roleRouting";
 
 const CALLBACK_TIMEOUT_MS = 15000;
 
@@ -30,8 +21,10 @@ export default function AuthCallbackPage() {
       const profile = await getCurrentUser();
       const storedRedirect = sessionStorage.getItem("auth_redirect");
       sessionStorage.removeItem("auth_redirect");
-      const defaultHome = ROLE_HOME[profile?.role || "customer"] || "/onboarding";
-      router.replace(storedRedirect || defaultHome);
+      const roleHome = getPostLoginPath(profile);
+      const safeRedirect =
+        storedRedirect && !storedRedirect.startsWith("/login") ? storedRedirect : roleHome;
+      router.replace(safeRedirect);
     };
 
     const fail = (reason?: string) => {
@@ -41,7 +34,6 @@ export default function AuthCallbackPage() {
       router.replace(`/login${q}`);
     };
 
-    // detectSessionInUrl handles PKCE — wait for SIGNED_IN / INITIAL_SESSION, don't double-exchange.
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (finished) return;
       if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session) {
@@ -72,7 +64,6 @@ export default function AuthCallbackPage() {
           return;
         }
 
-        // Fallback: if auto-detect hasn't fired yet, exchange once after a short delay.
         if (code) {
           await new Promise((r) => setTimeout(r, 600));
           const { data: afterWait } = await supabase.auth.getSession();

@@ -3,9 +3,23 @@ import { requiredAgreementTypes } from "./complianceAgreements.ts";
 export const ROLE_ALIASES: Record<string, string> = {
   driver: "delivery",
   restaurant: "vendor",
+  restaurant_owner: "vendor",
+  restaurant_staff: "vendor",
+  super_admin: "admin",
 };
 
-export const VALID_ROLES = ["customer", "vendor", "delivery", "admin", "dispatcher"] as const;
+export const VALID_ROLES = [
+  "customer",
+  "vendor",
+  "delivery",
+  "admin",
+  "dispatcher",
+  "driver",
+  "restaurant_owner",
+  "restaurant_staff",
+  "founder_driver",
+  "super_admin",
+] as const;
 export type AppRole = (typeof VALID_ROLES)[number];
 
 export function normalizeRole(role: string): string {

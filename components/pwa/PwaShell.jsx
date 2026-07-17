@@ -9,7 +9,7 @@ import {
 } from "@/lib/pwa/appContext";
 import AppSplash from "@/components/pwa/AppSplash";
 import InstallPrompt from "@/components/pwa/InstallPrompt";
-import PwaRoleGate from "@/components/pwa/PwaRoleGate";
+import RoleRouter from "@/components/auth/RoleRouter";
 import MobileTabBar from "@/components/navigation/MobileTabBar";
 
 export default function PwaShell() {
@@ -24,7 +24,7 @@ export default function PwaShell() {
 
   return (
     <>
-      <PwaRoleGate />
+      <RoleRouter />
       <AppSplash />
       <InstallPrompt />
       <MobileTabBar />

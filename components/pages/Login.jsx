@@ -10,7 +10,9 @@ import {
   signInWithEmail,
   signUpWithEmail,
   resetPassword,
+  getCurrentUser,
 } from "@/lib/auth";
+import { getPostLoginPath } from "@/lib/auth/roleRouting";
 
 export default function LoginPage({ title, subtitle, defaultRedirect = "/", signupMode = false }) {
   const router = useRouter();
@@ -44,7 +46,13 @@ export default function LoginPage({ title, subtitle, defaultRedirect = "/", sign
     return "";
   });
 
-  const finish = () => router.replace(redirect);
+  const finish = async () => {
+    const profile = await getCurrentUser();
+    const roleHome = getPostLoginPath(profile);
+    const target =
+      redirect && redirect !== "/" && !redirect.startsWith("/login") ? redirect : roleHome;
+    router.replace(target);
+  };
 
   const onGoogle = async () => {
     setBusy(true);
@@ -68,7 +76,7 @@ export default function LoginPage({ title, subtitle, defaultRedirect = "/", sign
       if (mode === "login") {
         await signInWithEmail(email, password, { remember });
         await refresh();
-        finish();
+        await finish();
       } else if (mode === "signup") {
         await signUpWithEmail(email, password, { name });
         setMessage("Check your email to confirm your account, or sign in if confirmation is disabled.");
