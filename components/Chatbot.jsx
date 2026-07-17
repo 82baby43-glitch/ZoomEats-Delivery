@@ -8,23 +8,36 @@ import ChatTyping from "@/components/chatbot/ChatTyping";
 import ChatInput from "@/components/chatbot/ChatInput";
 import DreamlandAvatar from "@/components/dreamland/DreamlandAvatar";
 import DreamlandChatHub from "@/components/dreamland/DreamlandChatHub";
+import DreamlandControls, { DreamlandRefreshPrompt } from "@/components/dreamland/DreamlandControls";
 import { DREAMLAND_CHAT_SUBTITLE } from "@/lib/dreamland/prompts";
 import { useDreamlandChat } from "@/components/chatbot/useChat";
 import { useAuth } from "@/lib/auth";
 
 export default function Chatbot() {
   const [open, setOpen] = useState(false);
+  const [selectedMood, setSelectedMood] = useState(null);
   const { user } = useAuth();
-  const { msgs, busy, send, appendAssistant } = useDreamlandChat(open, { skipSeed: !!user });
+  const {
+    msgs,
+    busy,
+    send,
+    appendAssistant,
+    session,
+    refreshChat,
+    showMore,
+    refreshDismissed,
+    setRefreshDismissed,
+  } = useDreamlandChat(open, { skipSeed: !!user });
   const endRef = useRef();
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, busy, open]);
 
-  const handleMood = useCallback((mood, label) => {
+  const handleMood = useCallback((mood, label, moodUiId) => {
+    setSelectedMood(moodUiId || mood);
     const text = label.replace(/[^\w\s]/g, "").trim() || mood.replace(/_/g, " ");
-    send(`I'm feeling ${text.toLowerCase()}`);
+    send(`I'm feeling ${text.toLowerCase()}`, { mood_ui_id: moodUiId });
   }, [send]);
 
   const handleSurprise = useCallback((data) => {
@@ -79,20 +92,36 @@ export default function Chatbot() {
               }}
             >
               <DreamlandAvatar size={36} pulse />
-              <div>
+              <div className="flex-1 min-w-0">
                 <div className="font-display font-black">Dreamland</div>
-                <div className="text-xs opacity-70">{DREAMLAND_CHAT_SUBTITLE}</div>
+                <div className="text-xs opacity-70 truncate">{DREAMLAND_CHAT_SUBTITLE}</div>
               </div>
+              {user && (
+                <DreamlandControls
+                  onRefresh={refreshChat}
+                  recentSessions={session?.recent_sessions || []}
+                />
+              )}
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3" data-testid="chatbot-messages">
               {user && (
-                <DreamlandChatHub
-                  onAfterMood={handleMood}
-                  onAfterSurprise={handleSurprise}
-                />
+                <>
+                  <DreamlandRefreshPrompt
+                    open={Boolean(session?.show_refresh_prompt && !refreshDismissed)}
+                    onRefresh={refreshChat}
+                    onContinue={() => setRefreshDismissed(true)}
+                    onDismiss={() => setRefreshDismissed(true)}
+                  />
+                  <DreamlandChatHub
+                    onAfterMood={handleMood}
+                    onAfterSurprise={handleSurprise}
+                    onShowMore={showMore}
+                    selectedMood={selectedMood}
+                  />
+                </>
               )}
               {msgs.map((m, i) => (
-                <ChatMessage key={`${m.role}-${i}-${m.text.slice(0, 16)}`} message={m} />
+                <ChatMessage key={`${m.role}-${i}-${m.text.slice(0, 16)}`} message={m} onShowMore={showMore} />
               ))}
               {busy && <ChatTyping />}
               <div ref={endRef} />
@@ -105,5 +134,4 @@ export default function Chatbot() {
   );
 }
 
-// Backward-compatible export name
 export { Chatbot as DreamlandChat };

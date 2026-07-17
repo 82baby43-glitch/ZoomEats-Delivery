@@ -47,4 +47,4 @@ export function buildDreamlandSystemPrompt(opts: {
 export const DREAMLAND_SEED_MESSAGE =
   "Hey — I'm Dreamland. If you need help figuring out what to eat, just ask. You can also say hi, tell me how your day's going, or share a craving whenever you're ready.";
 
-export const DREAMLAND_CHAT_SUBTITLE = "If you need help on what to eat, ask Dreamland";
+export const DREAMLAND_CHAT_SUBTITLE = "Feel → Ask Dreamland → Discover → Order";

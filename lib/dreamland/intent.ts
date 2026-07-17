@@ -3,7 +3,7 @@ export type DreamlandIntent = "greeting" | "thanks" | "conversation" | "food" | 
 const GREETING_RE = /^(hi|hello|hey|yo|sup|hiya|good morning|good afternoon|good evening|good night|howdy|what's up|whats up|gm|gn)[\s!.,?]*$/i;
 const THANKS_RE = /^(thanks|thank you|thx|ty|appreciate it|awesome|perfect|great)[\s!.,?]*$/i;
 const CONVERSATION_RE = /^(how are you|who are you|what are you|what can you do|help|tell me about yourself|are you there)[\s?.!]*$/i;
-const FOOD_RE = /hungry|eat|food|craving|mood|order|restaurant|recommend|menu|dinner|lunch|breakfast|snack|taco|pizza|sushi|burger|ramen|surprise me|what should i eat|what to eat|feeling|stressed|tired|comfort|healthy|indulgent|delivery|pick up|under \$|budget/i;
+const FOOD_RE = /hungry|eat|food|craving|mood|order|restaurant|recommend|menu|dinner|lunch|breakfast|snack|taco|pizza|sushi|burger|ramen|surprise me|what should i eat|what to eat|feeling|stressed|tired|comfort|healthy|indulgent|delivery|pick up|under \$|budget|long day|don't want to think|pick for me/i;
 
 export function classifyIntent(text: string): DreamlandIntent {
   const t = text.trim();
