@@ -20,7 +20,6 @@ const startLogin = () => {
 };
 
 const HERO_IMG = "/images/hero-zoomeats.webp";
-const WHY_ZOOMEATS_IMG = "/images/why-zoomeats-better.png";
 
 export default function Landing() {
   const [restaurants, setRestaurants] = useState([]);
@@ -134,22 +133,6 @@ export default function Landing() {
             </div>
           </motion.div>
         </div>
-      </section>
-
-      <section className="max-w-7xl mx-auto px-6 md:px-12 pb-12 md:pb-16" data-testid="why-zoomeats-band">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.2 }}
-          className="rounded-3xl overflow-hidden border"
-          style={{ borderColor: "var(--border)" }}
-        >
-          <img
-            src={WHY_ZOOMEATS_IMG}
-            alt="Why ZoomEats is better: higher driver pay, lower fees for restaurants, reliable deliveries, and better customer support"
-            className="w-full h-auto block"
-          />
-        </motion.div>
       </section>
 
       <LocalPartnerSpotlight limit={4} />
