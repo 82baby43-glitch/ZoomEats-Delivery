@@ -1,10 +1,10 @@
 /**
  * Canonical production site URL for auth redirects, SEO, and OAuth.
- * Production: https://zoomeats.net (apex)
+ * Production canonical host is www (apex 308-redirects to www).
  */
 export const PRODUCTION_SITE_ORIGIN =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "")) ||
-  "https://zoomeats.net";
+  "https://www.zoomeats.net";
 
 export function isLocalDevOrigin(origin: string): boolean {
   return /localhost|127\.0\.0\.1/.test(origin);
@@ -18,13 +18,10 @@ export function getSiteOrigin(): string {
   return PRODUCTION_SITE_ORIGIN;
 }
 
-/** OAuth/email callback — localhost in dev, canonical apex in production. */
+/** OAuth/email callback — always match the browser origin so session storage aligns with www vs apex. */
 export function getAuthCallbackUrl(): string {
   if (typeof window !== "undefined") {
-    const origin = window.location.origin.replace(/\/$/, "");
-    if (isLocalDevOrigin(origin)) {
-      return `${origin}/auth/callback`;
-    }
+    return `${window.location.origin.replace(/\/$/, "")}/auth/callback`;
   }
   return `${PRODUCTION_SITE_ORIGIN}/auth/callback`;
 }
