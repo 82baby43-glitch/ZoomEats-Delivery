@@ -6,7 +6,7 @@ import NavLinks from "@/components/header/NavLinks";
 import CartButton from "@/components/header/CartButton";
 import UserMenu from "@/components/header/UserMenu";
 
-const LOGO_URL = "/logo.svg";
+const LOGO_URL = "/logo.png";
 
 export default function Header() {
   const { user, logout } = useAuth();
