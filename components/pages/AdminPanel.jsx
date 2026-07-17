@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { Download, Truck, CreditCard, MapPin, Activity, DollarSign, Sparkles } from "lucide-react";
+import { Download, Truck, CreditCard, MapPin, Activity, DollarSign, Sparkles, Building2 } from "lucide-react";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import PulseHeader, { MetricsTiles } from "@/components/admin/PulseHeader";
@@ -182,6 +182,9 @@ export default function AdminPanel() {
           </Link>
           <Link href="/admin/spotlight" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-spotlight-link">
             <Sparkles size={16} /> Local Partner Spotlight
+          </Link>
+          <Link href="/admin/partners" className="btn-secondary inline-flex items-center gap-2 text-sm" data-testid="admin-partners-link">
+            <Building2 size={16} /> Restaurant Partners
           </Link>
           <GeocodeRestaurantsButton />
           <Link
