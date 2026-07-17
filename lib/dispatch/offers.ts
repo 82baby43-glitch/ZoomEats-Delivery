@@ -6,6 +6,8 @@ import { haversineKm } from "./routing/geo";
 import { initializeRouteForOrder } from "./routing/uber-routing-ai";
 import { handleDispatchAssigned } from "../delivery/handler";
 import type { RealtimeRuntime } from "../logistics/delivery-realtime";
+import { assignOrderToUberDirect } from "./uberDirect";
+import { resolveUberDirectConfig } from "../server/uberDirectConfigStore";
 
 export const OFFER_TTL_SECONDS = 20;
 export const DRIVER_OFFER_RADIUS_KM = 15;
@@ -125,6 +127,9 @@ async function loadOrderForOffer(db: SupabaseClient, orderId: string) {
   const { data: order } = await db.from("orders").select("*").eq("order_id", orderId).maybeSingle();
   if (!order) throwErr("Order not found", 404);
   if (order.driver_id) throwErr("Order already has a driver", 409);
+  if (order.delivery_type === "uber" || order.status === "assigned_uber") {
+    throwErr("Order already assigned to Uber Direct", 409);
+  }
   if (order.payment_status !== "paid") throwErr("Order not paid", 400);
   return order;
 }
@@ -245,7 +250,7 @@ export async function createAndBroadcastOffer(
   db: SupabaseClient,
   orderId: string,
   runtime?: RealtimeRuntime
-): Promise<{ ok: boolean; offer_id?: string; driver_id?: string; reason?: string }> {
+): Promise<{ ok: boolean; offer_id?: string; driver_id?: string; reason?: string; uber_delivery_id?: string }> {
   const order = await loadOrderForOffer(db, orderId);
   if (order.driver_id) return { ok: false, reason: "already_assigned" };
 
@@ -254,6 +259,20 @@ export async function createAndBroadcastOffer(
   const excluded = await getExcludedDriverIds(db, orderId);
   const pick = await pickDriverForOrder(db, orderId, excluded);
   if (!pick) {
+    const uberCfg = await resolveUberDirectConfig(db);
+    if (uberCfg?.enabled && uberCfg.backupEnabled) {
+      try {
+        const uber = await assignOrderToUberDirect(db, order, uberCfg);
+        await recordOfferEvent(db, orderId, "uber_direct_fallback", {
+          message: "No internal drivers — dispatched via Uber Direct",
+          meta: { uber_delivery_id: uber.uber_delivery_id },
+        });
+        return { ok: true, reason: "uber_fallback", uber_delivery_id: uber.uber_delivery_id };
+      } catch (e) {
+        await recordOfferEvent(db, orderId, "uber_direct_failed", { message: String(e) });
+      }
+    }
+
     await recordOfferEvent(db, orderId, "no_drivers_available", { message: "No eligible drivers for offer" });
     return { ok: false, reason: "no_drivers" };
   }
