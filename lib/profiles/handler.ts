@@ -249,10 +249,10 @@ export async function handleProfileRequest(
       const driverMap = Object.fromEntries((drivers || []).map((d) => [d.user_id, d.driver_id]));
       const driverIdList = Object.values(driverMap);
       const { data: vehicles } = driverIdList.length
-        ? await db.from("driver_vehicles").select("id,driver_id,make,model,color,is_active").in("driver_id", driverIdList)
+        ? await db.from("driver_vehicles").select("vehicle_id,driver_id,make,model,color,is_active,mode_key").in("driver_id", driverIdList)
         : { data: [] };
       const { data: photos } = (vehicles || []).length
-        ? await db.from("vehicle_photos").select("vehicle_id,photo_type").in("vehicle_id", (vehicles || []).map((v) => v.id))
+        ? await db.from("vehicle_photos").select("vehicle_id,photo_type").in("vehicle_id", (vehicles || []).map((v) => v.vehicle_id))
         : { data: [] };
       const photoMap = new Map<string, string[]>();
       for (const p of photos || []) {
@@ -265,8 +265,10 @@ export async function handleProfileRequest(
           .filter((v) => v.driver_id === driverId)
           .map((v) => ({
             ...v,
-            photo_types: photoMap.get(String(v.id)) || [],
-            missing_front_photo: !(photoMap.get(String(v.id)) || []).includes("front"),
+            id: v.vehicle_id,
+            vehicle_type: v.mode_key,
+            photo_types: photoMap.get(String(v.vehicle_id)) || [],
+            missing_front_photo: !(photoMap.get(String(v.vehicle_id)) || []).includes("front"),
           }));
       }
     }

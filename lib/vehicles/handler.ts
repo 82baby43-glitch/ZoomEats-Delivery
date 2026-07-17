@@ -1,6 +1,22 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { randomUUID } from "crypto";
 import { deleteStoragePaths, isAllowedImageType, publicStorageUrl, sanitizeImageFileName } from "../profiles/helpers";
 import { VEHICLE_TYPES } from "../profiles/types";
+
+function vehicleRowId(vehicle: Record<string, unknown>): string {
+  return String(vehicle.vehicle_id || vehicle.id || "");
+}
+
+function normalizeVehicle(vehicle: Record<string, unknown>) {
+  const id = vehicleRowId(vehicle);
+  return {
+    ...vehicle,
+    id,
+    vehicle_id: id,
+    vehicle_type: String(vehicle.mode_key || vehicle.vehicle_type || "car"),
+    mode_key: String(vehicle.mode_key || vehicle.vehicle_type || "car"),
+  };
+}
 
 function throwErr(message: string, status = 400): never {
   const e = new Error(message) as Error & { status?: number };
@@ -23,19 +39,20 @@ async function requireDriver(db: SupabaseClient, userId: string) {
 }
 
 async function enrichVehicle(db: SupabaseClient, vehicle: Record<string, unknown>) {
+  const vehicleId = vehicleRowId(vehicle);
   const { data: photos } = await db
     .from("vehicle_photos")
     .select("*")
-    .eq("vehicle_id", vehicle.id)
+    .eq("vehicle_id", vehicleId)
     .order("display_order", { ascending: true });
-  return {
+  return normalizeVehicle({
     ...vehicle,
     photos: (photos || []).map((p) => ({
       ...p,
       photo_url: publicStorageUrl("vehicle-images", p.photo_url),
       thumbnail_url: p.thumbnail_url ? publicStorageUrl("vehicle-images", p.thumbnail_url) : null,
     })),
-  };
+  });
 }
 
 export async function getActiveVehicleForDriver(db: SupabaseClient, driverId: string) {
@@ -110,9 +127,11 @@ export async function handleVehicleRequest(
     const { data, error } = await db
       .from("driver_vehicles")
       .insert({
+        vehicle_id: randomUUID(),
+        user_id: String(user.user_id),
         driver_id: driverId,
+        mode_key: vehicleType,
         nickname: body.nickname ? String(body.nickname) : null,
-        vehicle_type: vehicleType,
         make: body.make ? String(body.make) : null,
         model: body.model ? String(body.model) : null,
         year: body.year != null ? Number(body.year) : null,
@@ -134,15 +153,16 @@ export async function handleVehicleRequest(
     const driverId = await requireDriver(db, String(user.user_id));
     const vehicleId = vehicleIdMatch[1];
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    for (const key of ["nickname", "vehicle_type", "make", "model", "color", "license_plate", "fuel_type", "delivery_capacity"]) {
+    for (const key of ["nickname", "make", "model", "color", "license_plate", "fuel_type", "delivery_capacity"]) {
       if (body[key] !== undefined) patch[key] = body[key] ? String(body[key]) : null;
     }
+    if (body.vehicle_type !== undefined) patch.mode_key = body.vehicle_type ? String(body.vehicle_type) : "car";
     if (body.year !== undefined) patch.year = body.year != null ? Number(body.year) : null;
 
     const { data, error } = await db
       .from("driver_vehicles")
       .update(patch)
-      .eq("id", vehicleId)
+      .eq("vehicle_id", vehicleId)
       .eq("driver_id", driverId)
       .select()
       .single();
@@ -161,7 +181,7 @@ export async function handleVehicleRequest(
       (photos || []).flatMap((p) => [p.photo_url, p.thumbnail_url])
     );
     await db.from("vehicle_photos").delete().eq("vehicle_id", vehicleId);
-    await db.from("driver_vehicles").delete().eq("id", vehicleId).eq("driver_id", driverId);
+    await db.from("driver_vehicles").delete().eq("vehicle_id", vehicleId).eq("driver_id", driverId);
     return { ok: true };
   }
 
@@ -174,7 +194,7 @@ export async function handleVehicleRequest(
     const { data, error } = await db
       .from("driver_vehicles")
       .update({ is_active: true, updated_at: new Date().toISOString() })
-      .eq("id", vehicleId)
+      .eq("vehicle_id", vehicleId)
       .eq("driver_id", driverId)
       .select()
       .single();
@@ -189,8 +209,8 @@ export async function handleVehicleRequest(
     const vehicleId = photoPresignMatch[1];
     const { data: vehicle } = await db
       .from("driver_vehicles")
-      .select("id")
-      .eq("id", vehicleId)
+      .select("vehicle_id")
+      .eq("vehicle_id", vehicleId)
       .eq("driver_id", driverId)
       .maybeSingle();
     if (!vehicle) throwErr("Vehicle not found", 404);
@@ -262,8 +282,8 @@ export async function handleVehicleRequest(
     const photoId = photoDeleteMatch[2];
     const { data: vehicle } = await db
       .from("driver_vehicles")
-      .select("id")
-      .eq("id", vehicleId)
+      .select("vehicle_id")
+      .eq("vehicle_id", vehicleId)
       .eq("driver_id", driverId)
       .maybeSingle();
     if (!vehicle) throwErr("Vehicle not found", 404);
