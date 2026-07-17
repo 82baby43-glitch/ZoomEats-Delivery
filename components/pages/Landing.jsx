@@ -220,8 +220,8 @@ export default function Landing() {
       </section>
 
       <footer className="max-w-7xl mx-auto px-6 md:px-12 pb-10 pt-4 text-center">
-        <p className="text-xs" style={{ color: "var(--muted)" }}>
-          ZOOMEATS LLC Since 2026
+        <p className="text-xs max-w-3xl mx-auto leading-relaxed" style={{ color: "var(--muted)" }}>
+          Built in Columbia, Missouri. ZoomEats™ was created by Quantum Rise Labs LLC to empower local restaurants, drivers, and customers through next-generation delivery technology. 2026
         </p>
       </footer>
 
