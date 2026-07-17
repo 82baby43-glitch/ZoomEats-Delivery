@@ -71,14 +71,25 @@ export function isPublicPath(pathname: string): boolean {
 }
 
 /**
- * Effective role used for routing (founder_driver may be explicit role or admin+flags).
+ * Effective role used for routing. Founder flags are additive — they must not replace admin.
  */
 export function resolveEffectiveRole(user: AuthUserLike | null | undefined): string {
-  if (!user?.role) return "customer";
-  const raw = String(user.role).trim().toLowerCase();
+  if (!user?.role && !user?.is_founder) return "customer";
 
-  if (raw === "founder_driver") return "founder_driver";
+  // Primary founder always retains admin dashboard access.
+  if (user?.is_founder === true) return "admin";
+
+  const raw = String(user.role || "").trim().toLowerCase();
+  if (!raw) return "customer";
+
   if (raw === "super_admin") return "super_admin";
+  if (raw === "admin") return "admin";
+  if (raw === "dispatcher") return "dispatcher";
+
+  // Legacy: founder_driver role was incorrectly used instead of admin+flags.
+  if (raw === "founder_driver" && user.founder_driver === true) return "admin";
+  if (raw === "founder_driver") return "founder_driver";
+
   if (raw === "restaurant_owner" || raw === "restaurant_staff") return raw;
   if (raw === "restaurant") return "restaurant_owner";
   if (raw === "driver") return "driver";
@@ -97,8 +108,16 @@ export function getAccountStatus(user: AuthUserLike | null | undefined): string 
   return String(user.approval_status || "approved");
 }
 
+function isPrivilegedOperator(user: AuthUserLike | null | undefined): boolean {
+  const effective = resolveEffectiveRole(user);
+  return effective === "admin" || effective === "super_admin" || effective === "dispatcher";
+}
+
 export function isAccountActive(user: AuthUserLike | null | undefined): boolean {
   const status = getAccountStatus(user);
+  if (isPrivilegedOperator(user)) {
+    return status !== "suspended" && status !== "rejected";
+  }
   return status !== "suspended" && status !== "rejected";
 }
 
