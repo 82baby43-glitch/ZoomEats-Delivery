@@ -1,6 +1,6 @@
-import type { Mood } from "./emotions";
-import { moodPhrase } from "./emotions";
-import type { DreamlandIntent } from "./intent";
+import type { Mood } from "./dreamlandEmotions.ts";
+import { moodPhrase } from "./dreamlandEmotions.ts";
+import type { DreamlandIntent } from "./dreamlandIntent.ts";
 
 export const DREAMLAND_SYSTEM_PROMPT = `You are Dreamland — the emotionally intelligent AI food companion for ZoomEats.
 
