@@ -36,71 +36,68 @@ function detectAppType(host: string): "customer" | "driver" | "restaurant" {
 
 function applyAppContext(response: NextResponse, appType: string) {
   response.headers.set("x-zoomeats-app", appType);
-  response.cookies.set("zoomeats_app", appType, { path: "/", sameSite: "lax" });
+  try {
+    response.cookies.set("zoomeats_app", appType, { path: "/", sameSite: "lax" });
+  } catch {
+    // Edge runtimes can reject cookie writes on some response types.
+  }
   return response;
 }
 
+function redirectTo(request: NextRequest, pathname: string, appType: string) {
+  const url = request.nextUrl.clone();
+  url.pathname = pathname;
+  return applyAppContext(NextResponse.redirect(url), appType);
+}
+
 export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-  const host = request.headers.get("host") || "";
-  const appType = detectAppType(host);
+  try {
+    const { pathname } = request.nextUrl;
+    const host = request.headers.get("host") || "";
+    const appType = detectAppType(host);
 
-  // Subdomain root → role dashboard/login
-  if (pathname === "/" && appType === "driver") {
-    return applyAppContext(
-      NextResponse.redirect(new URL("/driver/dashboard", request.url)),
-      appType
-    );
-  }
-  if (pathname === "/" && appType === "restaurant") {
-    return applyAppContext(
-      NextResponse.redirect(new URL("/restaurant/dashboard", request.url)),
-      appType
-    );
-  }
-
-  // Legacy path aliases
-  if (pathname === "/driver") {
-    return applyAppContext(
-      NextResponse.redirect(new URL("/driver/dashboard", request.url)),
-      appType
-    );
-  }
-  if (pathname === "/restaurant") {
-    return applyAppContext(
-      NextResponse.redirect(new URL("/restaurant/dashboard", request.url)),
-      appType
-    );
-  }
-
-  // Subdomain login shortcuts
-  if (appType === "driver" && pathname === "/login") {
-    return applyAppContext(
-      NextResponse.redirect(new URL("/driver/login", request.url)),
-      appType
-    );
-  }
-  if (appType === "restaurant" && pathname === "/login") {
-    return applyAppContext(
-      NextResponse.redirect(new URL("/restaurant/login", request.url)),
-      appType
-    );
-  }
-
-  const response = NextResponse.next();
-  response.headers.set("x-zoomeats-path", pathname);
-  applyAppContext(response, appType);
-
-  if (isPublic(pathname)) return response;
-
-  for (const [prefix, roles] of Object.entries(ROLE_ROUTE_PREFIXES)) {
-    if (pathname.startsWith(prefix)) {
-      response.headers.set("x-required-roles", roles.join(","));
-      break;
+    // Subdomain root → role dashboard/login
+    if (pathname === "/" && appType === "driver") {
+      return redirectTo(request, "/driver/dashboard", appType);
     }
-  }
+    if (pathname === "/" && appType === "restaurant") {
+      return redirectTo(request, "/restaurant/dashboard", appType);
+    }
 
-  return response;
+    // Legacy path aliases
+    if (pathname === "/driver") {
+      return redirectTo(request, "/driver/dashboard", appType);
+    }
+    if (pathname === "/restaurant") {
+      return redirectTo(request, "/restaurant/dashboard", appType);
+    }
+
+    // Subdomain login shortcuts
+    if (appType === "driver" && pathname === "/login") {
+      return redirectTo(request, "/driver/login", appType);
+    }
+    if (appType === "restaurant" && pathname === "/login") {
+      return redirectTo(request, "/restaurant/login", appType);
+    }
+
+    const response = NextResponse.next();
+    response.headers.set("x-zoomeats-path", pathname);
+    applyAppContext(response, appType);
+
+    if (isPublic(pathname)) return response;
+
+    for (const [prefix, roles] of Object.entries(ROLE_ROUTE_PREFIXES)) {
+      if (pathname.startsWith(prefix)) {
+        response.headers.set("x-required-roles", roles.join(","));
+        break;
+      }
+    }
+
+    return response;
+  } catch (error) {
+    console.error("[middleware] failed:", error);
+    return NextResponse.next();
+  }
 }
 
 export const config = {

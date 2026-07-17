@@ -53,24 +53,6 @@ export default function ProfilePhotoUploader({ profile, onUpdated }) {
     setSelfieOpen(false);
   };
 
-  const captureSelfie = async () => {
-    const video = videoRef.current;
-    if (!video?.videoWidth || !video?.videoHeight) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, 0, 0);
-    closeSelfieCamera();
-    const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not capture photo"))), "image/jpeg", 0.92);
-    });
-    await uploadFile(new File([blob], "selfie.jpg", { type: "image/jpeg" }));
-  };
-
   const uploadFile = async (file) => {
     setBusy(true);
     setError("");
@@ -105,6 +87,28 @@ export default function ProfilePhotoUploader({ profile, onUpdated }) {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
       if (cameraRef.current) cameraRef.current.value = "";
+    }
+  };
+
+  const captureSelfie = async () => {
+    try {
+      const video = videoRef.current;
+      if (!video?.videoWidth || !video?.videoHeight) return;
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0);
+      closeSelfieCamera();
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not capture photo"))), "image/jpeg", 0.92);
+      });
+      await uploadFile(new File([blob], "selfie.jpg", { type: "image/jpeg" }));
+    } catch (e) {
+      setError(e?.message || "Could not capture photo");
     }
   };
 
