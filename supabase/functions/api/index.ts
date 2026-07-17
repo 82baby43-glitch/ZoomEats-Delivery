@@ -28,6 +28,8 @@ import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
 import { handlePwaRequest } from "../_shared/pwaHandler.ts";
 import { handleMenuImageRequest } from "../_shared/menuImages/handler.ts";
 import { handleSpotlightRequest } from "../_shared/spotlight/handler.ts";
+import { handleProfileRequest } from "../_shared/profiles/handler.ts";
+import { handleVehicleRequest } from "../_shared/vehicles/handler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
 import { handleFounderDriverRequest } from "../_shared/founderDriverHandler.ts";
 import { canUseDriverApis } from "../_shared/founderDriverAuth.ts";
@@ -227,6 +229,25 @@ Deno.serve(async (req) => {
       requireRole,
     });
     if (spotlightResult !== null) return json(spotlightResult);
+
+    const profileResult = await handleProfileRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (profileResult !== null) return json(profileResult);
+
+    const vehicleResult = await handleVehicleRequest(db, {
+      path,
+      method,
+      body,
+      requireAuth,
+      requireRole,
+    });
+    if (vehicleResult !== null) return json(vehicleResult);
 
     const complianceResult = await handleComplianceRequest(db, complianceCtx);
     if (complianceResult !== null) return json(complianceResult);

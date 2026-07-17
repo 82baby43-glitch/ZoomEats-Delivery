@@ -1,8 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { Car, CheckCircle2, Circle } from "lucide-react";
+import { Car, CheckCircle2, Circle, Star } from "lucide-react";
 import LogisticsMap from "@/components/maps/LogisticsMap";
+import UserAvatar from "@/components/profile/UserAvatar";
+import VehiclePlaceholder from "@/components/profile/VehiclePlaceholder";
+import { firstNameFromDisplay } from "@/lib/profiles/display";
 
 const STATUS_STEPS = [
   { id: "picking_up", label: "Picking Up Food" },
@@ -24,6 +27,8 @@ export default function CustomerLiveMapDashboard({ logistics, driverName }) {
   const idx = stepIndex(routing?.live_status);
   const etaText = routing?.eta_message || "Driver is on the way";
   const name = routing?.driver_name || driverName || "Driver";
+  const firstName = routing?.driver_first_name || firstNameFromDisplay(name);
+  const vehicleLabel = routing?.vehicle_label || [routing?.vehicle_color, routing?.vehicle_make, routing?.vehicle_model].filter(Boolean).join(" ");
 
   const showDashboard = useMemo(() => {
     if (!routing) return false;
@@ -46,9 +51,29 @@ export default function CustomerLiveMapDashboard({ logistics, driverName }) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-3">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-wider" style={{ color: "var(--muted)" }}>Driver</div>
-            <div className="font-bold text-lg">{name}</div>
+          <div className="card p-4" style={{ background: "var(--surface-2)" }} data-testid="customer-driver-card">
+            <div className="flex items-start gap-4">
+              <UserAvatar name={name} src={routing?.driver_photo_url} size={64} />
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-lg">
+                  {firstName}
+                  {name.includes(" ") ? ` ${name.split(" ").slice(-1)[0]?.[0] || ""}.` : ""}
+                </div>
+                {routing?.driver_rating != null && (
+                  <div className="text-sm mt-1 flex items-center gap-1">
+                    <Star size={14} style={{ color: "var(--primary)" }} fill="var(--primary)" />
+                    {routing.driver_rating}
+                  </div>
+                )}
+                {vehicleLabel && <div className="text-sm mt-2 font-medium">{vehicleLabel}</div>}
+                <div className="text-sm mt-1" style={{ color: "var(--muted)" }}>{routing?.customer_eta_message || etaText}</div>
+              </div>
+              {routing?.vehicle_photo_url ? (
+                <img src={routing.vehicle_photo_url} alt="" loading="lazy" className="w-24 h-24 rounded-xl object-cover shrink-0" />
+              ) : (
+                <VehiclePlaceholder className="w-24 h-24 shrink-0" />
+              )}
+            </div>
           </div>
           <div>
             <div className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: "var(--muted)" }}>Status</div>

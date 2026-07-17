@@ -2,6 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DriverRouteState } from "../routing/types.ts";
 import { createRoutingDbAdapter } from "../routing/db-adapter.ts";
 import type { LogisticsMarker, RoutePolyline } from "./types.ts";
+import { getPublicProfileForUser } from "../profiles/handler.ts";
+import { getActiveVehicleForOrder } from "../vehicles/handler.ts";
+import { firstNameFromDisplay } from "../profiles/display.ts";
 import {
   computeOrderRoutingIntel,
   liveStatusLabel,
@@ -15,6 +18,14 @@ export type CustomerTrackingRouting = OrderRoutingIntel & {
   live_status_label: string;
   eta_message: string | null;
   driver_name?: string;
+  driver_first_name?: string;
+  driver_rating?: number;
+  driver_photo_url?: string | null;
+  vehicle_label?: string | null;
+  vehicle_photo_url?: string | null;
+  vehicle_make?: string | null;
+  vehicle_model?: string | null;
+  vehicle_color?: string | null;
 };
 
 export type CustomerTrackingView = {
@@ -101,11 +112,31 @@ export async function buildCustomerTrackingView(
   );
 
   let driverName: string | undefined;
+  let driverFirstName: string | undefined;
+  let driverRating: number | undefined;
+  let driverPhotoUrl: string | null | undefined;
+  let vehicleLabel: string | null | undefined;
+  let vehiclePhotoUrl: string | null | undefined;
+  let vehicleMake: string | null | undefined;
+  let vehicleModel: string | null | undefined;
+  let vehicleColor: string | null | undefined;
+
   if (driver?.driver_id) {
     const { data: drv } = await db.from("drivers").select("user_id").eq("driver_id", driver.driver_id).maybeSingle();
     if (drv?.user_id) {
-      const { data: u } = await db.from("users").select("name").eq("user_id", drv.user_id).maybeSingle();
-      driverName = u?.name ? String(u.name) : "Driver";
+      const profile = await getPublicProfileForUser(db, String(drv.user_id));
+      driverName = profile?.name || "Driver";
+      driverFirstName = profile?.first_name || firstNameFromDisplay(profile?.name);
+      driverRating = profile?.rating;
+      driverPhotoUrl = profile?.thumbnail_photo_url || profile?.profile_photo_url || null;
+    }
+    const vehicle = await getActiveVehicleForOrder(db, driver.driver_id);
+    if (vehicle) {
+      vehicleLabel = vehicle.label || null;
+      vehiclePhotoUrl = vehicle.thumbnail_url || vehicle.photo_url || null;
+      vehicleMake = vehicle.make ? String(vehicle.make) : null;
+      vehicleModel = vehicle.model ? String(vehicle.model) : null;
+      vehicleColor = vehicle.color ? String(vehicle.color) : null;
     }
   }
 
@@ -114,6 +145,14 @@ export async function buildCustomerTrackingView(
     live_status_label: liveStatusLabel(routingIntel.live_status),
     eta_message: buildEtaMessage(routingIntel.live_status, routingIntel),
     driver_name: driverName,
+    driver_first_name: driverFirstName,
+    driver_rating: driverRating,
+    driver_photo_url: driverPhotoUrl,
+    vehicle_label: vehicleLabel,
+    vehicle_photo_url: vehiclePhotoUrl,
+    vehicle_make: vehicleMake,
+    vehicle_model: vehicleModel,
+    vehicle_color: vehicleColor,
   };
 
   const markers: LogisticsMarker[] = [];
