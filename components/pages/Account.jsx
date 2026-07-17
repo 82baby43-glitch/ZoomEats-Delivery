@@ -112,14 +112,8 @@ export default function AccountPage() {
           </p>
         </div>
 
-        <div
-          className="overflow-x-auto scrollbar-hide -mx-2 px-2"
-          data-testid="account-scroll-strip"
-        >
-          <div className="flex w-max min-w-full gap-4 justify-end pb-1">
-            <div className="w-[52vw] shrink-0 sm:hidden" aria-hidden="true" />
-            <WhyZoomEatsDisclosure />
-          </div>
+        <div className="flex justify-end" data-testid="account-scroll-strip">
+          <WhyZoomEatsDisclosure />
         </div>
 
         {profileLoading ? (
