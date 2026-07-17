@@ -109,6 +109,7 @@ export default function VehicleManager({ compact = false }) {
         thumbBlob: processed.thumbBlob,
         fileName: processed.fileName,
         contentType: processed.contentType,
+        bucket: "vehicle-images",
       });
       await api.post(`/driver/vehicles/${vehicleId}/photos/complete`, {
         ...paths,
