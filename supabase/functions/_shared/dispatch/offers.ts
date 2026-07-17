@@ -8,6 +8,7 @@ import { handleDispatchAssigned } from "../delivery/handler.ts";
 import type { RealtimeRuntime } from "../logistics/delivery-realtime.ts";
 import { assignOrderToUberDirect } from "../uberDirect.ts";
 import { resolveUberDirectConfig } from "../uberDirectConfigStore.ts";
+import { hasFounderDriverPermission } from "../founderDriverAuth.ts";
 
 export const OFFER_TTL_SECONDS = 20;
 export const DRIVER_OFFER_RADIUS_KM = 15;
@@ -69,8 +70,12 @@ export async function resolveOrderId(db: SupabaseClient, input: string): Promise
 }
 
 async function isFounderDriverUser(db: SupabaseClient, userId: string): Promise<boolean> {
-  const { data: user } = await db.from("users").select("founder_driver,role").eq("user_id", userId).maybeSingle();
-  return user?.founder_driver === true || user?.role === "admin";
+  const { data: user } = await db
+    .from("users")
+    .select("founder_driver,role,email,is_founder,roles")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return hasFounderDriverPermission(user);
 }
 
 export async function recordOfferEvent(

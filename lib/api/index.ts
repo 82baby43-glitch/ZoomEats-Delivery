@@ -8,6 +8,12 @@ type CacheEntry = { data: unknown; expires: number };
 const responseCache = new Map<string, CacheEntry>();
 const inflightRequests = new Map<string, Promise<unknown>>();
 
+/** Clear cached API responses after permission / role refresh. */
+export function clearApiCache() {
+  responseCache.clear();
+  inflightRequests.clear();
+}
+
 function buildRequestKey(path: string, method: string, body?: unknown, params?: Record<string, string>) {
   return JSON.stringify({ path, method, body: body ?? null, params: params ?? null });
 }

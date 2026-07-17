@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { roleMatches } from "@/lib/compliance/authz";
-import { hasFounderDriverPermission } from "@/lib/founderDriver/auth";
+import { hasFounderDriverPermission, isDeliveryRole } from "@/lib/founderDriver/auth";
 
 const ERROR_MESSAGES = {
   session_expired: "Your session has expired. Please sign in again.",
@@ -23,17 +23,23 @@ function parseErrorParam() {
   return code && ERROR_MESSAGES[code] ? ERROR_MESSAGES[code] : null;
 }
 
+function needsDriverRoles(roles) {
+  return roles?.some((r) => r === "delivery" || r === "driver");
+}
+
 export function ComplianceGate({
   children,
   roles = null,
   requireCompliance = true,
   loginPath = "/login",
+  alsoAllowFounderDriver = false,
 }) {
-  const { user, loading } = useAuth();
+  const { user, loading, refreshPermissions } = useAuth();
   const router = useRouter();
   const [compliance, setCompliance] = useState(null);
   const [checking, setChecking] = useState(requireCompliance);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [founderNotice, setFounderNotice] = useState(null);
 
   useEffect(() => {
     setErrorMsg(parseErrorParam());
@@ -45,6 +51,29 @@ export function ComplianceGate({
       router.replace(`${loginPath}?redirect=${redirect}`);
     }
   }, [loading, user, router, loginPath]);
+
+  useEffect(() => {
+    if (!user || !roles?.length) return;
+    const driverGate = needsDriverRoles(roles);
+    const founderGate = alsoAllowFounderDriver || driverGate;
+    if (!founderGate || !hasFounderDriverPermission(user)) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        await refreshPermissions?.();
+        if (!cancelled) {
+          setFounderNotice("Founder Driver Mode activated.");
+        }
+      } catch {
+        // Non-blocking — gate still allows access when permission is present.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, roles, alsoAllowFounderDriver, refreshPermissions]);
 
   useEffect(() => {
     if (!user || !requireCompliance) {
@@ -98,16 +127,21 @@ export function ComplianceGate({
     );
   }
 
-  if (roles && !roleMatches(user.role, roles)) {
-    const needsDriver = roles.some((r) => r === "delivery" || r === "driver");
-    const founderDriverOk = needsDriver && hasFounderDriverPermission(user);
-    if (!founderDriverOk) {
+  if (roles) {
+    const roleOk = roleMatches(user.role, roles);
+    const driverGate = needsDriverRoles(roles);
+    const founderGate = alsoAllowFounderDriver || driverGate;
+    const founderDriverOk = founderGate && hasFounderDriverPermission(user);
+    if (!roleOk && !founderDriverOk) {
+      const driverDenied = driverGate && !isDeliveryRole(user) && !hasFounderDriverPermission(user);
       return (
         <div className="min-h-screen flex items-center justify-center text-center px-6">
           <div>
             <div className="font-display text-2xl font-bold">Unauthorized</div>
             <p className="mt-2" style={{ color: "var(--muted)" }}>
-              This page requires a different role. Your role: {user.role}
+              {driverDenied
+                ? "Driver access requires delivery permissions."
+                : `This page requires a different role. Your role: ${user.role || "unknown"}`}
             </p>
           </div>
         </div>
@@ -116,8 +150,9 @@ export function ComplianceGate({
   }
 
   if (requireCompliance && compliance && !compliance.can_access_dashboard && roles?.length) {
-    const needsDriver = roles.some((r) => r === "delivery" || r === "driver");
-    if (!(needsDriver && hasFounderDriverPermission(user))) {
+    const driverGate = needsDriverRoles(roles);
+    const founderGate = alsoAllowFounderDriver || driverGate;
+    if (!(founderGate && hasFounderDriverPermission(user))) {
       return (
         <div className="min-h-screen flex items-center justify-center text-center px-6">
           <div>
@@ -136,6 +171,11 @@ export function ComplianceGate({
       {errorMsg && (
         <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm text-center py-2 px-4">
           {errorMsg}
+        </div>
+      )}
+      {founderNotice && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-sm text-center py-2 px-4">
+          {founderNotice}
         </div>
       )}
       {children}
