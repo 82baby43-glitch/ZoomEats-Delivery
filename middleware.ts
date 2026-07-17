@@ -27,11 +27,27 @@ function isPublic(pathname: string) {
   return PUBLIC_PREFIXES.some((p) => p !== "/" && pathname.startsWith(p));
 }
 
-function detectAppType(host: string): "customer" | "driver" | "restaurant" {
+type AppType = "customer" | "driver" | "restaurant" | "admin";
+
+function detectAppTypeFromHost(host: string): AppType {
   const h = host.toLowerCase().split(":")[0];
   if (h.startsWith("driver.")) return "driver";
   if (h.startsWith("restaurant.")) return "restaurant";
+  if (h.startsWith("admin.")) return "admin";
   return "customer";
+}
+
+function detectAppTypeFromPath(pathname: string): AppType {
+  if (pathname.startsWith("/admin")) return "admin";
+  if (pathname.startsWith("/driver") || pathname.startsWith("/delivery")) return "driver";
+  if (pathname.startsWith("/restaurant") || pathname.startsWith("/vendor")) return "restaurant";
+  return "customer";
+}
+
+function resolveAppType(host: string, pathname: string): AppType {
+  const fromHost = detectAppTypeFromHost(host);
+  if (fromHost !== "customer") return fromHost;
+  return detectAppTypeFromPath(pathname);
 }
 
 function applyAppContext(response: NextResponse, appType: string) {
@@ -54,7 +70,7 @@ export function middleware(request: NextRequest) {
   try {
     const { pathname } = request.nextUrl;
     const host = request.headers.get("host") || "";
-    const appType = detectAppType(host);
+    const appType = resolveAppType(host, pathname);
 
     // Subdomain root → role dashboard/login
     if (pathname === "/" && appType === "driver") {
@@ -62,6 +78,9 @@ export function middleware(request: NextRequest) {
     }
     if (pathname === "/" && appType === "restaurant") {
       return redirectTo(request, "/restaurant/dashboard", appType);
+    }
+    if (pathname === "/" && appType === "admin") {
+      return redirectTo(request, "/admin", appType);
     }
 
     // Legacy path aliases
