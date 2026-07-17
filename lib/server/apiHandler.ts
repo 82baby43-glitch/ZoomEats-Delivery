@@ -279,6 +279,7 @@ export async function handleApiRequest(
       params,
       anthropicKey,
       requireAuth,
+      requireAdmin: () => requireRole("admin"),
     });
     if (dreamlandResult !== null) return dreamlandResult;
 

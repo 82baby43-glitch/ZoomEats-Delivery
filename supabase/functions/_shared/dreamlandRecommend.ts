@@ -5,6 +5,8 @@ import { detectMood } from "./dreamlandEmotions.ts";
 import { detectCravings } from "./dreamlandCravings.ts";
 import { loadRestaurantData, rankRecommendations } from "./dreamlandScoring.ts";
 import type { Mood } from "./dreamlandEmotions.ts";
+import { analyzeMessage } from "./dreamlandAnalysis.ts";
+import { moodModeRules, resolveUiMood } from "./dreamlandMoodUi.ts";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -89,36 +91,65 @@ export async function generateRecommendations(
     userId: string;
     text?: string;
     mood?: Mood | null;
+    moodUiId?: string;
     budgetMax?: number | null;
     wantsHealthy?: boolean;
     wantsFast?: boolean;
     limit?: number;
     weather?: string;
+    excludeRecentOrders?: boolean;
+    excludeRestaurantIds?: string[];
+    excludeMenuItemIds?: string[];
   }
-): Promise<{ recommendations: ScoredRecommendation[]; mood: Mood | null; cravings: string[]; ctx: ReturnType<typeof buildContext> }> {
+): Promise<{
+  recommendations: ScoredRecommendation[];
+  mood: Mood | null;
+  cravings: string[];
+  ctx: ReturnType<typeof buildContext>;
+  analysis?: ReturnType<typeof analyzeMessage>;
+}> {
   const text = opts.text || "";
-  const mood = opts.mood || detectMood(text);
+  const resolvedMood = opts.mood || resolveUiMood(opts.moodUiId || "") || detectMood(text);
+  const analysis = analyzeMessage(text, resolvedMood);
+  const modeRules = moodModeRules(resolvedMood, opts.moodUiId);
   const cravings = detectCravings(text);
   const ctx = buildContext(new Date(), opts.weather);
   const state = await loadUserState(db, opts.userId);
   const inferred = inferPreferencesFromOrders(state);
   const { restaurants, menuItems, orderCounts, maxOrders } = await loadRestaurantData(db);
 
+  const excludeRestaurantIds = [...(opts.excludeRestaurantIds || [])];
+  const excludeMenuItemIds = [...(opts.excludeMenuItemIds || [])];
+
+  if (opts.excludeRecentOrders && state.orderHistory.length) {
+    const recent = state.orderHistory.slice(0, 5);
+    excludeRestaurantIds.push(...recent.map((o) => o.restaurant_id));
+  }
+
+  const budgetFromText = text.match(/under\s*\$?\s*(\d+)/i);
+  const budgetMax =
+    opts.budgetMax ??
+    state.preferences.budget_max ??
+    (budgetFromText ? Number(budgetFromText[1]) : null) ??
+    (modeRules.budgetBias && inferred.avgSpend ? inferred.avgSpend * modeRules.budgetBias : null);
+
   const recommendations = rankRecommendations(restaurants, menuItems, {
-    mood,
+    mood: resolvedMood,
     cravings,
     ctx,
     orderCounts,
     maxOrders,
-    budgetMax: opts.budgetMax ?? state.preferences.budget_max,
-    wantsHealthy: opts.wantsHealthy ?? state.preferences.prefers_healthy ?? undefined,
-    wantsFast: opts.wantsFast ?? state.preferences.prefers_fast ?? undefined,
+    budgetMax,
+    wantsHealthy: opts.wantsHealthy ?? modeRules.wantsHealthy ?? state.preferences.prefers_healthy ?? undefined,
+    wantsFast: opts.wantsFast ?? modeRules.wantsFast ?? analysis.timeSensitive ?? state.preferences.prefers_fast ?? undefined,
     favoriteCuisines: inferred.favoriteCuisines,
     avoidIngredients: state.preferences.avoid_ingredients,
-    limit: opts.limit || 8,
+    limit: opts.limit || modeRules.limitChoices || analysis.recommendLimit || 8,
+    excludeRestaurantIds: [...new Set(excludeRestaurantIds)],
+    excludeMenuItemIds: [...new Set(excludeMenuItemIds)],
   });
 
-  return { recommendations, mood, cravings, ctx };
+  return { recommendations, mood: resolvedMood, cravings, ctx, analysis };
 }
 
 export async function persistRecommendations(

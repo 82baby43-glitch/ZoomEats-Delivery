@@ -234,3 +234,9 @@ export const dreamlandHistory = () =>
 
 export const dreamlandFeedback = (body: Record<string, unknown>) =>
   api.post("/dreamland/feedback", body);
+
+export const dreamlandRefresh = () => api.post("/dreamland/refresh", {});
+export const dreamlandSession = () => api.get("/dreamland/session");
+export const dreamlandMore = (params: Record<string, string> = {}) =>
+  api.get("/dreamland/more", { params });
+export const dreamlandAdminAnalytics = () => api.get("/dreamland/admin/analytics");

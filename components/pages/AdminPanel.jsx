@@ -183,6 +183,9 @@ export default function AdminPanel() {
           <Link href="/admin/spotlight" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-spotlight-link">
             <Sparkles size={16} /> Local Partner Spotlight
           </Link>
+          <Link href="/admin/dreamland" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-dreamland-link">
+            <Sparkles size={16} /> Dreamland AI
+          </Link>
           <Link href="/admin/profiles" className="btn-secondary inline-flex items-center gap-2 text-sm" data-testid="admin-profiles-link">
             <Shield size={16} /> Profile moderation
           </Link>

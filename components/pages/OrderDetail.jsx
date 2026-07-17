@@ -12,6 +12,8 @@ import { formatMoney, safeNumber, safeOrderId, sanitizeOrder } from "@/lib/safeD
 import { PAYMENT_STATE_LABEL, resolvePaymentState } from "@/lib/orderState";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import CustomerDeliveryPin from "@/components/orders/CustomerDeliveryPin";
+import DreamlandPostDeliveryFeedback from "@/components/dreamland/DreamlandPostDeliveryFeedback";
+import { logClientError } from "@/lib/clientErrorLog";
 
 const TIMELINE = [
   { id: "placed", label: "Placed" },
@@ -265,6 +267,13 @@ export default function OrderDetail() {
             <span>${formatMoney(o.total)}</span>
           </div>
         </div>
+
+        {o.status === "delivered" && (
+          <DreamlandPostDeliveryFeedback
+            orderId={o.order_id}
+            restaurantId={o.restaurant_id || data?.restaurant?.restaurant_id}
+          />
+        )}
       </div>
     </div>
   );

@@ -6,19 +6,16 @@ import DreamlandRecCard from "./DreamlandRecCard";
 import MoodQuickReorder from "./MoodQuickReorder";
 
 const MOOD_CHIPS = [
-  { id: "tired", label: "Tired 😴" },
-  { id: "stressed", label: "Stressed 😮‍💨" },
-  { id: "comfort_food", label: "Comfort 🫶" },
-  { id: "healthy_day", label: "Healthy 🥗" },
-  { id: "celebrating", label: "Celebrating 🎉" },
-  { id: "lazy", label: "Lazy 🛋️" },
+  { id: "feeling_good", label: "😊 Feeling Good", mood: "happy" },
+  { id: "stress_relief", label: "😩 Stress Relief", mood: "stressed" },
+  { id: "low_energy", label: "😴 Low Energy", mood: "tired" },
+  { id: "strong_craving", label: "🔥 Strong Craving", mood: "cheat_meal" },
+  { id: "healthy_choice", label: "🥗 Healthy Choice", mood: "healthy_day" },
+  { id: "budget_mode", label: "💰 Budget Mode", mood: "lazy" },
+  { id: "celebration", label: "🎉 Celebration", mood: "celebrating" },
 ];
 
-/**
- * In-chat Dreamland hub — mood reorder, mood chips, surprise, top picks.
- * Rendered only inside the Dreamland chat panel (not on landing pages).
- */
-export default function DreamlandChatHub({ onAfterMood, onAfterSurprise }) {
+export default function DreamlandChatHub({ onAfterMood, onAfterSurprise, onShowMore, selectedMood }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -36,11 +33,11 @@ export default function DreamlandChatHub({ onAfterMood, onAfterSurprise }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const setMood = async (mood, label) => {
+  const setMood = async (chip) => {
     try {
-      await api.post("/dreamland/mood", { mood });
+      await api.post("/dreamland/mood", { mood: chip.id });
       await load();
-      onAfterMood?.(mood, label);
+      onAfterMood?.(chip.mood, chip.label, chip.id);
     } catch (e) {
       console.warn(e);
     }
@@ -74,7 +71,7 @@ export default function DreamlandChatHub({ onAfterMood, onAfterSurprise }) {
     >
       <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
         {data?.greeting ? `${data.greeting} — ` : ""}
-        Tell me how you&apos;re feeling, or pick a shortcut below.
+        Tell Dreamland how you feel, what you crave, or tap a mood below.
       </div>
 
       {data?.last_win && (
@@ -84,15 +81,17 @@ export default function DreamlandChatHub({ onAfterMood, onAfterSurprise }) {
       )}
 
       <div data-testid="dreamland-hub-mood-chips">
-        <p className="text-xs font-bold mb-2">How are you feeling?</p>
+        <p className="text-xs font-bold mb-2">Your mood</p>
         <div className="flex flex-wrap gap-1.5">
           {MOOD_CHIPS.map((m) => (
             <button
               key={m.id}
               type="button"
-              className="px-2.5 py-1 rounded-full text-xs font-bold border transition hover:scale-105"
+              className={`px-2.5 py-1 rounded-full text-xs font-bold border transition hover:scale-105 ${
+                selectedMood === m.id ? "ring-2 ring-[var(--primary)]" : ""
+              }`}
               style={{ borderColor: "var(--border)", background: "var(--surface)" }}
-              onClick={() => setMood(m.id, m.label)}
+              onClick={() => setMood(m)}
               data-testid={`dreamland-mood-${m.id}`}
             >
               {m.label}
@@ -112,9 +111,14 @@ export default function DreamlandChatHub({ onAfterMood, onAfterSurprise }) {
 
       {data?.top_picks?.length > 0 && (
         <div className="space-y-2" data-testid="dreamland-hub-top-picks">
-          <p className="text-xs font-bold">Top picks for {data.timeLabel || "right now"}</p>
+          <p className="text-xs font-bold">Dreamland picks · {data.timeLabel || "right now"}</p>
           {data.top_picks.slice(0, 2).map((rec) => (
-            <DreamlandRecCard key={`${rec.restaurant_id}-${rec.menu_item_id}`} rec={rec} compact />
+            <DreamlandRecCard
+              key={`${rec.restaurant_id}-${rec.menu_item_id}`}
+              rec={rec}
+              compact
+              onShowMore={onShowMore}
+            />
           ))}
         </div>
       )}

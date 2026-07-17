@@ -300,6 +300,7 @@ Deno.serve(async (req) => {
       params,
       anthropicKey,
       requireAuth,
+      requireAdmin: () => requireRole("admin"),
     });
     if (dreamlandResult !== null) return json(dreamlandResult);
 

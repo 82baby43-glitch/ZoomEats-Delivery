@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildDreamlandSystemPrompt, DREAMLAND_SEED_MESSAGE } from "../dreamland/prompts";
 import { moodPhrase } from "../dreamland/emotions";
-import { classifyIntent, conversationalFallback, shouldRecommend } from "../dreamland/intent";
+import { conversationalFallback, shouldRecommend } from "../dreamland/intent";
 import { buildContext } from "../dreamland/context";
 import { buildCollections, buildHomeSections } from "../dreamland/collections";
 import {
@@ -13,6 +13,18 @@ import {
 } from "../dreamland/recommend";
 import { loadLastWin } from "../dreamland/lastWin";
 import type { Mood } from "../dreamland/emotions";
+import { analyzeMessage } from "../dreamland/analysis";
+import { resolveUiMood } from "../dreamland/moodUi";
+import {
+  countOrdersSinceRefresh,
+  getActiveSessionId,
+  learnFromFeedback,
+  loadShortTermMemory,
+  setActiveSessionId,
+  updateShortTermMemory,
+} from "../dreamland/memory";
+import { getDreamlandAdminAnalytics, trackDreamlandEvent } from "../dreamland/analytics";
+import { buildRestaurantIntelStub } from "../dreamland/restaurantIntel";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -35,14 +47,17 @@ function formatRecContext(recs: Awaited<ReturnType<typeof generateRecommendation
 }
 
 async function ensureSession(db: SupabaseClient, userId: string, sessionId?: string) {
-  const sid = sessionId || `dreamland_${userId}`;
+  const sid = sessionId || (await getActiveSessionId(db, userId));
   const { data: existing } = await db.from("dreamland_sessions").select("session_id").eq("session_id", sid).maybeSingle();
   if (!existing) {
     await db.from("dreamland_sessions").insert({
       session_id: sid,
       user_id: userId,
       context: {},
+      is_active: true,
+      refreshed_at: new Date().toISOString(),
     });
+    await setActiveSessionId(db, userId, sid);
   }
   await db.from("dreamland_profiles").upsert({
     user_id: userId,
@@ -92,6 +107,7 @@ export async function handleDreamlandRequest(
     params?: Record<string, string>;
     anthropicKey?: string;
     requireAuth: () => Record<string, unknown>;
+    requireAdmin?: () => Record<string, unknown>;
   }
 ): Promise<unknown | null> {
   const { path, method, body = {}, params = {} } = opts;
@@ -100,12 +116,94 @@ export async function handleDreamlandRequest(
   const isDreamland = path.startsWith("/dreamland") || path === "/chat" || path === "/chat/history";
   if (!isDreamland) return null;
 
-  // Legacy chat aliases → dreamland
   const route = path === "/chat" ? "/dreamland/chat" : path === "/chat/history" ? "/dreamland/history" : path;
+
+  if (route === "/dreamland/admin/analytics" && method === "GET") {
+    opts.requireAdmin?.();
+    return getDreamlandAdminAnalytics(db);
+  }
+
+  if (route === "/dreamland/restaurant-intel" && method === "GET") {
+    opts.requireAuth();
+    const restaurantId = params.restaurant_id || "";
+    if (!restaurantId) throwErr("restaurant_id required");
+    return buildRestaurantIntelStub(restaurantId);
+  }
+
+  if (route === "/dreamland/session" && method === "GET") {
+    const u = opts.requireAuth();
+    const userId = String(u.user_id);
+    const sessionId = await getActiveSessionId(db, userId);
+    const { data: session } = await db
+      .from("dreamland_sessions")
+      .select("session_id,mood,refreshed_at,short_term_memory")
+      .eq("session_id", sessionId)
+      .maybeSingle();
+    const ordersSinceRefresh = await countOrdersSinceRefresh(db, userId, session?.refreshed_at || null);
+    const { data: recentSessions } = await db
+      .from("dreamland_sessions")
+      .select("session_id,created_at,refreshed_at,mood")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(5);
+
+    return {
+      session_id: sessionId,
+      mood: session?.mood || null,
+      short_term: session?.short_term_memory || {},
+      orders_since_refresh: ordersSinceRefresh,
+      show_refresh_prompt: ordersSinceRefresh >= 3,
+      recent_sessions: recentSessions || [],
+    };
+  }
+
+  if (route === "/dreamland/refresh" && method === "POST") {
+    const u = opts.requireAuth();
+    const userId = String(u.user_id);
+    const oldSession = await getActiveSessionId(db, userId);
+    await db.from("dreamland_sessions").update({ is_active: false }).eq("session_id", oldSession);
+
+    const newSessionId = `dreamland_${userId}_${Date.now()}`;
+    await db.from("dreamland_sessions").insert({
+      session_id: newSessionId,
+      user_id: userId,
+      context: {},
+      short_term_memory: {},
+      is_active: true,
+      refreshed_at: new Date().toISOString(),
+    });
+    await setActiveSessionId(db, userId, newSessionId);
+    await trackDreamlandEvent(db, "chat_refresh", { old_session: oldSession }, userId);
+
+    return {
+      ok: true,
+      session_id: newSessionId,
+      seed_message: DREAMLAND_SEED_MESSAGE,
+    };
+  }
+
+  if (route === "/dreamland/more" && method === "GET") {
+    const u = opts.requireAuth();
+    const userId = String(u.user_id);
+    const excludeRestaurants = (params.exclude_restaurants || "").split(",").filter(Boolean);
+    const excludeItems = (params.exclude_items || "").split(",").filter(Boolean);
+    const mood = (params.mood as Mood) || null;
+
+    const { recommendations } = await generateRecommendations(db, {
+      userId,
+      mood,
+      excludeRestaurantIds: excludeRestaurants,
+      excludeMenuItemIds: excludeItems,
+      limit: params.limit ? Number(params.limit) : 4,
+    });
+
+    await trackDreamlandEvent(db, "show_more", { count: recommendations.length }, userId);
+    return { recommendations };
+  }
 
   if (route === "/dreamland/history" && method === "GET") {
     const u = opts.requireAuth();
-    const sessionId = params.session_id || `dreamland_${u.user_id}`;
+    const sessionId = params.session_id || (await getActiveSessionId(db, String(u.user_id)));
     const { data } = await db
       .from("dreamland_conversations")
       .select("role,text,recommendations,created_at")
@@ -121,7 +219,6 @@ export async function handleDreamlandRequest(
       }));
     }
 
-    // Fallback legacy chat_messages
     const legacyId = `chat_${u.user_id}`;
     const { data: legacy } = await db
       .from("chat_messages")
@@ -144,17 +241,20 @@ export async function handleDreamlandRequest(
     const sessionId = await ensureSession(db, userId, body.session_id as string | undefined);
     await learnFromText(db, userId, text);
 
-    const intent = classifyIntent(text);
+    const analysis = analyzeMessage(text);
+    const intent = analysis.intent;
     const wantsFood = shouldRecommend(intent, text);
 
     const { recommendations, mood, cravings, ctx } = wantsFood
       ? await generateRecommendations(db, {
           userId,
           text,
+          moodUiId: body.mood_ui_id as string | undefined,
           budgetMax: body.budget_max != null ? Number(body.budget_max) : undefined,
           wantsHealthy: body.wants_healthy != null ? Boolean(body.wants_healthy) : undefined,
           wantsFast: body.wants_fast != null ? Boolean(body.wants_fast) : undefined,
           weather: body.weather as string | undefined,
+          limit: analysis.recommendLimit,
         })
       : { recommendations: [], mood: null, cravings: [], ctx: buildContext() };
 
@@ -177,9 +277,13 @@ export async function handleDreamlandRequest(
 
     if (wantsFood && recommendations[0]) {
       const top = recommendations[0];
-      reply = mood
-        ? `${moodPhrase(mood)} ${top.why} I'd go with ${top.restaurant_name} — ${top.match_score}% ${top.match_label}.`
-        : `${top.why} Check out ${top.restaurant_name} — ${top.match_score}% ${top.match_label}.`;
+      const lead =
+        analysis.responseStyle === "supportive"
+          ? "I hear you — let's keep this simple."
+          : analysis.responseStyle === "simple"
+            ? "No overthinking needed."
+            : moodPhrase(mood);
+      reply = `${lead} ${top.why} I'd go with ${top.restaurant_name} — ${top.match_score}% ${top.match_label}.`;
     }
 
     if (anthropicKey) {
@@ -194,7 +298,7 @@ export async function handleDreamlandRequest(
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
             max_tokens: 500,
-            system,
+            system: `${system}\n\nEmotional analysis: ${analysis.summary}. Style: ${analysis.responseStyle}.`,
             messages,
           }),
         });
@@ -218,6 +322,11 @@ export async function handleDreamlandRequest(
 
     if (wantsFood) {
       await persistRecommendations(db, userId, sessionId, recommendations, mood);
+      await updateShortTermMemory(db, sessionId, {
+        current_mood: mood,
+        current_search: text,
+        last_recommendation_ids: recommendations.slice(0, 5).map((r) => r.menu_item_id || r.restaurant_id),
+      });
     }
 
     if (mood) {
@@ -225,30 +334,40 @@ export async function handleDreamlandRequest(
       await db.from("dreamland_sessions").update({ mood, updated_at: new Date().toISOString() }).eq("session_id", sessionId);
     }
 
-    // Legacy chat_messages sync
+    await trackDreamlandEvent(db, "chat_message", { wants_food: wantsFood, mood }, userId);
+
     try {
       await db.from("chat_messages").insert([
         { session_id: `chat_${userId}`, user_id: userId, role: "user", text },
         { session_id: `chat_${userId}`, user_id: userId, role: "assistant", text: reply },
       ]);
     } catch {
-      // legacy table may not exist in all environments
+      // legacy table may not exist
     }
+
+    const ordersSinceRefresh = await countOrdersSinceRefresh(
+      db,
+      userId,
+      (await db.from("dreamland_sessions").select("refreshed_at").eq("session_id", sessionId).maybeSingle()).data?.refreshed_at
+    );
 
     return {
       reply,
       session_id: sessionId,
       mood,
       cravings,
+      analysis,
       recommendations: recommendations.slice(0, 5),
       context: { greeting: ctx.greeting, timeLabel: ctx.timeLabel },
+      orders_since_refresh: ordersSinceRefresh,
+      show_refresh_prompt: ordersSinceRefresh >= 3,
     };
   }
 
   if (route === "/dreamland/recommend" && method === "GET") {
     const u = opts.requireAuth();
     const userId = String(u.user_id);
-    const { recommendations, mood, cravings, ctx } = await generateRecommendations(db, {
+    const { recommendations, mood, cravings, ctx, analysis } = await generateRecommendations(db, {
       userId,
       text: params.q || params.text || "",
       mood: (params.mood as Mood) || null,
@@ -257,22 +376,26 @@ export async function handleDreamlandRequest(
       wantsFast: params.fast === "1",
       limit: params.limit ? Number(params.limit) : 8,
     });
-    return { recommendations, mood, cravings, context: ctx };
+    return { recommendations, mood, cravings, context: ctx, analysis };
   }
 
   if (route === "/dreamland/mood" && method === "POST") {
     const u = opts.requireAuth();
     const userId = String(u.user_id);
-    const mood = String(body.mood || "") as Mood;
+    const moodInput = String(body.mood || "");
+    const mood = (resolveUiMood(moodInput) || moodInput) as Mood;
     const sessionId = await ensureSession(db, userId);
     await db.from("dreamland_sessions").update({ mood, updated_at: new Date().toISOString() }).eq("session_id", sessionId);
     await db.from("dreamland_profiles").update({ last_mood: mood, updated_at: new Date().toISOString() }).eq("user_id", userId);
 
     const { recommendations } = await generateRecommendations(db, {
       userId,
+      moodUiId: moodInput,
       mood: mood || null,
       limit: 6,
     });
+
+    await trackDreamlandEvent(db, "mood_selected", { mood: moodInput }, userId);
     return { mood, phrase: moodPhrase(mood || null), recommendations };
   }
 
@@ -304,16 +427,20 @@ export async function handleDreamlandRequest(
     const u = opts.requireAuth();
     const userId = String(u.user_id);
     const sessionId = await ensureSession(db, userId);
+    const shortTerm = await loadShortTermMemory(db, sessionId);
     const { recommendations, mood, ctx } = await generateRecommendations(db, {
       userId,
       limit: 12,
+      excludeRecentOrders: true,
+      excludeRestaurantIds: (shortTerm.last_recommendation_ids || []).filter((id) => id.startsWith("rest_")),
     });
     const pick = recommendations[Math.floor(Math.random() * Math.min(5, recommendations.length))] || recommendations[0];
     if (!pick) return { surprise: null, message: "No restaurants available right now." };
 
-    const reply = `✨ Surprise! I picked **${pick.restaurant_name}** — ${pick.menu_item_name || "their best seller"} (${pick.match_score}% ${pick.match_label}). ${pick.why}`;
+    const reply = `✨ Surprise! Dreamland picked **${pick.restaurant_name}** — ${pick.menu_item_name || "their best seller"} (${pick.match_score}% ${pick.match_label}). ${pick.why}`;
     await saveMessage(db, { sessionId, userId, role: "assistant", text: reply, mood, recommendations: [pick] });
     await persistRecommendations(db, userId, sessionId, [pick], mood);
+    await trackDreamlandEvent(db, "surprise", { restaurant_id: pick.restaurant_id }, userId);
 
     return {
       surprise: pick,
@@ -329,15 +456,32 @@ export async function handleDreamlandRequest(
     const u = opts.requireAuth();
     const userId = String(u.user_id);
     const action = String(body.action || "accepted");
+    const rating = body.rating != null ? Number(body.rating) : null;
     await db.from("dreamland_feedback").insert({
       feedback_id: uid("dfb"),
       user_id: userId,
       recommendation_id: body.recommendation_id || null,
       restaurant_id: body.restaurant_id || null,
       action,
-      rating: body.rating != null ? Number(body.rating) : null,
+      rating,
       notes: body.notes || null,
     });
+
+    await learnFromFeedback(db, userId, {
+      action,
+      rating,
+      restaurantId: body.restaurant_id as string | null,
+      notes: body.notes as string | null,
+    });
+
+    if (action === "ordered") {
+      await db.from("dreamland_profiles").upsert({
+        user_id: userId,
+        dreamland_order_count: 1,
+      }, { onConflict: "user_id" });
+    }
+
+    await trackDreamlandEvent(db, "feedback", { action, rating }, userId);
     return { ok: true };
   }
 

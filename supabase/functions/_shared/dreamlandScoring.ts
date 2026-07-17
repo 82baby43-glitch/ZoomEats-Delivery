@@ -1,19 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { filterPublicRestaurants } from "./restaurants.ts";
 import type { Mood } from "./dreamlandEmotions.ts";
 import { moodCuisines } from "./dreamlandEmotions.ts";
 import { itemMatchesCraving } from "./dreamlandCravings.ts";
 import type { DreamlandContext } from "./dreamlandContext.ts";
-import { filterPublicRestaurants } from "./restaurants.ts";
 
 export const SCORE_WEIGHTS = {
-  emotion: 0.35,
-  craving: 0.20,
-  rating: 0.10,
-  distance: 0.10,
-  deliveryTime: 0.10,
-  popularity: 0.05,
-  health: 0.05,
-  promotions: 0.05,
+  preferences: 0.40,
+  orderBehavior: 0.20,
+  delivery: 0.20,
+  restaurantQuality: 0.10,
+  localTrends: 0.10,
 } as const;
 
 export type ScoredRecommendation = {
@@ -131,23 +128,25 @@ export function scoreRestaurantItem(opts: {
   const delivery = deliveryScore(Number(r.delivery_time_min || 30), opts.wantsFast);
   const pop = popularityScore(opts.orderCount || 0, opts.maxOrders || 1);
   const health = item ? healthScore(item.name, item.category, opts.wantsHealthy) : 0.5;
-  const promo = 0.5;
-  const distance = 0.75;
+  const distanceFactor = 0.75;
 
   let favBoost = 0;
   if (opts.favoriteCuisines?.some((f) => r.cuisine.toLowerCase().includes(f.toLowerCase()))) {
     favBoost = 0.1;
   }
 
+  const preferenceScore = (emo * 0.6 + crave * 0.4 + health * 0.15);
+  const orderBehaviorScore = pop;
+  const deliveryFactor = delivery * 0.85 + distanceFactor * 0.15;
+  const restaurantQualityScore = rating;
+  const localTrendsScore = pop;
+
   const raw =
-    emo * SCORE_WEIGHTS.emotion +
-    crave * SCORE_WEIGHTS.craving +
-    rating * SCORE_WEIGHTS.rating +
-    distance * SCORE_WEIGHTS.distance +
-    delivery * SCORE_WEIGHTS.deliveryTime +
-    pop * SCORE_WEIGHTS.popularity +
-    health * SCORE_WEIGHTS.health +
-    promo * SCORE_WEIGHTS.promotions +
+    preferenceScore * SCORE_WEIGHTS.preferences +
+    orderBehaviorScore * SCORE_WEIGHTS.orderBehavior +
+    deliveryFactor * SCORE_WEIGHTS.delivery +
+    restaurantQualityScore * SCORE_WEIGHTS.restaurantQuality +
+    localTrendsScore * SCORE_WEIGHTS.localTrends +
     favBoost;
 
   const price = item ? Number(item.price) : 15;
@@ -167,8 +166,8 @@ export function scoreRestaurantItem(opts: {
   if (opts.cravings.length) whyParts.push(`you asked for ${opts.cravings.slice(0, 2).join(" & ")}`);
   if (opts.budgetMax) whyParts.push(`under $${opts.budgetMax}`);
   const why = whyParts.length
-    ? `I picked this because ${whyParts.join(", ")}. ${why_meal} and ${why_restaurant.toLowerCase()}.`
-    : `${why_meal}. ${why_restaurant}.`;
+    ? `Dreamland selected this because ${whyParts.join(", ")}. ${why_meal} and ${why_restaurant.toLowerCase()}.`
+    : `Dreamland selected this because ${why_meal}. ${why_restaurant}.`;
 
   return {
     restaurant_id: r.restaurant_id,
@@ -183,11 +182,14 @@ export function scoreRestaurantItem(opts: {
     match_score,
     match_label: matchLabel(match_score),
     score_breakdown: {
+      preferences: Math.round(preferenceScore * 100),
+      orderBehavior: Math.round(orderBehaviorScore * 100),
+      delivery: Math.round(deliveryFactor * 100),
+      restaurantQuality: Math.round(restaurantQualityScore * 100),
+      localTrends: Math.round(localTrendsScore * 100),
       emotion: Math.round(emo * 100),
       craving: Math.round(crave * 100),
       rating: Math.round(rating * 100),
-      delivery: Math.round(delivery * 100),
-      popularity: Math.round(pop * 100),
       health: Math.round(health * 100),
     },
     why,
@@ -249,6 +251,8 @@ export function rankRecommendations(
     favoriteCuisines?: string[];
     avoidIngredients?: string[];
     limit?: number;
+    excludeRestaurantIds?: string[];
+    excludeMenuItemIds?: string[];
   }
 ): ScoredRecommendation[] {
   const byRest = new Map<string, MenuRow[]>();
@@ -260,10 +264,12 @@ export function rankRecommendations(
 
   const scored: ScoredRecommendation[] = [];
   for (const r of restaurants) {
+    if (opts.excludeRestaurantIds?.includes(r.restaurant_id)) continue;
     const items = byRest.get(r.restaurant_id) || [];
     const topItems = items.slice(0, 3);
     const candidates = topItems.length ? topItems : [null];
     for (const item of candidates) {
+      if (item && opts.excludeMenuItemIds?.includes(item.item_id)) continue;
       const rec = scoreRestaurantItem({
         restaurant: r,
         item,

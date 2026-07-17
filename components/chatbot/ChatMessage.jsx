@@ -2,7 +2,7 @@
 
 import DreamlandRecCard from "@/components/dreamland/DreamlandRecCard";
 
-export default function ChatMessage({ message }) {
+export default function ChatMessage({ message, onShowMore }) {
   const isUser = message.role === "user";
   const recs = Array.isArray(message.recommendations) ? message.recommendations : [];
 
@@ -23,7 +23,7 @@ export default function ChatMessage({ message }) {
       {!isUser && recs.length > 0 && (
         <div className="w-full space-y-2 max-w-[95%]">
           {recs.slice(0, 2).map((rec) => (
-            <DreamlandRecCard key={`${rec.restaurant_id}-${rec.menu_item_id}`} rec={rec} compact />
+            <DreamlandRecCard key={`${rec.restaurant_id}-${rec.menu_item_id}`} rec={rec} compact onShowMore={onShowMore} />
           ))}
         </div>
       )}
