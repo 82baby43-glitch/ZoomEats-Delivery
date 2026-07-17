@@ -65,6 +65,7 @@ export function hasFounderDriverPermission(
   adminEmails: string[] = getAdminEmails()
 ): boolean {
   if (!user) return false;
+  if (userHasRole(user, "founder_driver")) return true;
   if (hasFounderPrivileges(user)) return true;
   if (hasAdminFounderAccess(user, adminEmails)) return true;
   // Legacy: admins granted founder_driver via migration may rely on role alone.
@@ -74,7 +75,7 @@ export function hasFounderDriverPermission(
 
 export function isDeliveryRole(user: FounderUser | null | undefined): boolean {
   if (!user) return false;
-  return userHasRole(user, "delivery", "driver");
+  return userHasRole(user, "delivery", "driver", "founder_driver");
 }
 
 /** Founder may operate driver endpoints when permission granted (additive — does not change role). */

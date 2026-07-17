@@ -6,8 +6,8 @@ export default function Page() {
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading…</div>}>
       <LoginPage
         title="Sign in to ZoomEats"
-        subtitle="Order food, run a kitchen, or deliver on your schedule."
-        defaultRedirect="/onboarding"
+        subtitle="One app for ordering, delivering, restaurants, and operations. Your dashboard opens automatically based on your account role."
+        defaultRedirect="/"
       />
     </Suspense>
   );

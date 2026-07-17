@@ -79,6 +79,7 @@ export function hasFounderDriverPermission(
   adminEmails: string[] = getAdminEmails()
 ): boolean {
   if (!user) return false;
+  if (userHasRole(user, "founder_driver")) return true;
   if (hasFounderPrivileges(user)) return true;
   if (hasAdminFounderAccess(user, adminEmails)) return true;
   if (userHasRole(user, "admin") && user.founder_driver !== false) return true;

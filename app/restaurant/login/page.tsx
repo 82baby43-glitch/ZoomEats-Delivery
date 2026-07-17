@@ -1,14 +1,5 @@
-import { Suspense } from "react";
-import LoginPage from "@/components/pages/Login";
+import { redirect } from "next/navigation";
 
-export default function Page() {
-  return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading…</div>}>
-      <LoginPage
-        title="Restaurant sign in"
-        subtitle="Manage your menu, orders, and store settings."
-        defaultRedirect="/restaurant/dashboard"
-      />
-    </Suspense>
-  );
+export default function RestaurantLoginRedirect() {
+  redirect("/login?redirect=%2Frestaurant%2Fdashboard");
 }

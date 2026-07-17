@@ -3,7 +3,7 @@ import { ComplianceGate } from "@/components/ComplianceGate";
 
 export default function FounderDriverPage() {
   return (
-    <ComplianceGate roles={["admin"]} alsoAllowFounderDriver requireCompliance={false}>
+    <ComplianceGate roles={["admin", "founder_driver", "super_admin"]} alsoAllowFounderDriver requireCompliance={false}>
       <FounderDriverDashboard />
     </ComplianceGate>
   );

@@ -14,12 +14,12 @@ const PUBLIC_PREFIXES = [
 ];
 
 const ROLE_ROUTE_PREFIXES: Record<string, string[]> = {
-  "/driver": ["delivery"],
-  "/delivery": ["delivery"],
-  "/restaurant": ["vendor"],
-  "/vendor": ["vendor"],
-  "/admin": ["admin"],
-  "/dispatcher": ["dispatcher", "admin"],
+  "/driver": ["driver", "delivery", "founder_driver"],
+  "/delivery": ["driver", "delivery", "founder_driver"],
+  "/restaurant": ["restaurant_owner", "restaurant_staff", "vendor"],
+  "/vendor": ["restaurant_owner", "restaurant_staff", "vendor"],
+  "/admin": ["admin", "super_admin", "founder_driver"],
+  "/dispatcher": ["dispatcher", "admin", "super_admin"],
 };
 
 function isPublic(pathname: string) {
@@ -27,81 +27,27 @@ function isPublic(pathname: string) {
   return PUBLIC_PREFIXES.some((p) => p !== "/" && pathname.startsWith(p));
 }
 
-type AppType = "customer" | "driver" | "restaurant" | "admin";
-
-function detectAppTypeFromHost(host: string): AppType {
-  const h = host.toLowerCase().split(":")[0];
-  if (h.startsWith("driver.")) return "driver";
-  if (h.startsWith("restaurant.")) return "restaurant";
-  if (h.startsWith("admin.")) return "admin";
-  return "customer";
-}
-
-function detectAppTypeFromPath(pathname: string): AppType {
-  if (pathname.startsWith("/admin")) return "admin";
-  if (pathname.startsWith("/driver") || pathname.startsWith("/delivery")) return "driver";
-  if (pathname.startsWith("/restaurant") || pathname.startsWith("/vendor")) return "restaurant";
-  return "customer";
-}
-
-function resolveAppType(host: string, pathname: string): AppType {
-  const fromHost = detectAppTypeFromHost(host);
-  if (fromHost !== "customer") return fromHost;
-  return detectAppTypeFromPath(pathname);
-}
-
-function applyAppContext(response: NextResponse, appType: string) {
-  response.headers.set("x-zoomeats-app", appType);
-  try {
-    response.cookies.set("zoomeats_app", appType, { path: "/", sameSite: "lax" });
-  } catch {
-    // Edge runtimes can reject cookie writes on some response types.
-  }
-  return response;
-}
-
-function redirectTo(request: NextRequest, pathname: string, appType: string) {
+function redirectTo(request: NextRequest, pathname: string) {
   const url = request.nextUrl.clone();
   url.pathname = pathname;
-  return applyAppContext(NextResponse.redirect(url), appType);
+  return NextResponse.redirect(url);
 }
 
 export function middleware(request: NextRequest) {
   try {
     const { pathname } = request.nextUrl;
-    const host = request.headers.get("host") || "";
-    const appType = resolveAppType(host, pathname);
 
-    // Subdomain root → role dashboard/login
-    if (pathname === "/" && appType === "driver") {
-      return redirectTo(request, "/driver/dashboard", appType);
-    }
-    if (pathname === "/" && appType === "restaurant") {
-      return redirectTo(request, "/restaurant/dashboard", appType);
-    }
-    if (pathname === "/" && appType === "admin") {
-      return redirectTo(request, "/admin", appType);
-    }
-
-    // Legacy path aliases
+    // Legacy path aliases (single-domain routing)
     if (pathname === "/driver") {
-      return redirectTo(request, "/driver/dashboard", appType);
+      return redirectTo(request, "/driver/dashboard");
     }
     if (pathname === "/restaurant") {
-      return redirectTo(request, "/restaurant/dashboard", appType);
-    }
-
-    // Subdomain login shortcuts
-    if (appType === "driver" && pathname === "/login") {
-      return redirectTo(request, "/driver/login", appType);
-    }
-    if (appType === "restaurant" && pathname === "/login") {
-      return redirectTo(request, "/restaurant/login", appType);
+      return redirectTo(request, "/restaurant/dashboard");
     }
 
     const response = NextResponse.next();
     response.headers.set("x-zoomeats-path", pathname);
-    applyAppContext(response, appType);
+    response.headers.set("x-zoomeats-app", "zoomeats");
 
     if (isPublic(pathname)) return response;
 
