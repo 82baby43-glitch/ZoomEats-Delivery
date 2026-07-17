@@ -22,6 +22,8 @@ import { useWebPush } from "@/lib/useWebPush";
 import { primeDriverOfferSound } from "@/lib/driverOfferSound";
 import { logClientError } from "@/lib/clientErrorLog";
 import { ErrorState } from "@/components/ui/PageStates";
+import VehicleManager from "@/components/profile/VehicleManager";
+import UserAvatar from "@/components/profile/UserAvatar";
 import { useRoutingRealtime } from "@/lib/hooks/useRoutingRealtime";
 import { useDriverGpsTracking } from "@/lib/hooks/useDriverGpsTracking";
 import { TRACKING_INTERVAL_MS, resolveTrackingMode } from "@/lib/logistics/driver-location-service";
@@ -281,6 +283,19 @@ function DeliveryDashboardInner() {
           >
             {online ? "Go offline" : "Go online"}
           </button>
+        </div>
+
+        <div className="card p-5 mt-4 flex flex-wrap items-center gap-4" data-testid="driver-profile-card">
+          <UserAvatar name={user?.name} src={user?.picture} size={56} />
+          <div className="flex-1 min-w-[180px]">
+            <div className="font-bold">{user?.name || "Driver"}</div>
+            <div className="text-sm" style={{ color: "var(--muted)" }}>Profile & vehicle identity shown to customers during delivery.</div>
+          </div>
+          <Link href="/account" className="btn-ghost text-sm">Edit profile</Link>
+        </div>
+
+        <div className="mt-4">
+          <VehicleManager compact />
         </div>
 
         {/* Live optimized route (routing intelligence layer) */}
