@@ -172,29 +172,40 @@ export async function runAuthChecks(db: SupabaseClient): Promise<AuditCheck[]> {
     process.env.SUPABASE_SERVICE_ROLE_KEY ? "Set" : "Missing — edge functions need this"
   ));
 
-  const roles = ["customer", "delivery", "vendor", "admin"];
-  for (const role of roles) {
-    const { count } = await countRows(db, "users", (q) => q.eq("role", role));
+  const roleChecks: { id: string; roles: string[]; label: string; severity: IssueSeverity }[] = [
+    { id: "customer", roles: ["customer"], label: "customer", severity: "medium" },
+    { id: "delivery", roles: ["delivery", "driver"], label: "driver", severity: "medium" },
+    { id: "vendor", roles: ["vendor", "restaurant_owner", "restaurant"], label: "restaurant", severity: "medium" },
+    { id: "admin", roles: ["admin", "super_admin"], label: "admin", severity: "high" },
+  ];
+  for (const { id, roles, label, severity } of roleChecks) {
+    const { count } = await countRows(db, "users", (q) => q.in("role", roles));
     checks.push(mk(
-      `auth_role_${role}`,
+      `auth_role_${id}`,
       "authentication",
-      `${role} accounts exist`,
+      `${label} accounts exist`,
       count > 0 ? "pass" : "warn",
-      role === "admin" ? "high" : "medium",
-      `${count} ${role} user(s)`
+      severity,
+      `${count} ${label} user(s)`
     ));
   }
 
+  const { count: founderAdminCount } = await countRows(db, "users", (q) =>
+    q.or("is_founder.eq.true,role.eq.admin,role.eq.super_admin")
+  );
   const adminEmails = getAdminEmails();
+  const allowlistConfigured = isAdminEmailsConfigured() || founderAdminCount > 0;
   checks.push(mk(
     "auth_admin_emails",
     "authentication",
     "Admin email allowlist (ADMIN_EMAILS)",
-    isAdminEmailsConfigured() ? "pass" : "warn",
+    allowlistConfigured ? "pass" : "warn",
     "high",
     isAdminEmailsConfigured()
       ? `${adminEmails.length} configured`
-      : "ADMIN_EMAILS not set — admin dashboard requires manual role assignment"
+      : founderAdminCount > 0
+        ? `${founderAdminCount} admin/founder user(s) in database (set ADMIN_EMAILS for signup bootstrap)`
+        : "ADMIN_EMAILS not set — admin dashboard requires manual role assignment"
   ));
 
   return checks;
