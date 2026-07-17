@@ -5,7 +5,15 @@ import {
   getUberDelivery,
   verifyUberDirectConnection,
 } from "../dispatch/uberDirect";
-import { getUberDirectConfig } from "./uberDirectEnv";
+import {
+  buildUberDirectAdminConfigView,
+  loadUberDirectConfigRow,
+  resetUberDirectConfig,
+  resolveUberDirectConfig,
+  saveUberDirectConfig,
+  type UberDirectConfigSaveInput,
+} from "./uberDirectConfigStore";
+import type { UberDirectConfig } from "./uberDirectEnv";
 
 type AdminCtx = {
   path: string;
@@ -28,9 +36,20 @@ function isActiveDelivery(status?: string | null, orderStatus?: string | null): 
   return true;
 }
 
+function buildConnectionStatus(configured: boolean, enabled: boolean, authOk: boolean) {
+  return {
+    configuration: configured ? "complete" : "missing_credentials",
+    integration: enabled ? "enabled" : "disabled",
+    connection: authOk ? "connected" : "authentication_failed",
+  };
+}
+
 async function buildUberDirectOverview(db: SupabaseClient) {
-  const cfg = getUberDirectConfig();
-  const auth = cfg ? await verifyUberDirectConnection() : { ok: false, error: "not_configured" };
+  const row = await loadUberDirectConfigRow(db);
+  const cfg = await resolveUberDirectConfig(db);
+  const auth = cfg?.enabled
+    ? await verifyUberDirectConnection(cfg)
+    : { ok: false, error: cfg ? "integration_disabled" : "not_configured" };
 
   const { data: deliveries } = await db
     .from("deliveries")
@@ -83,14 +102,21 @@ async function buildUberDirectOverview(db: SupabaseClient) {
 
   const active = rows.filter((r) => r.active).length;
   const completed = rows.length - active;
+  const configured = Boolean(cfg?.configured);
+  const enabled = Boolean(cfg?.enabled);
+  const status = buildConnectionStatus(configured, enabled, Boolean(auth.ok));
 
   return {
-    configured: Boolean(cfg),
-    enabled: Boolean(cfg?.enabled),
-    preferred: Boolean(cfg?.preferred),
+    configured,
+    enabled,
+    backup_enabled: Boolean(cfg?.backupEnabled ?? row?.backup_enabled),
+    environment: cfg?.environment ?? row?.environment ?? "sandbox",
     customer_id: cfg ? maskId(cfg.customerId) : null,
     client_id: cfg ? maskId(cfg.clientId) : null,
+    has_client_secret: Boolean(row?.client_secret),
+    status,
     auth,
+    config: buildUberDirectAdminConfigView(row),
     stats: {
       total_deliveries: deliveries?.length || 0,
       total_orders: totalUberOrders || 0,
@@ -158,8 +184,9 @@ async function runUberDirectLiveTest(
   action: string,
   deliveryId?: string
 ): Promise<Record<string, unknown>> {
-  const cfg = getUberDirectConfig();
-  if (!cfg?.enabled) return { ok: false, error: "not_configured" };
+  const cfg = await resolveUberDirectConfig(db);
+  if (!cfg?.enabled) return { ok: false, error: "integration_disabled" };
+  if (!cfg.configured) return { ok: false, error: "not_configured" };
 
   if (action === "quote") {
     const rest = await findQuoteTestRestaurant(db);
@@ -276,6 +303,18 @@ async function runUberDirectLiveTest(
   return { ok: false, error: "unknown_action", action };
 }
 
+function parseSaveInput(body?: Record<string, unknown>): UberDirectConfigSaveInput {
+  const environment = body?.environment === "production" ? "production" : body?.environment === "sandbox" ? "sandbox" : undefined;
+  return {
+    enabled: typeof body?.enabled === "boolean" ? body.enabled : undefined,
+    backup_enabled: typeof body?.backup_enabled === "boolean" ? body.backup_enabled : undefined,
+    environment,
+    client_id: typeof body?.client_id === "string" ? body.client_id : undefined,
+    client_secret: typeof body?.client_secret === "string" ? body.client_secret : undefined,
+    customer_id: typeof body?.customer_id === "string" ? body.customer_id : undefined,
+  };
+}
+
 export async function handleUberDirectAdminRequest(
   db: SupabaseClient,
   ctx: AdminCtx
@@ -289,8 +328,42 @@ export async function handleUberDirectAdminRequest(
     return buildUberDirectOverview(db);
   }
 
+  if (path === "/admin/uber-direct/config" && method === "POST") {
+    try {
+      const saved = await saveUberDirectConfig(db, parseSaveInput(ctx.body));
+      const cfg = await resolveUberDirectConfig(db);
+      const auth = cfg?.enabled
+        ? await verifyUberDirectConnection(cfg)
+        : { ok: false, error: "integration_disabled" };
+      return {
+        ok: true,
+        config: buildUberDirectAdminConfigView(saved),
+        status: buildConnectionStatus(Boolean(saved.configured), Boolean(saved.enabled), Boolean(auth.ok)),
+        auth,
+      };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  }
+
+  if (path === "/admin/uber-direct/reset" && method === "POST") {
+    try {
+      await resetUberDirectConfig(db);
+      return {
+        ok: true,
+        config: buildUberDirectAdminConfigView(null),
+        status: buildConnectionStatus(false, false, false),
+      };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  }
+
   if (path === "/admin/uber-direct/test" && method === "POST") {
-    return verifyUberDirectConnection();
+    const cfg = await resolveUberDirectConfig(db);
+    if (!cfg?.configured) return { ok: false, error: "not_configured" };
+    if (!cfg.enabled) return { ok: false, error: "integration_disabled" };
+    return verifyUberDirectConnection(cfg);
   }
 
   if (path === "/admin/uber-direct/live-test" && method === "POST") {
@@ -305,3 +378,5 @@ export async function handleUberDirectAdminRequest(
 
   return null;
 }
+
+export type { UberDirectConfig };

@@ -1,38 +1,63 @@
 /** Uber Direct credentials — Deno edge mirror of lib/server/uberDirectEnv.ts */
 
+export type UberDirectEnvironment = "sandbox" | "production";
+
 export type UberDirectConfig = {
   enabled: boolean;
+  backupEnabled: boolean;
+  environment: UberDirectEnvironment;
   customerId: string;
   clientId: string;
   clientSecret: string;
   defaultPhone: string;
-  preferred: boolean;
+  configured: boolean;
+};
+
+export type UberDirectConfigRow = {
+  id: string;
+  enabled: boolean;
+  backup_enabled: boolean;
+  environment: string;
+  client_id: string | null;
+  client_secret: string | null;
+  customer_id: string | null;
+  configured: boolean;
+  created_at?: string;
+  updated_at?: string;
 };
 
 function truthy(v: string | undefined): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
-export function getUberDirectConfig(): UberDirectConfig | null {
+/** Legacy env-only resolver (used when DB config is absent). */
+export function getUberDirectConfigFromEnv(): UberDirectConfig | null {
   const customerId = Deno.env.get("UBER_DIRECT_CUSTOMER_ID") || "";
   const clientId = Deno.env.get("UBER_DIRECT_CLIENT_ID") || "";
   const clientSecret = Deno.env.get("UBER_DIRECT_CLIENT_SECRET") || "";
-  const enabled = truthy(Deno.env.get("UBER_DIRECT_ENABLED") ?? "true");
-  const preferred = truthy(Deno.env.get("UBER_DIRECT_PREFERRED") ?? "false");
+  const enabled = truthy(Deno.env.get("UBER_DIRECT_ENABLED") ?? "false");
+  const backupEnabled = truthy(Deno.env.get("UBER_DIRECT_PREFERRED") ?? "false");
 
   if (!customerId || !clientId || !clientSecret) return null;
 
   return {
     enabled,
+    backupEnabled,
+    environment: "sandbox",
     customerId,
     clientId,
     clientSecret,
     defaultPhone: Deno.env.get("UBER_DIRECT_DEFAULT_PHONE") || "+15555550100",
-    preferred,
+    configured: true,
   };
 }
 
+/** @deprecated Use resolveUberDirectConfig(db) when a database client is available. */
+export function getUberDirectConfig(): UberDirectConfig | null {
+  return getUberDirectConfigFromEnv();
+}
+
 export function isUberDirectConfigured(): boolean {
-  const cfg = getUberDirectConfig();
-  return Boolean(cfg?.enabled);
+  const cfg = getUberDirectConfigFromEnv();
+  return Boolean(cfg?.enabled && cfg.configured);
 }

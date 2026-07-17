@@ -3,6 +3,7 @@
  * https://developer.uber.com/docs/deliveries
  */
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getUberDirectConfig, type UberDirectConfig } from "@/lib/server/uberDirectEnv";
 
 const AUTH_URL = "https://auth.uber.com/oauth/v2/token";
@@ -207,21 +208,130 @@ export async function createUberDelivery(
   };
 }
 
-export async function dispatchOrderViaUberDirect(ctx: DispatchOrderContext): Promise<UberDeliveryResult> {
-  const cfg = getUberDirectConfig();
-  if (!cfg?.enabled) {
+export async function dispatchOrderViaUberDirect(
+  ctx: DispatchOrderContext,
+  cfg?: UberDirectConfig | null
+): Promise<UberDeliveryResult> {
+  const resolved = cfg ?? getUberDirectConfig();
+  if (!resolved?.enabled) {
     throw new Error("uber_direct_not_configured");
   }
 
   let quoteId: string | undefined;
   try {
-    const quote = await createUberDeliveryQuote(cfg, ctx);
+    const quote = await createUberDeliveryQuote(resolved, ctx);
     quoteId = quote.id;
   } catch (e) {
     console.warn(JSON.stringify({ uber_quote_skipped: String(e), order_id: ctx.orderId }));
   }
 
-  return createUberDelivery(cfg, ctx, quoteId);
+  return createUberDelivery(resolved, ctx, quoteId);
+}
+
+type OrderRow = {
+  order_id: string;
+  customer_name?: string;
+  address?: string;
+  customer_lat?: number | null;
+  customer_lng?: number | null;
+  restaurant_id?: string;
+  restaurant_name?: string;
+  items?: Array<{ name?: string; quantity?: number; price?: number }>;
+  total?: number;
+};
+
+type RestaurantRow = {
+  name?: string;
+  address?: string;
+  phone?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+};
+
+export async function loadUberDispatchContext(
+  db: SupabaseClient,
+  order: OrderRow
+): Promise<DispatchOrderContext | null> {
+  if (!order.address?.trim()) return null;
+
+  let restaurant: RestaurantRow | null = null;
+  if (order.restaurant_id) {
+    const { data } = await db
+      .from("restaurants")
+      .select("name,address,phone,latitude,longitude")
+      .eq("restaurant_id", order.restaurant_id)
+      .maybeSingle();
+    restaurant = data;
+  }
+
+  const restaurantAddress = restaurant?.address || order.restaurant_name || "Restaurant";
+  const { items, manifestTotalCents } = buildManifestFromOrderItems(order.items, Number(order.total) || 0);
+
+  return {
+    orderId: order.order_id,
+    customerName: order.customer_name || "Customer",
+    customerAddress: order.address,
+    customerLat: order.customer_lat,
+    customerLng: order.customer_lng,
+    restaurantName: restaurant?.name || order.restaurant_name || "Restaurant",
+    restaurantAddress,
+    restaurantPhone: restaurant?.phone,
+    pickupLat: restaurant?.latitude,
+    pickupLng: restaurant?.longitude,
+    items,
+    manifestTotalCents,
+  };
+}
+
+export async function assignOrderToUberDirect(
+  db: SupabaseClient,
+  order: OrderRow,
+  cfg: UberDirectConfig
+): Promise<{ uber_delivery_id: string; tracking_url?: string }> {
+  const ctx = await loadUberDispatchContext(db, order);
+  if (!ctx) {
+    throw new Error("uber_context_missing");
+  }
+
+  const uberDelivery = await dispatchOrderViaUberDirect(ctx, cfg);
+  const trackingId = uberDelivery.id || `uber_${order.order_id}`;
+  const eta = uberDelivery.dropoff_eta || uberDelivery.pickup_eta || null;
+
+  const { error: updateError } = await db
+    .from("orders")
+    .update({
+      status: "assigned_uber",
+      delivery_type: "uber",
+      tracking_id: trackingId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("order_id", order.order_id)
+    .eq("payment_status", "paid")
+    .is("driver_id", null);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  await db.from("deliveries").insert({
+    delivery_id: `dlv_${crypto.randomUUID().slice(0, 12)}`,
+    order_id: order.order_id,
+    provider: "uber",
+    tracking_id: trackingId,
+    uber_delivery_id: uberDelivery.id,
+    status: uberDelivery.status || "assigned",
+    eta,
+    meta: {
+      tracking_url: uberDelivery.tracking_url,
+      quote_id: uberDelivery.quote_id,
+      provider: "uber_direct",
+    },
+  });
+
+  return {
+    uber_delivery_id: uberDelivery.id,
+    tracking_url: uberDelivery.tracking_url,
+  };
 }
 
 export type UberDeliverySnapshot = {
@@ -256,11 +366,13 @@ export async function cancelUberDelivery(
   );
 }
 
-export async function verifyUberDirectConnection(): Promise<{ ok: boolean; error?: string }> {
-  const cfg = getUberDirectConfig();
-  if (!cfg) return { ok: false, error: "not_configured" };
+export async function verifyUberDirectConnection(
+  cfg?: UberDirectConfig | null
+): Promise<{ ok: boolean; error?: string }> {
+  const resolved = cfg ?? getUberDirectConfig();
+  if (!resolved) return { ok: false, error: "not_configured" };
   try {
-    await fetchAccessToken(cfg);
+    await fetchAccessToken(resolved);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e) };
