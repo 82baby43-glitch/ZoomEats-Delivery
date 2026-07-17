@@ -13,7 +13,7 @@ const startLogin = () => {
 export default function UserMenu({ user, logout }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
-  const { canInstall, openInstallPrompt, config } = usePwaInstall();
+  const { canInstall, openInstallPrompt, config, roleAllowed } = usePwaInstall();
 
   if (!user) {
     return (
@@ -62,7 +62,7 @@ export default function UserMenu({ user, logout }) {
           >
             <Repeat size={16} /> Switch mode
           </button>
-          {canInstall && (
+          {canInstall && roleAllowed && (
             <button
               className="w-full text-left px-4 py-3 flex items-center gap-2 text-sm hover:bg-black/40"
               onClick={() => { setOpen(false); openInstallPrompt(); }}

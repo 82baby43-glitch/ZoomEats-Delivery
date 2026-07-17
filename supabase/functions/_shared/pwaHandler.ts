@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { canUserAccessAppType } from "./pwaRoleAccess.ts";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -32,14 +33,11 @@ export async function handlePwaRequest(
   }
 
   if (path === "/pwa/installation" && method === "POST") {
-    let userId: string | null = null;
-    try {
-      userId = String(requireAuth().user_id);
-    } catch {
-      userId = null;
-    }
+    const u = requireAuth();
+    const userId = String(u.user_id);
     const appType = String(body.app_type || "customer");
-    if (!["customer", "driver", "restaurant"].includes(appType)) throwErr("Invalid app_type");
+    if (!["customer", "driver", "restaurant", "admin"].includes(appType)) throwErr("Invalid app_type");
+    if (!canUserAccessAppType(u, appType)) throwErr("This account cannot install that app", 403);
     const deviceId = String(body.device_id || "unknown");
     const row = {
       installation_id: uid("pwa"),
@@ -51,11 +49,7 @@ export async function handlePwaRequest(
       user_agent: body.user_agent || null,
       updated_at: new Date().toISOString(),
     };
-    if (userId) {
-      await db.from("pwa_installations").upsert(row, { onConflict: "user_id,app_type,device_id" });
-    } else {
-      await db.from("pwa_installations").insert(row);
-    }
+    await db.from("pwa_installations").upsert(row, { onConflict: "user_id,app_type,device_id" });
     return { ok: true };
   }
 
@@ -66,6 +60,7 @@ export async function handlePwaRequest(
     if (!sub?.endpoint) throwErr("Missing subscription");
     const keys = sub.keys as Record<string, string> | undefined;
     const appType = String(body.app_type || "customer");
+    if (!canUserAccessAppType(u, appType)) throwErr("This account cannot use that app", 403);
     await db.from("push_subscriptions").upsert({
       subscription_id: uid("psub"),
       user_id: userId,
