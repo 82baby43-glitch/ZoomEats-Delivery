@@ -44,6 +44,30 @@ async function fetchStatus(url, label) {
   }
 }
 
+async function resolveLaunchTestCustomerId(db) {
+  const SIM_USER_ID = "user_launch_simulation";
+  const { data: simUser } = await db.from("users").select("user_id").eq("user_id", SIM_USER_ID).maybeSingle();
+  if (simUser?.user_id) return simUser.user_id;
+
+  const { data: customer } = await db.from("users").select("user_id").eq("role", "customer").limit(1).maybeSingle();
+  if (customer?.user_id) return customer.user_id;
+
+  const { error } = await db.from("users").upsert({
+    user_id: SIM_USER_ID,
+    email: "launch-simulation@zoomeats.internal",
+    name: "Launch Simulation Customer",
+    role: "customer",
+    active: true,
+    approval_status: "approved",
+  });
+  if (!error) return SIM_USER_ID;
+
+  const { data: fallback } = await db.from("users").select("user_id").limit(1).maybeSingle();
+  if (fallback?.user_id) return fallback.user_id;
+
+  throw new Error("No valid customer user for launch readiness test");
+}
+
 async function main() {
   console.log("\n=== ZoomEats Launch Readiness Test ===\n");
   console.log(`Production: ${PROD}`);
@@ -199,77 +223,88 @@ async function main() {
 
     const testOrderId = `ord_launch_${Date.now().toString(36)}`;
     const testAddress = "123 Main St, San Francisco, CA 94102";
-    const orderRow = {
-      order_id: testOrderId,
-      customer_id: "launch_test_user",
-      customer_name: "Launch Test",
-      restaurant_id: menuRest.restaurant_id,
-      restaurant_name: menuRest.name,
-      items: [{ item_id: menuItem.item_id, name: menuItem.name, price: menuItem.price, quantity: 1 }],
-      subtotal: menuItem.price,
-      delivery_fee: 2.99,
-      total: Math.round((menuItem.price + 2.99) * 100) / 100,
-      address: testAddress,
-      customer_lat: 37.7749,
-      customer_lng: -122.4194,
-      status: "placed",
-      payment_status: "paid",
-      order_status: "confirmed",
-      created_at: new Date().toISOString(),
-    };
+    let customerId;
+    try {
+      customerId = await resolveLaunchTestCustomerId(db);
+    } catch (e) {
+      fail("Create test order", e.message || String(e));
+      customerId = null;
+    }
 
-    const { error: insertErr } = await db.from("orders").insert(orderRow);
-    if (insertErr) {
-      fail("Create test order", insertErr.message);
-    } else {
-      pass("Create test order", testOrderId);
+    if (customerId) {
+      const orderRow = {
+        order_id: testOrderId,
+        customer_id: customerId,
+        customer_name: "Launch Test",
+        restaurant_id: menuRest.restaurant_id,
+        restaurant_name: menuRest.name,
+        items: [{ item_id: menuItem.item_id, name: menuItem.name, price: menuItem.price, quantity: 1 }],
+        subtotal: menuItem.price,
+        delivery_fee: 2.99,
+        total: Math.round((menuItem.price + 2.99) * 100) / 100,
+        address: testAddress,
+        customer_lat: 37.7749,
+        customer_lng: -122.4194,
+        status: "placed",
+        payment_status: "paid",
+        order_status: "confirmed",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
 
-      try {
-        const dispatchRes = await fetch(`${fnBase}/dispatch-order`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ order_id: testOrderId }),
-        });
-        const dispatchData = await dispatchRes.json();
-        if (dispatchRes.ok) {
-          if (dispatchData.ok && (dispatchData.driver_id || dispatchData.uber_delivery_id || dispatchData.delivery_type === "uber")) {
-            pass(
-              "Dispatch-order",
-              dispatchData.driver_id
-                ? `internal driver ${dispatchData.driver_id}`
-                : `uber ${dispatchData.uber_delivery_id || "assigned"}`
-            );
-          } else if (dispatchData.reason === "no_drivers" || dispatchData.reason === "no_drivers_uber_failed") {
-            warn("Dispatch-order", dispatchData.reason + (dispatchData.detail ? `: ${String(dispatchData.detail).slice(0, 80)}` : ""));
+      const { error: insertErr } = await db.from("orders").insert(orderRow);
+      if (insertErr) {
+        fail("Create test order", insertErr.message);
+      } else {
+        pass("Create test order", testOrderId);
+
+        try {
+          const dispatchRes = await fetch(`${fnBase}/dispatch-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ order_id: testOrderId }),
+          });
+          const dispatchData = await dispatchRes.json();
+          if (dispatchRes.ok) {
+            if (dispatchData.ok && (dispatchData.driver_id || dispatchData.uber_delivery_id || dispatchData.delivery_type === "uber")) {
+              pass(
+                "Dispatch-order",
+                dispatchData.driver_id
+                  ? `internal driver ${dispatchData.driver_id}`
+                  : `uber ${dispatchData.uber_delivery_id || "assigned"}`
+              );
+            } else if (dispatchData.reason === "no_drivers" || dispatchData.reason === "no_drivers_uber_failed") {
+              warn("Dispatch-order", dispatchData.reason + (dispatchData.detail ? `: ${String(dispatchData.detail).slice(0, 80)}` : ""));
+            } else {
+              pass("Dispatch-order", JSON.stringify(dispatchData).slice(0, 100));
+            }
           } else {
-            pass("Dispatch-order", JSON.stringify(dispatchData).slice(0, 100));
+            fail("Dispatch-order", JSON.stringify(dispatchData).slice(0, 120));
           }
-        } else {
-          fail("Dispatch-order", JSON.stringify(dispatchData).slice(0, 120));
+
+          const { data: after } = await db.from("orders").select("status,delivery_type,driver_id").eq("order_id", testOrderId).maybeSingle();
+          if (after?.delivery_type || after?.driver_id) {
+            pass("Order after dispatch", `${after.delivery_type || "internal"} / ${after.status}`);
+          } else {
+            warn("Order after dispatch", `still unassigned — status ${after?.status}`);
+          }
+
+          const { data: delivery } = await db
+            .from("deliveries")
+            .select("provider,status,meta")
+            .eq("order_id", testOrderId)
+            .maybeSingle();
+          if (delivery) pass("Delivery record", `${delivery.provider} / ${delivery.status}`);
+          else warn("Delivery record", "not created");
+        } catch (e) {
+          fail("Dispatch-order", String(e));
         }
 
-        const { data: after } = await db.from("orders").select("status,delivery_type,driver_id").eq("order_id", testOrderId).maybeSingle();
-        if (after?.delivery_type || after?.driver_id) {
-          pass("Order after dispatch", `${after.delivery_type || "internal"} / ${after.status}`);
-        } else {
-          warn("Order after dispatch", `still unassigned — status ${after?.status}`);
-        }
-
-        const { data: delivery } = await db
-          .from("deliveries")
-          .select("provider,status,meta")
-          .eq("order_id", testOrderId)
-          .maybeSingle();
-        if (delivery) pass("Delivery record", `${delivery.provider} / ${delivery.status}`);
-        else warn("Delivery record", "not created");
-      } catch (e) {
-        fail("Dispatch-order", String(e));
+        // Cleanup test order
+        await db.from("deliveries").delete().eq("order_id", testOrderId);
+        await db.from("orders").delete().eq("order_id", testOrderId);
+        pass("Cleanup test order", testOrderId);
       }
-
-      // Cleanup test order
-      await db.from("deliveries").delete().eq("order_id", testOrderId);
-      await db.from("orders").delete().eq("order_id", testOrderId);
-      pass("Cleanup test order", testOrderId);
     }
   }
 
