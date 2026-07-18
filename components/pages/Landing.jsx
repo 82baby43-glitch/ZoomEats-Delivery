@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { safeGet } from "@/lib/api";
+import { safeGet, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { signInWithGoogle } from "@/lib/auth";
 import Header from "@/components/Header";
-import { Search, Star, Clock, Sparkles } from "lucide-react";
+import { Search, Star, Clock, Sparkles, Heart } from "lucide-react";
 import Chatbot from "@/components/Chatbot";
 import { LocalBusinessJsonLd } from "@/components/seo/StructuredData";
 import LocalPartnerSpotlight from "@/components/spotlight/LocalPartnerSpotlight";
@@ -23,12 +23,59 @@ const HERO_IMG = "/images/hero-zoomeats.webp";
 
 export default function Landing() {
   const [restaurants, setRestaurants] = useState([]);
+  const [marketCategories, setMarketCategories] = useState([]);
+  const [searchProducts, setSearchProducts] = useState([]);
+  const [favoriteIds, setFavoriteIds] = useState(new Set());
+  const [favoriteBusy, setFavoriteBusy] = useState(null);
   const [q, setQ] = useState("");
   const [cuisine, setCuisine] = useState("");
+  const [merchantCategory, setMerchantCategory] = useState("");
   const [openNow, setOpenNow] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const { user } = useAuth();
+
+  useEffect(() => {
+    safeGet("/marketplace/categories", []).then((data) => {
+      setMarketCategories(Array.isArray(data) ? data : []);
+    }).catch(() => setMarketCategories([]));
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setFavoriteIds(new Set());
+      return;
+    }
+    safeGet("/marketplace/favorites", []).then((data) => {
+      const ids = new Set((Array.isArray(data) ? data : []).map((f) => f.restaurant_id).filter(Boolean));
+      setFavoriteIds(ids);
+    }).catch(() => setFavoriteIds(new Set()));
+  }, [user]);
+
+  const toggleFavorite = async (e, restaurantId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!user || !restaurantId || favoriteBusy) return;
+    setFavoriteBusy(restaurantId);
+    const isFav = favoriteIds.has(restaurantId);
+    try {
+      if (isFav) {
+        await api.delete(`/marketplace/favorites/${restaurantId}`);
+        setFavoriteIds((prev) => {
+          const next = new Set(prev);
+          next.delete(restaurantId);
+          return next;
+        });
+      } else {
+        await api.post("/marketplace/favorites", { restaurant_id: restaurantId });
+        setFavoriteIds((prev) => new Set(prev).add(restaurantId));
+      }
+    } catch (err) {
+      logClientError("landing.favorite", err);
+    } finally {
+      setFavoriteBusy(null);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -37,19 +84,27 @@ export default function Landing() {
         const params = {};
         if (q.trim()) params.q = q.trim();
         if (cuisine) params.cuisine = cuisine;
+        if (merchantCategory) params.merchant_category = merchantCategory;
         if (openNow) params.open_now = "1";
         const data = await safeGet("/restaurants", [], { params });
         setRestaurants(sanitizeRestaurants(data));
+        if (q.trim().length >= 2) {
+          const search = await safeGet("/marketplace/search", { products: [] }, { params: { q: q.trim() } });
+          setSearchProducts(Array.isArray(search?.products) ? search.products.slice(0, 6) : []);
+        } else {
+          setSearchProducts([]);
+        }
         setError(false);
       } catch (e) {
         logClientError("landing.restaurants", e);
         setError(true);
         setRestaurants([]);
+        setSearchProducts([]);
       } finally {
         setLoading(false);
       }
     })();
-  }, [q, cuisine, openNow]);
+  }, [q, cuisine, merchantCategory, openNow]);
 
   const cuisineChips = useMemo(() => {
     const counts = new Map();
@@ -83,7 +138,7 @@ export default function Landing() {
               <span style={{ color: "var(--primary)" }}>delivered fast.</span>
             </h1>
             <p className="mt-6 text-lg leading-relaxed max-w-xl" style={{ color: "var(--muted)" }}>
-              Discover local restaurants — order in minutes and track every step from kitchen to door.
+              Discover local merchants — restaurants, convenience, retail, and more. Order in minutes and track every step.
             </p>
             <div className="mt-8 flex items-center gap-3 max-w-xl">
               <div className="flex-1 relative">
@@ -94,7 +149,7 @@ export default function Landing() {
                 />
                 <input
                   className="input-field pl-11"
-                  placeholder="Search restaurants or cuisines…"
+                  placeholder="Search merchants, products, or categories…"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   data-testid="hero-search-input"
@@ -140,12 +195,37 @@ export default function Landing() {
       <section className="max-w-7xl mx-auto px-6 md:px-12 pb-24">
         <div className="flex items-end justify-between mb-8 gap-4 flex-wrap">
           <div>
-            <div className="label-eyebrow">Tonight&apos;s table</div>
+            <div className="label-eyebrow">Local marketplace</div>
             <h2 className="font-display text-3xl md:text-4xl font-bold tracking-tight mt-1">
-              Restaurants we love
+              {merchantCategory
+                ? marketCategories.find((c) => c.slug === merchantCategory)?.label || "Merchants"
+                : "Merchants near you"}
             </h2>
           </div>
         </div>
+
+        {marketCategories.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mb-4" data-testid="marketplace-category-chips">
+            <button
+              type="button"
+              className={`badge ${!merchantCategory ? "ring-2 ring-[var(--primary)]" : ""}`}
+              onClick={() => setMerchantCategory("")}
+            >
+              All
+            </button>
+            {marketCategories.map((cat) => (
+              <button
+                key={cat.slug}
+                type="button"
+                className={`badge ${merchantCategory === cat.slug ? "ring-2 ring-[var(--primary)]" : ""}`}
+                onClick={() => setMerchantCategory((cur) => (cur === cat.slug ? "" : cat.slug))}
+                data-testid={`filter-category-${cat.slug}`}
+              >
+                {cat.icon} {cat.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <button
@@ -169,7 +249,35 @@ export default function Landing() {
           ))}
         </div>
 
-        {loading && <LoadingSkeleton label="Loading restaurants…" rows={3} />}
+        {searchProducts.length > 0 && (
+          <div className="mb-8 card p-5" data-testid="search-products">
+            <div className="label-eyebrow mb-3">Products matching &ldquo;{q.trim()}&rdquo;</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {searchProducts.map((p) => (
+                <Link
+                  key={p.item_id}
+                  href={`/r/${p.restaurant_id}`}
+                  className="flex items-center gap-3 p-3 rounded-xl border hover:border-[var(--primary)]"
+                  style={{ borderColor: "var(--border)" }}
+                >
+                  {p.image_url ? (
+                    <img src={p.image_url} alt="" className="w-12 h-12 rounded-lg object-cover" />
+                  ) : (
+                    <div className="w-12 h-12 rounded-lg" style={{ background: "var(--surface-2)" }} />
+                  )}
+                  <div className="min-w-0">
+                    <div className="font-bold text-sm truncate">{p.name}</div>
+                    <div className="text-xs truncate" style={{ color: "var(--muted)" }}>
+                      {p.restaurants?.name || "Merchant"} · ${Number(p.price || 0).toFixed(2)}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {loading && <LoadingSkeleton label="Loading merchants…" rows={3} />}
 
         {error && !loading && (
           <ErrorState title="Could not load restaurants" description="Please check your connection and try again." />
@@ -186,9 +294,26 @@ export default function Landing() {
               >
                 <Link
                   href={`/r/${r.restaurant_id}`}
-                  className="card card-hover block"
+                  className="card card-hover block relative"
                   data-testid={`restaurant-card-${r.restaurant_id}`}
                 >
+                  {user && (
+                    <button
+                      type="button"
+                      className="absolute top-3 right-3 z-10 p-2 rounded-full border backdrop-blur-sm"
+                      style={{ borderColor: "var(--border)", background: "rgba(0,0,0,0.45)" }}
+                      aria-label={favoriteIds.has(r.restaurant_id) ? "Remove favorite" : "Save favorite"}
+                      disabled={favoriteBusy === r.restaurant_id}
+                      onClick={(e) => toggleFavorite(e, r.restaurant_id)}
+                      data-testid={`favorite-${r.restaurant_id}`}
+                    >
+                      <Heart
+                        size={18}
+                        fill={favoriteIds.has(r.restaurant_id) ? "var(--primary)" : "none"}
+                        color={favoriteIds.has(r.restaurant_id) ? "var(--primary)" : "white"}
+                      />
+                    </button>
+                  )}
                   <div className="aspect-video overflow-hidden">
                     {r.image_url ? (
                       <img src={r.image_url} alt={r.name} className="w-full h-full object-cover" />
