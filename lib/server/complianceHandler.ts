@@ -8,6 +8,7 @@ import {
 import { computeComplianceStatus, normalizeRole, VALID_ROLES } from "../compliance/authz";
 import { encryptTaxPayload, maskTaxId } from "../compliance/taxCrypto";
 import { syncRestaurantLaunchState } from "../restaurant/readiness";
+import { ensureMerchantStub, isDispensaryCategory } from "../merchant/onboarding";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -90,7 +91,7 @@ async function enrichPartnerUsers(
     if (partnerRole === "vendor" && role === "vendor") {
       const { data: restaurant } = await db
         .from("restaurants")
-        .select("restaurant_id,name,cuisine,address,approved,approval_status,active,owner_id")
+        .select("restaurant_id,name,cuisine,address,approved,approval_status,active,owner_id,merchant_category_slug")
         .eq("owner_id", u.user_id)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -157,12 +158,20 @@ async function applyUserApproval(
 
   if (role === "vendor") {
     const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", userId).maybeSingle();
+    const { data: onboarding } = await db
+      .from("restaurant_onboarding")
+      .select("merchant_category_slug, verification_status")
+      .eq("user_id", userId)
+      .maybeSingle();
     const restaurantUpdates: Record<string, unknown> = {
       approval_status: approvalStatus,
       approved: approvalStatus === "approved",
       active: approvalStatus === "approved",
       updated_at: new Date().toISOString(),
     };
+    if (onboarding?.merchant_category_slug) {
+      restaurantUpdates.merchant_category_slug = onboarding.merchant_category_slug;
+    }
     if (approvalStatus === "approved") restaurantUpdates.agreement_complete = true;
     if (approvalStatus === "pending" || approvalStatus === "rejected") {
       restaurantUpdates.approved = false;
@@ -170,6 +179,18 @@ async function applyUserApproval(
       restaurantUpdates.accepting_orders = false;
     }
     await db.from("restaurants").update(restaurantUpdates).eq("owner_id", userId);
+    const verificationStatus =
+      approvalStatus === "approved"
+        ? "approved"
+        : approvalStatus === "rejected"
+          ? "rejected"
+          : approvalStatus === "documents_missing"
+            ? "info_requested"
+            : "pending";
+    await db
+      .from("restaurant_onboarding")
+      .update({ verification_status: verificationStatus, updated_at: new Date().toISOString() })
+      .eq("user_id", userId);
     if (approvalStatus === "approved" && rest?.restaurant_id) {
       await syncRestaurantLaunchState(db, rest.restaurant_id);
     }
@@ -318,7 +339,16 @@ export async function handleComplianceRequest(
   if (path === "/agreements/me" && method === "GET") {
     const u = requireAuth();
     const role = normalizeRole(String(u.role));
-    const defs = agreementsForRole(role);
+    let merchantCategory = params.merchant_category || null;
+    if (!merchantCategory && role === "vendor") {
+      const { data: ob } = await db
+        .from("restaurant_onboarding")
+        .select("merchant_category_slug")
+        .eq("user_id", u.user_id)
+        .maybeSingle();
+      merchantCategory = (ob?.merchant_category_slug as string) || null;
+    }
+    const defs = agreementsForRole(role, merchantCategory);
     const { data: accepted } = await db
       .from("agreement_acceptances")
       .select("*")
@@ -615,7 +645,7 @@ export async function handleComplianceRequest(
       db.from("background_checks").select("*").eq("user_id", userId).order("initiated_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
 
-    const catalog = agreementsForRole(role);
+    const catalog = agreementsForRole(role, (restOnboarding as { merchant_category_slug?: string } | null)?.merchant_category_slug);
     const agreementDetails = catalog.map((def) => {
       const signed = (agreements || []).find((a) => a.agreement_type === def.type);
       return { ...def, signed: Boolean(signed), acceptance: signed || null };
@@ -644,6 +674,19 @@ export async function handleComplianceRequest(
         restaurant: restaurantDocs,
       },
       onboarding: onboarding || restOnboarding || null,
+      merchant_verification: restOnboarding
+        ? {
+            merchant_category_slug: restOnboarding.merchant_category_slug,
+            verification_status: restOnboarding.verification_status,
+            business_license_number: restOnboarding.business_license_number,
+            state_license_number: restOnboarding.state_license_number,
+            license_expiration_date: restOnboarding.license_expiration_date,
+            delivery_agreement_accepted: restOnboarding.delivery_agreement_accepted,
+            age_restricted_confirmed: restOnboarding.age_restricted_confirmed,
+            business_name: restOnboarding.business_name,
+            owner_name: restOnboarding.owner_name,
+          }
+        : null,
       tax: tax ? { ...tax, masked_id: tax.last_four ? `***-**-${tax.last_four}` : null } : null,
       background_check: bg || null,
     };
@@ -716,8 +759,19 @@ export async function handleComplianceRequest(
       status: "uploading",
     };
     if (entityType === "restaurant") {
-      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
-      if (!rest) throwErr("Create your restaurant profile first");
+      let { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
+      if (!rest) {
+        const { data: ob } = await db
+          .from("restaurant_onboarding")
+          .select("merchant_category_slug, business_name")
+          .eq("user_id", u.user_id)
+          .maybeSingle();
+        const restId = await ensureMerchantStub(db, String(u.user_id), {
+          merchant_category_slug: (ob?.merchant_category_slug as string) || "restaurants",
+          name: (ob?.business_name as string) || undefined,
+        });
+        rest = { restaurant_id: restId };
+      }
       row.restaurant_id = rest.restaurant_id;
     } else {
       row.user_id = u.user_id;
@@ -797,6 +851,20 @@ export async function handleComplianceRequest(
     return { ok: true, masked_id: maskTaxId(ssnOrEin) };
   }
 
+  if (path === "/onboarding/restaurant/ensure-stub" && method === "POST") {
+    const u = requireRole("vendor", "restaurant");
+    const { data: ob } = await db
+      .from("restaurant_onboarding")
+      .select("merchant_category_slug, business_name")
+      .eq("user_id", u.user_id)
+      .maybeSingle();
+    const restaurantId = await ensureMerchantStub(db, String(u.user_id), {
+      merchant_category_slug: (ob?.merchant_category_slug as string) || "restaurants",
+      name: (ob?.business_name as string) || undefined,
+    });
+    return { ok: true, restaurant_id: restaurantId };
+  }
+
   if (path === "/onboarding/restaurant" && method === "GET") {
     const u = requireRole("vendor", "restaurant");
     const { data } = await db.from("restaurant_onboarding").select("*").eq("user_id", u.user_id).maybeSingle();
@@ -808,6 +876,9 @@ export async function handleComplianceRequest(
     const allowed = [
       "business_name", "owner_name", "business_address", "phone", "hours", "cuisine",
       "sales_tax_id", "ein", "food_permit_number", "status", "application_signature",
+      "merchant_category_slug", "business_license_number", "state_license_number",
+      "license_expiration_date", "delivery_agreement_accepted", "age_restricted_confirmed",
+      "verification_status",
     ];
     const payload: Record<string, unknown> = {
       user_id: u.user_id,
@@ -818,10 +889,38 @@ export async function handleComplianceRequest(
     for (const k of allowed) {
       if (body[k] !== undefined) payload[k] = body[k];
     }
-    if (body.signature_image) {
-      payload.metadata = { signature_image: body.signature_image };
+    const categorySlug = String(body.merchant_category_slug || payload.merchant_category_slug || "restaurants");
+    if (!payload.merchant_category_slug) payload.merchant_category_slug = categorySlug;
+
+    if (isDispensaryCategory(categorySlug)) {
+      if (body.status === "submitted" || body.verification_status === "documents_submitted") {
+        if (!body.business_license_number) throwErr("Business license number required");
+        if (!body.license_expiration_date) throwErr("License expiration date required");
+        if (!body.delivery_agreement_accepted || !body.age_restricted_confirmed) {
+          throwErr("Delivery agreement and age-restricted confirmation required");
+        }
+        payload.verification_status = "documents_submitted";
+      }
     }
+
+    const meta: Record<string, unknown> = {};
+    if (body.signature_image) meta.signature_image = body.signature_image;
+    if (body.application_signature) meta.application_signature = body.application_signature;
+    if (Object.keys(meta).length) payload.metadata = meta;
+
     const { data } = await db.from("restaurant_onboarding").upsert(payload, { onConflict: "user_id" }).select().single();
+
+    if (categorySlug) {
+      await ensureMerchantStub(db, String(u.user_id), {
+        merchant_category_slug: categorySlug,
+        name: String(body.business_name || data?.business_name || ""),
+      });
+      await db
+        .from("restaurants")
+        .update({ merchant_category_slug: categorySlug, updated_at: new Date().toISOString() })
+        .eq("owner_id", u.user_id);
+    }
+
     return data;
   }
 

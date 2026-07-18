@@ -178,7 +178,30 @@ export default function ComplianceDossier({ userId, onClose, onAction }) {
               </section>
             )}
 
-            {data.onboarding && (
+            {data.merchant_verification && (
+              <section className="mt-6 p-4 rounded-lg border" style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}>
+                <h3 className="font-bold mb-3">Merchant verification</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                  <div><span style={{ color: "var(--muted)" }}>Category:</span> <strong>{data.merchant_verification.merchant_category_slug || "—"}</strong></div>
+                  <div><span style={{ color: "var(--muted)" }}>Status:</span> <strong>{data.merchant_verification.verification_status || "pending"}</strong></div>
+                  <div><span style={{ color: "var(--muted)" }}>Business:</span> {data.merchant_verification.business_name || "—"}</div>
+                  <div><span style={{ color: "var(--muted)" }}>Owner:</span> {data.merchant_verification.owner_name || "—"}</div>
+                  <div><span style={{ color: "var(--muted)" }}>License #:</span> {data.merchant_verification.business_license_number || "—"}</div>
+                  <div><span style={{ color: "var(--muted)" }}>State license:</span> {data.merchant_verification.state_license_number || "—"}</div>
+                  <div><span style={{ color: "var(--muted)" }}>Expires:</span> {data.merchant_verification.license_expiration_date || "—"}</div>
+                  <div>
+                    <span style={{ color: "var(--muted)" }}>Delivery agreement:</span>{" "}
+                    {data.merchant_verification.delivery_agreement_accepted ? "✓" : "—"}
+                  </div>
+                  <div>
+                    <span style={{ color: "var(--muted)" }}>Age-restricted confirmed:</span>{" "}
+                    {data.merchant_verification.age_restricted_confirmed ? "✓" : "—"}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {data.onboarding && !data.merchant_verification && (
               <section className="mt-6">
                 <h3 className="font-bold">Onboarding Progress</h3>
                 <pre className="mt-2 text-xs p-3 rounded-lg overflow-x-auto" style={{ background: "var(--surface-2)" }}>

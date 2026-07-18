@@ -117,6 +117,9 @@ export default function PartnerApprovalsPanel({
                         <span className={`badge ${agreementsDone ? "text-green-400" : "text-amber-400"}`}>
                           Agreements: {agreementsDone ? "complete" : "incomplete"}
                         </span>
+                        {item.restaurant?.merchant_category_slug === "licensed_dispensary" && (
+                          <span className="badge" style={{ color: "var(--primary)" }}>🌿 Licensed Dispensary</span>
+                        )}
                         {item.restaurant?.name && (
                           <span className="badge">Store: {item.restaurant.name}</span>
                         )}

@@ -42,12 +42,44 @@ export const RESTAURANT_AGREEMENTS: AgreementDef[] = [
   { type: "electronic_signature", title: "Electronic Signature", kind: "signature", required: true, role: "vendor", body: "You consent to electronic signatures for merchant agreements." },
 ];
 
-export function agreementsForRole(role: string): AgreementDef[] {
+export const DISPENSARY_EXTRA_AGREEMENTS: AgreementDef[] = [
+  {
+    type: "cannabis_merchant_compliance",
+    title: "Licensed Cannabis Merchant Compliance",
+    kind: "signature",
+    required: true,
+    role: "vendor",
+    body: "You certify that you hold valid state and local cannabis licenses, will sell only within licensed scope, and will comply with all applicable cannabis delivery regulations.",
+  },
+  {
+    type: "age_verification_merchant",
+    title: "Age-Restricted Merchant Confirmation",
+    kind: "checkbox",
+    required: true,
+    role: "vendor",
+    body: "I confirm this is an age-restricted merchant and I will verify customer age and valid identification before fulfilling restricted product orders.",
+  },
+];
+
+export function agreementsForRole(role: string, merchantCategory?: string | null): AgreementDef[] {
   if (role === "delivery" || role === "driver") return DRIVER_AGREEMENTS;
-  if (role === "vendor" || role === "restaurant") return RESTAURANT_AGREEMENTS;
+  if (role === "vendor" || role === "restaurant") {
+    let list = [...RESTAURANT_AGREEMENTS];
+    if (merchantCategory === "licensed_dispensary") {
+      list = list.map((a) =>
+        a.type === "age_verification" || a.type === "alcohol_compliance"
+          ? { ...a, required: false }
+          : a.type === "food_safety_certification"
+            ? { ...a, required: false, title: "Product Safety (optional)" }
+            : a
+      );
+      list = [...list, ...DISPENSARY_EXTRA_AGREEMENTS];
+    }
+    return list;
+  }
   return [];
 }
 
-export function requiredAgreementTypes(role: string): string[] {
-  return agreementsForRole(role).filter((a) => a.required).map((a) => a.type);
+export function requiredAgreementTypes(role: string, merchantCategory?: string | null): string[] {
+  return agreementsForRole(role, merchantCategory).filter((a) => a.required).map((a) => a.type);
 }
