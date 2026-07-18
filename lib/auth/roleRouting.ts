@@ -1,4 +1,5 @@
 import { normalizeRole, roleMatches } from "../compliance/authz";
+import { hasMultiRolePrivileges } from "../founderDriver/auth";
 
 export type ZoomEatsRole =
   | "customer"
@@ -53,6 +54,14 @@ export const ROLE_ROUTE_ACCESS: Record<string, string[]> = {
   super_admin: ["/admin", "/account", "/agreements", "/onboarding"],
   dispatcher: ["/admin", "/dispatcher", "/account"],
 };
+
+/** Route prefixes granted to founder multi-role accounts (admin + driver + customer). */
+const FOUNDER_MULTI_ROLE_PREFIXES: string[] = [
+  ...ROLE_ROUTE_ACCESS.admin,
+  ...ROLE_ROUTE_ACCESS.driver,
+  ...ROLE_ROUTE_ACCESS.customer,
+  ...ROLE_ROUTE_ACCESS.founder_driver,
+];
 
 const PUBLIC_PREFIXES = [
   "/login",
@@ -141,6 +150,11 @@ function prefixAllowed(pathname: string, prefixes: string[]): boolean {
 export function canAccessPath(user: AuthUserLike | null | undefined, pathname: string): boolean {
   if (!user) return isPublicPath(pathname);
   if (isPublicPath(pathname)) return true;
+
+  // Founder multi-role: admin, driver, and customer surfaces without changing DB role.
+  if (hasMultiRolePrivileges(user)) {
+    return prefixAllowed(pathname, FOUNDER_MULTI_ROLE_PREFIXES);
+  }
 
   const effective = resolveEffectiveRole(user);
   const allowed = ROLE_ROUTE_ACCESS[effective];

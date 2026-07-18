@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { setWorkspaceMode } from "@/lib/auth/workspaceMode";
 import { Utensils, Bike, ShoppingBag, Shield, Check } from "lucide-react";
 
 const BASE_ROLES = [
@@ -27,16 +28,18 @@ export default function Onboarding() {
 
   if (!user) return null;
 
-  const isAdmin = user.role === "admin";
-  // Admins see all 4 tiles (admin first); everyone else sees the 3 base options.
+  const isAdmin = user.role === "admin" || user.role === "super_admin" || user.is_founder === true || user.isFounder === true;
+  // Founders/admins see all workspaces (admin first); everyone else sees the 3 base options.
   const roles = isAdmin ? [ADMIN_ROLE, ...BASE_ROLES] : BASE_ROLES;
 
   const choose = async (role) => {
     setPicking(role.id);
     try {
+      if (isAdmin) {
+        setWorkspaceMode(role.id === "vendor" ? "vendor" : role.id);
+      }
       // Same role as currently assigned → just navigate, no role change.
-      // Different role → switch (admins are immutable on the backend, so any non-admin
-      // role click for an admin will silently fail; we just navigate them to that view).
+      // Different role → switch (admins/founders keep DB role; routing grants multi-role access).
       if (role.id !== user.role && !isAdmin) {
         await api.post("/auth/role", { role: role.id });
         await refresh();
@@ -57,7 +60,7 @@ export default function Onboarding() {
           </h1>
           <p className="mt-3" style={{ color: "var(--muted)" }} data-testid="onboarding-subtitle">
             {isAdmin
-              ? "Pick a workspace to enter. You can always come back here on next sign-in."
+              ? "Pick a workspace — founder accounts can use admin, driver, and customer modes."
               : "Pick a mode. You can switch any time."}
           </p>
         </div>

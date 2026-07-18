@@ -128,3 +128,11 @@ export function satisfiesRoleRequirement(
 export function isFounderAccount(user: FounderUser | null | undefined): boolean {
   return user?.is_founder === true;
 }
+
+/** Founder / admin accounts that may use customer, driver, and admin surfaces simultaneously. */
+export function hasMultiRolePrivileges(user: FounderUser | null | undefined): boolean {
+  if (!user) return false;
+  if (user.is_founder === true) return true;
+  if (user.founder_driver === true && userHasRole(user, "admin", "super_admin")) return true;
+  return false;
+}
