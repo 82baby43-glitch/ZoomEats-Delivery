@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import ElectronicSignature from "@/components/compliance/ElectronicSignature";
 
-export default function RestaurantApplicationForm({ onComplete, initial = {} }) {
+export default function RestaurantApplicationForm({ onComplete, initial = {}, merchantCategorySlug = "restaurants" }) {
   const [form, setForm] = useState({
     business_name: "",
     owner_name: "",
@@ -40,6 +40,7 @@ export default function RestaurantApplicationForm({ onComplete, initial = {} }) 
       const name = signature.typed_name || form.owner_name;
       if (!name?.trim()) throw new Error("Electronic signature required");
       await api.post("/onboarding/restaurant", {
+        merchant_category_slug: merchantCategorySlug,
         ...form,
         application_signature: name.trim(),
         signature_image: signature.signature_image || null,

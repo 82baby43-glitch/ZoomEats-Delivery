@@ -7,6 +7,8 @@ import ElectronicSignature from "@/components/compliance/ElectronicSignature";
 import DriverBackgroundCheckForm from "@/components/compliance/DriverBackgroundCheckForm";
 import RestaurantApplicationForm from "@/components/compliance/RestaurantApplicationForm";
 import DriverApplicationForm from "@/components/compliance/DriverApplicationForm";
+import MerchantCategoryPicker from "@/components/compliance/MerchantCategoryPicker";
+import DispensaryApplicationForm from "@/components/compliance/DispensaryApplicationForm";
 
 function clientMeta() {
   if (typeof window === "undefined") return {};
@@ -19,13 +21,16 @@ function clientMeta() {
 }
 
 const DRIVER_STEPS = ["application", "background", "agreements"];
-const VENDOR_STEPS = ["application", "agreements"];
+const VENDOR_STEPS_RESTAURANT = ["application", "agreements"];
+const VENDOR_STEPS_WITH_CATEGORY = ["category", "application", "agreements"];
 
 export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) {
   const { user } = useAuth();
   const role = user?.role === "vendor" || user?.role === "restaurant" ? "vendor" : "delivery";
-  const steps = role === "vendor" ? VENDOR_STEPS : DRIVER_STEPS;
 
+  const [merchantCategory, setMerchantCategory] = useState("restaurants");
+  const [categoryLocked, setCategoryLocked] = useState(false);
+  const [steps, setSteps] = useState(role === "vendor" ? VENDOR_STEPS_WITH_CATEGORY : DRIVER_STEPS);
   const [step, setStep] = useState(0);
   const [agreements, setAgreements] = useState([]);
   const [checks, setChecks] = useState({});
@@ -38,34 +43,58 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) 
 
   useEffect(() => {
     if (!user) return;
-    Promise.all([
-      api.get("/agreements/me"),
-      role === "delivery" ? api.get("/compliance/background-check") : Promise.resolve(null),
-      role === "delivery" ? api.get("/onboarding/driver") : api.get("/onboarding/restaurant"),
-    ]).then(([agr, bg, app]) => {
-      const list = Array.isArray(agr?.data) ? agr.data : [];
-      setAgreements(list);
-      const c = {};
-      const s = {};
-      list.forEach((a) => {
-        if (a.accepted) c[a.type] = true;
-        if (a.acceptance?.typed_name) s[a.type] = a.acceptance.typed_name;
-      });
-      setChecks(c);
-      setSignatures(s);
-      const appData = app?.data ?? app;
-      setAppDone(Boolean(appData?.legal_name || appData?.business_name));
-      const bgData = bg?.data ?? bg;
-      setBgDone(Boolean(bgData?.submitted));
-      const stillPending = list.filter((a) => a.required && !a.accepted);
-      if (stillPending.length === 0 && list.length > 0) {
-        onAllComplete?.();
+    (async () => {
+      try {
+        const appEndpoint = role === "delivery" ? "/onboarding/driver" : "/onboarding/restaurant";
+        const [bg, app] = await Promise.all([
+          role === "delivery" ? api.get("/compliance/background-check") : Promise.resolve(null),
+          api.get(appEndpoint),
+        ]);
+        const appData = app?.data ?? app;
+        const slug = appData?.merchant_category_slug || "restaurants";
+        const hasApplication = Boolean(appData?.business_name);
+        const hasCategory = Boolean(appData?.merchant_category_slug);
+
+        if (role === "vendor") {
+          setMerchantCategory(slug);
+          if (hasCategory && hasApplication) {
+            setCategoryLocked(true);
+            setSteps(VENDOR_STEPS_RESTAURANT);
+          } else if (hasCategory) {
+            setCategoryLocked(true);
+            setSteps(["application", "agreements"]);
+          } else {
+            setSteps(VENDOR_STEPS_WITH_CATEGORY);
+          }
+        }
+
+        const agrRes = role === "vendor"
+          ? await api.get(`/agreements/me?merchant_category=${encodeURIComponent(slug)}`)
+          : await api.get("/agreements/me");
+        const list = Array.isArray(agrRes?.data) ? agrRes.data : [];
+        setAgreements(list);
+        const c = {};
+        const s = {};
+        list.forEach((a) => {
+          if (a.accepted) c[a.type] = true;
+          if (a.acceptance?.typed_name) s[a.type] = a.acceptance.typed_name;
+        });
+        setChecks(c);
+        setSignatures(s);
+        setAppDone(hasApplication);
+        const bgData = bg?.data ?? bg;
+        setBgDone(Boolean(bgData?.submitted));
+        const stillPending = list.filter((a) => a.required && !a.accepted);
+        if (stillPending.length === 0 && list.length > 0) onAllComplete?.();
+      } catch (e) {
+        setError(e?.message || "Failed to load");
       }
-    }).catch((e) => setError(e?.message || "Failed to load"));
+    })();
   }, [user, role, onAllComplete]);
 
   const currentStep = steps[step];
   const pending = agreements.filter((a) => a.required && !a.accepted);
+  const isDispensary = merchantCategory === "licensed_dispensary";
 
   const allAgreementsReady = pending.every((a) => {
     const sig = esign[a.type] || {};
@@ -73,6 +102,26 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) 
     if (a.kind === "signature") return checks[a.type] && typed.length > 1;
     return checks[a.type];
   });
+
+  const saveCategory = async () => {
+    if (!merchantCategory) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.post("/onboarding/restaurant", {
+        merchant_category_slug: merchantCategory,
+        status: "category_selected",
+      });
+      setCategoryLocked(true);
+      const agrRes = await api.get(`/agreements/me?merchant_category=${encodeURIComponent(merchantCategory)}`);
+      setAgreements(Array.isArray(agrRes?.data) ? agrRes.data : []);
+      setStep(step + 1);
+    } catch (e) {
+      setError(e?.message || "Could not save category");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submitAgreements = async () => {
     setBusy(true);
@@ -102,40 +151,57 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) 
     if (step < steps.length - 1) setStep(step + 1);
   };
 
+  const stepLabel = (s) => {
+    if (s === "category") return "Business type";
+    if (s === "application") return "Application";
+    if (s === "background") return "Background check";
+    return "Agreements";
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2">
         {steps.map((s, i) => (
           <span key={s} className={`badge ${i === step ? "ring-2 ring-[var(--primary)]" : i < step ? "opacity-100" : "opacity-50"}`}>
-            {i + 1}. {s === "application" ? "Application" : s === "background" ? "Background check" : "Agreements"}
+            {i + 1}. {stepLabel(s)}
           </span>
         ))}
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      {currentStep === "application" && role === "delivery" && (
-        <DriverApplicationForm
-          onComplete={() => { setAppDone(true); goNext(); }}
+      {currentStep === "category" && role === "vendor" && !categoryLocked && (
+        <MerchantCategoryPicker
+          value={merchantCategory}
+          onChange={setMerchantCategory}
+          onContinue={saveCategory}
         />
       )}
 
-      {currentStep === "application" && role === "vendor" && (
+      {currentStep === "application" && role === "delivery" && (
+        <DriverApplicationForm onComplete={() => { setAppDone(true); goNext(); }} />
+      )}
+
+      {currentStep === "application" && role === "vendor" && isDispensary && (
+        <DispensaryApplicationForm onComplete={() => { setAppDone(true); goNext(); }} />
+      )}
+
+      {currentStep === "application" && role === "vendor" && !isDispensary && (
         <RestaurantApplicationForm
+          merchantCategorySlug={merchantCategory}
           onComplete={() => { setAppDone(true); goNext(); }}
         />
       )}
 
       {currentStep === "background" && role === "delivery" && (
-        <DriverBackgroundCheckForm
-          onComplete={() => { setBgDone(true); goNext(); }}
-        />
+        <DriverBackgroundCheckForm onComplete={() => { setBgDone(true); goNext(); }} />
       )}
 
       {currentStep === "agreements" && (
         <div className="space-y-4">
           <p className="text-sm" style={{ color: "var(--muted)" }}>
             Review each agreement, sign electronically, and check the consent box.
+            {isDispensary && " Licensed dispensary merchants require additional compliance agreements."}
           </p>
           {agreements.map((a) => (
             <div key={a.type} className="card p-5">
