@@ -58,6 +58,7 @@ import { handleFinancialAdminRequest } from "./financialAdminHandler";
 import { handleCompanionRequest } from "../companionMode/handler";
 import { recordOrderFinancials } from "../financial/engine";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "./restaurantAdminHandler";
+import { handleMarketplaceRequest } from "../marketplace/handler";
 import { syncRestaurantLaunchState } from "../restaurant/readiness";
 import { getAdminEmails } from "../adminEnv";
 import { checkRateLimit } from "../rateLimiter";
@@ -280,6 +281,16 @@ export async function handleApiRequest(
     });
     if (restaurantAdminResult !== null) return restaurantAdminResult;
 
+    const marketplaceResult = await handleMarketplaceRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (marketplaceResult !== null) return marketplaceResult;
+
     const dreamlandResult = await handleDreamlandRequest(db, {
       path,
       method,
@@ -360,6 +371,9 @@ export async function handleApiRequest(
 
     // ---- Restaurants (public) ----
     if (path === "/restaurants" && method === "GET") {
+      const { data: enabledCats } = await db.from("merchant_categories").select("slug").eq("enabled", true);
+      const enabledSlugs = (enabledCats || []).map((c) => c.slug as string);
+
       let q = db
         .from("restaurants")
         .select("*")
@@ -370,9 +384,20 @@ export async function handleApiRequest(
       const search = sanitizeImportString(params.q, 120);
       const cuisine = sanitizeImportString(params.cuisine, 80);
       const category = sanitizeImportString(params.category, 80);
-      if (search) q = q.or(`name.ilike.%${search}%,description.ilike.%${search}%,cuisine.ilike.%${search}%`);
+      const merchantCategory = sanitizeImportString(params.merchant_category || params.category_slug, 80);
+      if (search) {
+        q = q.or(
+          `name.ilike.%${search}%,description.ilike.%${search}%,cuisine.ilike.%${search}%,primary_category.ilike.%${search}%`
+        );
+      }
       if (cuisine) q = q.ilike("cuisine", `%${cuisine}%`);
-      if (category) q = q.ilike("primary_category", `%${category}%`);
+      if (merchantCategory) {
+        q = q.eq("merchant_category_slug", merchantCategory);
+      } else if (category) {
+        q = q.or(`primary_category.ilike.%${category}%,merchant_category_slug.ilike.%${category}%`);
+      } else if (enabledSlugs.length) {
+        q = q.in("merchant_category_slug", enabledSlugs);
+      }
       const { data } = await q;
       return finalizePublicRestaurantList(data || [], params);
     }
@@ -437,7 +462,15 @@ export async function handleApiRequest(
         price: body.price,
         image_url: body.image_url || "",
         category: body.category || "Mains",
-        available: true,
+        available: body.available !== false,
+        sku: body.sku || null,
+        barcode: body.barcode || null,
+        weight_grams: body.weight_grams ?? null,
+        tax_category: body.tax_category || null,
+        product_category: body.product_category || body.category || null,
+        featured: body.featured === true,
+        inventory_count: body.inventory_count ?? null,
+        brand: body.brand || null,
       };
       const { data } = await db.from("menu_items").insert(item).select().single();
       await syncRestaurantLaunchState(db, rest.restaurant_id);

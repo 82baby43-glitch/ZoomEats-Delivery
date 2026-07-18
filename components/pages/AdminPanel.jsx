@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { Download, Truck, CreditCard, MapPin, Activity, DollarSign, Sparkles, Shield } from "lucide-react";
+import { Download, Truck, CreditCard, MapPin, Activity, DollarSign, Sparkles, Shield, Store } from "lucide-react";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import PulseHeader, { MetricsTiles } from "@/components/admin/PulseHeader";
@@ -167,6 +167,9 @@ export default function AdminPanel() {
           </Link>
           <Link href="/admin/founder-driver" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-founder-driver-link">
             <Truck size={16} /> Founder Driver Mode
+          </Link>
+          <Link href="/admin/marketplace" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-marketplace-link">
+            <Store size={16} /> Marketplace Manager
           </Link>
           <Link href="/admin/compliance" className="btn-primary inline-flex items-center gap-2 text-sm">
             Compliance Center
