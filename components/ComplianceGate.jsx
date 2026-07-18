@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { roleMatches } from "@/lib/compliance/authz";
 import { resolveEffectiveRole } from "@/lib/auth/roleRouting";
-import { hasFounderDriverPermission, isDeliveryRole } from "@/lib/founderDriver/auth";
+import { hasFounderDriverPermission, hasMultiRolePrivileges, isDeliveryRole } from "@/lib/founderDriver/auth";
 
 const ERROR_MESSAGES = {
   session_expired: "Your session has expired. Please sign in again.",
@@ -134,7 +134,9 @@ export function ComplianceGate({
     const driverGate = needsDriverRoles(roles);
     const founderGate = alsoAllowFounderDriver || driverGate;
     const founderDriverOk = founderGate && hasFounderDriverPermission(user);
-    if (!roleOk && !founderDriverOk) {
+    const adminGate = roles.some((r) => r === "admin" || r === "super_admin");
+    const founderAdminOk = hasMultiRolePrivileges(user) && adminGate;
+    if (!roleOk && !founderDriverOk && !founderAdminOk) {
       const driverDenied = driverGate && !isDeliveryRole(user) && !hasFounderDriverPermission(user);
       return (
         <div className="min-h-screen flex items-center justify-center text-center px-6">
@@ -151,10 +153,11 @@ export function ComplianceGate({
     }
   }
 
-  if (requireCompliance && compliance && !compliance.can_access_dashboard && roles?.length) {
+    if (requireCompliance && compliance && !compliance.can_access_dashboard && roles?.length) {
     const driverGate = needsDriverRoles(roles);
     const founderGate = alsoAllowFounderDriver || driverGate;
-    if (!(founderGate && hasFounderDriverPermission(user))) {
+    const adminGate = roles.some((r) => r === "admin" || r === "super_admin");
+    if (!(founderGate && hasFounderDriverPermission(user)) && !(hasMultiRolePrivileges(user) && adminGate)) {
       return (
         <div className="min-h-screen flex items-center justify-center text-center px-6">
           <div>
