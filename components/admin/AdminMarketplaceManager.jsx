@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
-import { Store, ToggleLeft, ToggleRight, Plus, BarChart3 } from "lucide-react";
+import { Store, ToggleLeft, ToggleRight, Plus, BarChart3, ChevronDown, ChevronUp, Save } from "lucide-react";
 import { logClientError } from "@/lib/clientErrorLog";
 
 export default function AdminMarketplaceManager() {
@@ -12,6 +12,8 @@ export default function AdminMarketplaceManager() {
   const [analytics, setAnalytics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+  const [edits, setEdits] = useState({});
   const [form, setForm] = useState({ label: "", icon: "🏪", color: "#B6F127" });
 
   const load = useCallback(async () => {
@@ -44,6 +46,42 @@ export default function AdminMarketplaceManager() {
     } finally {
       setBusy(null);
     }
+  };
+
+  const openEdit = (cat) => {
+    setExpanded((cur) => (cur === cat.slug ? null : cat.slug));
+    setEdits((prev) => ({
+      ...prev,
+      [cat.slug]: prev[cat.slug] || {
+        icon: cat.icon,
+        color: cat.color,
+        visible: cat.visible !== false,
+        delivery_enabled: cat.delivery_enabled !== false,
+        pickup_enabled: cat.pickup_enabled !== false,
+      },
+    }));
+  };
+
+  const saveCategory = async (slug) => {
+    const patch = edits[slug];
+    if (!patch) return;
+    setBusy(`save-${slug}`);
+    try {
+      await api.patch(`/admin/marketplace/categories/${slug}`, patch);
+      await load();
+      setExpanded(null);
+    } catch (e) {
+      alert(e?.message || "Save failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const updateEdit = (slug, field, value) => {
+    setEdits((prev) => ({
+      ...prev,
+      [slug]: { ...(prev[slug] || {}), [field]: value },
+    }));
   };
 
   const createCategory = async (e) => {
@@ -137,6 +175,15 @@ export default function AdminMarketplaceManager() {
                     />
                     <button
                       type="button"
+                      className="btn-ghost text-sm inline-flex items-center gap-1"
+                      onClick={() => openEdit(cat)}
+                      data-testid={`edit-category-${cat.slug}`}
+                    >
+                      {expanded === cat.slug ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      Configure
+                    </button>
+                    <button
+                      type="button"
                       className="btn-ghost text-sm inline-flex items-center gap-2"
                       disabled={busy === cat.slug}
                       onClick={() => toggleEnabled(cat.slug, cat.enabled)}
@@ -146,6 +193,61 @@ export default function AdminMarketplaceManager() {
                       {cat.enabled ? "Enabled" : "Disabled"}
                     </button>
                   </div>
+                  {expanded === cat.slug && edits[cat.slug] && (
+                    <div className="w-full mt-3 pt-3 border-t grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3" style={{ borderColor: "var(--border)" }}>
+                      <label className="text-xs">
+                        <span style={{ color: "var(--muted)" }}>Icon</span>
+                        <input
+                          className="input-field mt-1"
+                          value={edits[cat.slug].icon}
+                          onChange={(e) => updateEdit(cat.slug, "icon", e.target.value)}
+                        />
+                      </label>
+                      <label className="text-xs">
+                        <span style={{ color: "var(--muted)" }}>Color</span>
+                        <input
+                          className="input-field mt-1"
+                          type="color"
+                          value={edits[cat.slug].color}
+                          onChange={(e) => updateEdit(cat.slug, "color", e.target.value)}
+                        />
+                      </label>
+                      <label className="text-xs flex items-center gap-2 mt-5">
+                        <input
+                          type="checkbox"
+                          checked={edits[cat.slug].visible}
+                          onChange={(e) => updateEdit(cat.slug, "visible", e.target.checked)}
+                        />
+                        Visible on home
+                      </label>
+                      <label className="text-xs flex items-center gap-2 mt-5">
+                        <input
+                          type="checkbox"
+                          checked={edits[cat.slug].delivery_enabled}
+                          onChange={(e) => updateEdit(cat.slug, "delivery_enabled", e.target.checked)}
+                        />
+                        Delivery available
+                      </label>
+                      <label className="text-xs flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={edits[cat.slug].pickup_enabled}
+                          onChange={(e) => updateEdit(cat.slug, "pickup_enabled", e.target.checked)}
+                        />
+                        Pickup available
+                      </label>
+                      <div className="md:col-span-2 lg:col-span-3 flex justify-end">
+                        <button
+                          type="button"
+                          className="btn-primary text-sm inline-flex items-center gap-2"
+                          disabled={busy === `save-${cat.slug}`}
+                          onClick={() => saveCategory(cat.slug)}
+                        >
+                          <Save size={14} /> Save settings
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

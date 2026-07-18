@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { safeGet } from "@/lib/api";
+import { safeGet, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { signInWithGoogle } from "@/lib/auth";
 import Header from "@/components/Header";
-import { Search, Star, Clock, Sparkles } from "lucide-react";
+import { Search, Star, Clock, Sparkles, Heart } from "lucide-react";
 import Chatbot from "@/components/Chatbot";
 import { LocalBusinessJsonLd } from "@/components/seo/StructuredData";
 import LocalPartnerSpotlight from "@/components/spotlight/LocalPartnerSpotlight";
@@ -25,6 +25,8 @@ export default function Landing() {
   const [restaurants, setRestaurants] = useState([]);
   const [marketCategories, setMarketCategories] = useState([]);
   const [searchProducts, setSearchProducts] = useState([]);
+  const [favoriteIds, setFavoriteIds] = useState(new Set());
+  const [favoriteBusy, setFavoriteBusy] = useState(null);
   const [q, setQ] = useState("");
   const [cuisine, setCuisine] = useState("");
   const [merchantCategory, setMerchantCategory] = useState("");
@@ -38,6 +40,42 @@ export default function Landing() {
       setMarketCategories(Array.isArray(data) ? data : []);
     }).catch(() => setMarketCategories([]));
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setFavoriteIds(new Set());
+      return;
+    }
+    safeGet("/marketplace/favorites", []).then((data) => {
+      const ids = new Set((Array.isArray(data) ? data : []).map((f) => f.restaurant_id).filter(Boolean));
+      setFavoriteIds(ids);
+    }).catch(() => setFavoriteIds(new Set()));
+  }, [user]);
+
+  const toggleFavorite = async (e, restaurantId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!user || !restaurantId || favoriteBusy) return;
+    setFavoriteBusy(restaurantId);
+    const isFav = favoriteIds.has(restaurantId);
+    try {
+      if (isFav) {
+        await api.delete(`/marketplace/favorites/${restaurantId}`);
+        setFavoriteIds((prev) => {
+          const next = new Set(prev);
+          next.delete(restaurantId);
+          return next;
+        });
+      } else {
+        await api.post("/marketplace/favorites", { restaurant_id: restaurantId });
+        setFavoriteIds((prev) => new Set(prev).add(restaurantId));
+      }
+    } catch (err) {
+      logClientError("landing.favorite", err);
+    } finally {
+      setFavoriteBusy(null);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -256,9 +294,26 @@ export default function Landing() {
               >
                 <Link
                   href={`/r/${r.restaurant_id}`}
-                  className="card card-hover block"
+                  className="card card-hover block relative"
                   data-testid={`restaurant-card-${r.restaurant_id}`}
                 >
+                  {user && (
+                    <button
+                      type="button"
+                      className="absolute top-3 right-3 z-10 p-2 rounded-full border backdrop-blur-sm"
+                      style={{ borderColor: "var(--border)", background: "rgba(0,0,0,0.45)" }}
+                      aria-label={favoriteIds.has(r.restaurant_id) ? "Remove favorite" : "Save favorite"}
+                      disabled={favoriteBusy === r.restaurant_id}
+                      onClick={(e) => toggleFavorite(e, r.restaurant_id)}
+                      data-testid={`favorite-${r.restaurant_id}`}
+                    >
+                      <Heart
+                        size={18}
+                        fill={favoriteIds.has(r.restaurant_id) ? "var(--primary)" : "none"}
+                        color={favoriteIds.has(r.restaurant_id) ? "var(--primary)" : "white"}
+                      />
+                    </button>
+                  )}
                   <div className="aspect-video overflow-hidden">
                     {r.image_url ? (
                       <img src={r.image_url} alt={r.name} className="w-full h-full object-cover" />
