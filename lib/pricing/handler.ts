@@ -18,34 +18,72 @@ function throwErr(message: string, status = 400): never {
   throw e;
 }
 
+type CartLineInput = { item_id: string; quantity: number; price?: number; name?: string };
+
+export type ResolvedCartLine = {
+  item_id: string;
+  name: string;
+  price: number;
+  quantity: number;
+};
+
+export async function resolveCartLineItems(
+  db: SupabaseClient,
+  restaurantId: string,
+  items: CartLineInput[]
+): Promise<{ subtotal: number; items: ResolvedCartLine[] }> {
+  if (!items.length) throwErr("items or subtotal required");
+  const ids = items.map((i) => i.item_id);
+  const { data: menuRows } = await db
+    .from("menu_items")
+    .select("item_id,name,price")
+    .in("item_id", ids)
+    .eq("restaurant_id", restaurantId)
+    .eq("available", true);
+  const menuById = Object.fromEntries((menuRows || []).map((m) => [m.item_id, m]));
+
+  const repriced = items.map((line) => {
+    const qty = Math.max(1, Math.min(Number(line.quantity), 99));
+    const menu = menuById[line.item_id];
+    const menuPrice = menu != null ? Number(menu.price) : NaN;
+    const cartPrice = Number(line.price);
+    const price =
+      Number.isFinite(menuPrice) && menuPrice > 0
+        ? menuPrice
+        : Number.isFinite(cartPrice) && cartPrice > 0
+          ? cartPrice
+          : NaN;
+    if (!Number.isFinite(price)) throwErr(`Unavailable item: ${line.item_id}`);
+    return {
+      item_id: line.item_id,
+      name: String(menu?.name || line.name || "Item"),
+      price: Math.round(price * 100) / 100,
+      quantity: qty,
+    };
+  });
+
+  const subtotal = Math.round(repriced.reduce((s, it) => s + it.price * it.quantity, 0) * 100) / 100;
+  return { subtotal, items: repriced };
+}
+
 async function buildQuoteInput(
   db: SupabaseClient,
   body: Record<string, unknown>,
   user?: Record<string, unknown>
-): Promise<PricingQuoteInput> {
+): Promise<{ input: PricingQuoteInput; repricedItems: ResolvedCartLine[] }> {
   const restaurantId = String(body.restaurant_id || "");
-  const items = (body.items as Array<{ item_id: string; quantity: number; price?: number }>) || [];
+  const items = (body.items as CartLineInput[]) || [];
   if (!restaurantId) throwErr("restaurant_id required");
 
   let subtotal = body.subtotal != null ? Number(body.subtotal) : NaN;
+  let repricedItems: ResolvedCartLine[] = [];
   if (!Number.isFinite(subtotal)) {
-    if (!items.length) throwErr("items or subtotal required");
-    const ids = items.map((i) => i.item_id);
-    const { data: menuRows } = await db
-      .from("menu_items")
-      .select("item_id,price")
-      .in("item_id", ids)
-      .eq("restaurant_id", restaurantId)
-      .eq("available", true);
-    const priceMap = Object.fromEntries((menuRows || []).map((m) => [m.item_id, Number(m.price)]));
-    subtotal = items.reduce((s, line) => {
-      const qty = Math.max(1, Math.min(Number(line.quantity), 99));
-      const menuPrice = priceMap[line.item_id];
-      if (menuPrice != null) return s + menuPrice * qty;
-      const cartPrice = Number(line.price);
-      if (Number.isFinite(cartPrice) && cartPrice > 0) return s + cartPrice * qty;
-      throwErr(`Unavailable item: ${line.item_id}`);
-    }, 0);
+    const resolved = await resolveCartLineItems(db, restaurantId, items);
+    subtotal = resolved.subtotal;
+    repricedItems = resolved.items;
+  } else if (items.length) {
+    const resolved = await resolveCartLineItems(db, restaurantId, items);
+    repricedItems = resolved.items;
   }
 
   const { data: rest } = await db
@@ -68,18 +106,21 @@ async function buildQuoteInput(
   }
 
   return {
-    subtotal: Math.round(subtotal * 100) / 100,
-    restaurantId,
-    customerId: user?.user_id ? String(user.user_id) : null,
-    customerLat,
-    customerLng,
-    restaurantLat: rest.latitude != null ? Number(rest.latitude) : null,
-    restaurantLng: rest.longitude != null ? Number(rest.longitude) : null,
-    tipAmount: body.tip_amount != null ? Number(body.tip_amount) : 0,
-    discountAmount: body.discount_amount != null ? Number(body.discount_amount) : 0,
-    promoCode: body.promo_code ? String(body.promo_code) : null,
-    weatherActive: Boolean(body.weather_active),
-    allowSubsidy: user?.role === "admin" || user?.role === "super_admin",
+    input: {
+      subtotal: Math.round(subtotal * 100) / 100,
+      restaurantId,
+      customerId: user?.user_id ? String(user.user_id) : null,
+      customerLat,
+      customerLng,
+      restaurantLat: rest.latitude != null ? Number(rest.latitude) : null,
+      restaurantLng: rest.longitude != null ? Number(rest.longitude) : null,
+      tipAmount: body.tip_amount != null ? Number(body.tip_amount) : 0,
+      discountAmount: body.discount_amount != null ? Number(body.discount_amount) : 0,
+      promoCode: body.promo_code ? String(body.promo_code) : null,
+      weatherActive: Boolean(body.weather_active),
+      allowSubsidy: user?.role === "admin" || user?.role === "super_admin",
+    },
+    repricedItems,
   };
 }
 
@@ -96,7 +137,7 @@ export async function handlePricingRequest(
     } catch {
       user = undefined;
     }
-    const input = await buildQuoteInput(db, body, user);
+    const { input, repricedItems } = await buildQuoteInput(db, body, user);
     const quote = await calculatePricingQuote(db, input);
     return {
       calculator: quote.delivery_calculator,
@@ -105,6 +146,7 @@ export async function handlePricingRequest(
       distance_miles: quote.distance_miles,
       surge_multiplier: quote.surge_multiplier,
       free_delivery: quote.free_delivery,
+      repriced_items: repricedItems,
     };
   }
 
@@ -147,9 +189,9 @@ export async function handlePricingRequest(
     } catch {
       user = undefined;
     }
-    const input = await buildQuoteInput(db, body, user);
+    const { input, repricedItems } = await buildQuoteInput(db, body, user);
     const quote = await calculatePricingQuote(db, input);
-    return quote;
+    return { ...quote, repriced_items: repricedItems };
   }
 
   return null;
