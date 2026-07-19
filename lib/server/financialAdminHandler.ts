@@ -1,10 +1,17 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getFinancialAnalytics } from "../financial/analytics";
 
 type AdminCtx = {
   path: string;
   method: string;
+  body: Record<string, unknown>;
+  params?: Record<string, string>;
   requireRole: (...roles: string[]) => Record<string, unknown>;
 };
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
 
 function sum(rows: Array<Record<string, unknown>>, key: string) {
   return rows.reduce((s, r) => s + Number(r[key] || 0), 0);
@@ -14,13 +21,21 @@ export async function handleFinancialAdminRequest(
   db: SupabaseClient,
   ctx: AdminCtx
 ): Promise<unknown | null> {
-  const { path, method } = ctx;
+  const { path, method, body, params } = ctx;
+
+  if (path === "/admin/financial/analytics" && method === "GET") {
+    ctx.requireRole("admin");
+    const days = Number(params?.days ?? body.days ?? 30);
+    return getFinancialAnalytics(db, days);
+  }
 
   if (path !== "/admin/revenue" || method !== "GET") {
     return null;
   }
 
   ctx.requireRole("admin");
+
+  const analytics = await getFinancialAnalytics(db, 30);
 
   const [
     { data: driverEarnings },
@@ -54,6 +69,9 @@ export async function handleFinancialAdminRequest(
     average_order_value: avgOrderValue,
     average_driver_pay: avgDriverPay,
     average_margin_pct: avgMargin,
+    gmv: analytics.summary.gmv,
+    promotion_costs: analytics.summary.promotion_costs,
+    refunds: analytics.summary.refunds,
     ledger_counts: {
       driver_earnings: (driverEarnings || []).length,
       restaurant_settlements: (settlements || []).length,
@@ -64,8 +82,4 @@ export async function handleFinancialAdminRequest(
     recent_settlements: (settlements || []).slice(0, 10),
     recent_platform_revenue: (platformRows || []).slice(0, 10),
   };
-}
-
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
 }
