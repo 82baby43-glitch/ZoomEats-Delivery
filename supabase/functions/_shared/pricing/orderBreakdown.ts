@@ -89,22 +89,49 @@ function combinedDeliveryFee(snapshot: SnapshotRow) {
   );
 }
 
+function itemsSubtotal(items: Array<{ line_total: number }>) {
+  return round2(items.reduce((s, i) => s + i.line_total, 0));
+}
+
+function resolveSubtotal(snapshot: SnapshotRow | null, items: Array<{ line_total: number }>) {
+  const fromItems = itemsSubtotal(items);
+  const snapshotSubtotal = snapshot?.subtotal != null ? Number(snapshot.subtotal) : NaN;
+  if (Number.isFinite(snapshotSubtotal) && snapshotSubtotal > 0) return round2(snapshotSubtotal);
+  return fromItems;
+}
+
+function resolveTotal(
+  snapshot: SnapshotRow | null,
+  order: OrderRow,
+  subtotal: number,
+  tax: number,
+  delivery: number,
+  service: number,
+  discount: number,
+  tip: number,
+  items: Array<{ line_total: number }>
+) {
+  const computed = round2(subtotal + tax + delivery + service - discount + tip);
+  const snapshotTotal = snapshot?.customer_total != null ? Number(snapshot.customer_total) : NaN;
+  if (Number.isFinite(snapshotTotal) && snapshotTotal > 0) return round2(snapshotTotal);
+  if (computed > 0) return computed;
+  const orderTotal = order.total != null ? Number(order.total) : NaN;
+  if (Number.isFinite(orderTotal) && orderTotal > 0) return round2(orderTotal);
+  return itemsSubtotal(items);
+}
+
 export function buildCustomerBreakdownFromSnapshot(
   order: OrderRow,
   snapshot: SnapshotRow | null
 ): CustomerOrderBreakdown {
   const items = parseItems(order);
-  const subtotal = round2(
-    snapshot?.subtotal != null ? Number(snapshot.subtotal) : items.reduce((s, i) => s + i.line_total, 0)
-  );
+  const subtotal = resolveSubtotal(snapshot, items);
   const tax = round2(Number(snapshot?.tax_amount ?? order.tax_amount ?? 0));
   const delivery = snapshot ? combinedDeliveryFee(snapshot) : round2(Number(order.delivery_fee ?? 0));
   const service = round2(Number(snapshot?.service_fee ?? order.service_fee ?? 0));
   const discount = round2(Number(snapshot?.discount_amount ?? order.discount_amount ?? 0));
   const tip = round2(Number(snapshot?.tip_amount ?? order.tip_amount ?? 0));
-  const total = round2(
-    Number(snapshot?.customer_total ?? order.total ?? subtotal + tax + delivery + service - discount + tip)
-  );
+  const total = resolveTotal(snapshot, order, subtotal, tax, delivery, service, discount, tip, items);
 
   const lines: BreakdownLine[] = [
     { label: "Items", amount: subtotal },

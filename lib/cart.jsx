@@ -59,7 +59,10 @@ export function CartProvider({ children }) {
 
   const clear = () => setCart({ restaurant: null, items: [] });
 
-  const subtotal = cart.items.reduce((s, x) => s + x.price * x.quantity, 0);
+  const subtotal = cart.items.reduce(
+    (s, x) => s + Number(x.price || 0) * Number(x.quantity || 1),
+    0
+  );
 
   const value = useMemo(
     () => ({ cart, addItem, updateQty, clear, subtotal }),

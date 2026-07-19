@@ -24,7 +24,7 @@ async function buildQuoteInput(
   user?: Record<string, unknown>
 ): Promise<PricingQuoteInput> {
   const restaurantId = String(body.restaurant_id || "");
-  const items = (body.items as Array<{ item_id: string; quantity: number }>) || [];
+  const items = (body.items as Array<{ item_id: string; quantity: number; price?: number }>) || [];
   if (!restaurantId) throwErr("restaurant_id required");
 
   let subtotal = body.subtotal != null ? Number(body.subtotal) : NaN;
@@ -39,9 +39,12 @@ async function buildQuoteInput(
       .eq("available", true);
     const priceMap = Object.fromEntries((menuRows || []).map((m) => [m.item_id, Number(m.price)]));
     subtotal = items.reduce((s, line) => {
-      const price = priceMap[line.item_id];
-      if (price == null) throwErr(`Unavailable item: ${line.item_id}`);
-      return s + price * Math.max(1, Math.min(Number(line.quantity), 99));
+      const qty = Math.max(1, Math.min(Number(line.quantity), 99));
+      const menuPrice = priceMap[line.item_id];
+      if (menuPrice != null) return s + menuPrice * qty;
+      const cartPrice = Number(line.price);
+      if (Number.isFinite(cartPrice) && cartPrice > 0) return s + cartPrice * qty;
+      throwErr(`Unavailable item: ${line.item_id}`);
     }, 0);
   }
 
@@ -138,8 +141,13 @@ export async function handlePricingRequest(
   }
 
   if (path === "/pricing/quote" && method === "POST") {
-    const u = ctx.requireAuth();
-    const input = await buildQuoteInput(db, body, u);
+    let user: Record<string, unknown> | undefined;
+    try {
+      user = ctx.requireAuth();
+    } catch {
+      user = undefined;
+    }
+    const input = await buildQuoteInput(db, body, user);
     const quote = await calculatePricingQuote(db, input);
     return quote;
   }

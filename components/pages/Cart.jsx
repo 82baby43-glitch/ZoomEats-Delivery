@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { supabase } from "@/lib/supabaseClient";
 import { logClientError } from "@/lib/clientErrorLog";
 import Header from "@/components/Header";
 import DeliveryFeeCalculator from "@/components/checkout/DeliveryFeeCalculator";
@@ -13,7 +14,7 @@ import { buildCustomerBreakdownFromQuote } from "@/lib/pricing/orderBreakdown";
 import { CustomerOrderBreakdown } from "@/components/pricing/OrderPricingBreakdown";
 
 export default function Cart() {
-  const { cart, updateQty, subtotal, clear } = useCart();
+  const { cart, updateQty, clear } = useCart();
   const { user } = useAuth();
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
@@ -29,6 +30,7 @@ export default function Cart() {
   const [loading, setLoading] = useState(false);
   const [checkoutPhase, setCheckoutPhase] = useState("");
   const [err, setErr] = useState("");
+  const [quoteErr, setQuoteErr] = useState("");
   const router = useRouter();
   const placingRef = useRef(false);
 
@@ -46,6 +48,7 @@ export default function Cart() {
       return;
     }
     setQuoteLoading(true);
+    setQuoteErr("");
     try {
       const res = await api.post("/pricing/quote", {
         restaurant_id: cart.restaurant.restaurant_id,
@@ -58,6 +61,7 @@ export default function Cart() {
       setPromoMsg("");
     } catch (e) {
       setQuote(null);
+      setQuoteErr(getApiErrorMessage(e, "Could not load delivery fee estimate."));
     } finally {
       setQuoteLoading(false);
     }
@@ -85,14 +89,23 @@ export default function Cart() {
     }
   };
 
+  const cartSubtotal = cart.items.reduce(
+    (s, it) => s + Number(it.price || 0) * Number(it.quantity || 1),
+    0
+  );
   const customerBreakdown =
     quote && cart.items.length > 0
       ? buildCustomerBreakdownFromQuote(
           quote,
-          cart.items.map((it) => ({ name: it.name, quantity: it.quantity, price: it.price }))
+          cart.items.map((it) => ({
+            name: it.name,
+            quantity: it.quantity,
+            price: Number(it.price || 0),
+          }))
         )
       : null;
-  const total = customerBreakdown?.total ?? quote?.customer?.customer_total ?? subtotal;
+  const quotedTotal = customerBreakdown?.total ?? quote?.customer?.customer_total;
+  const displayTotal = Math.max(Number(quotedTotal) || 0, cartSubtotal);
 
   const placeOrder = async () => {
     if (placingRef.current || loading) return;
@@ -113,8 +126,8 @@ export default function Cart() {
       setErr(quote.block_reason || "This order cannot be placed right now.");
       return;
     }
-    if (!quote && !quoteLoading) {
-      setErr("Could not calculate pricing. Check your address and try again.");
+    if (cartSubtotal <= 0) {
+      setErr("Your cart has no priced items. Remove and re-add items, then try again.");
       return;
     }
     if (quoteLoading) {
@@ -126,6 +139,10 @@ export default function Cart() {
     setLoading(true);
     setCheckoutPhase("creating_order");
     try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.refreshSession();
+      if (sessionError || !sessionData?.session) {
+        throw new Error("Please sign in again to complete checkout.");
+      }
       const orderRes = await api.post("/orders", {
         restaurant_id: cart.restaurant.restaurant_id,
         items: cart.items,
@@ -300,15 +317,18 @@ export default function Cart() {
                   <DeliveryFeeCalculator
                     quote={quote}
                     loading={quoteLoading}
-                    subtotalFallback={subtotal}
+                    subtotalFallback={cartSubtotal}
                   />
                 )}
               </div>
+              {quoteErr && !quoteLoading && (
+                <p className="text-xs" style={{ color: "var(--muted)" }}>{quoteErr}</p>
+              )}
               {err && <div className="text-sm" style={{ color: "var(--primary)" }}>{err}</div>}
               <button
                 className="btn-primary w-full inline-flex items-center justify-center gap-2"
                 onClick={placeOrder}
-                disabled={loading || quoteLoading || quote?.blocked}
+                disabled={loading || quote?.blocked || cartSubtotal <= 0}
                 data-testid="checkout-submit-button"
               >
                 {loading ? (
@@ -317,9 +337,12 @@ export default function Cart() {
                     {checkoutPhase === "starting_stripe" ? "Starting Stripe…" : "Creating order…"}
                   </>
                 ) : quoteLoading ? (
-                  "Calculating…"
+                  <>
+                    <Loader2 size={18} className="animate-spin" aria-hidden />
+                    Calculating…
+                  </>
                 ) : (
-                  `Pay $${total.toFixed(2)} with Stripe`
+                  `Pay $${displayTotal.toFixed(2)} with Stripe`
                 )}
               </button>
             </div>
