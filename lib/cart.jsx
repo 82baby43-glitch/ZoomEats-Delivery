@@ -72,19 +72,25 @@ export function CartProvider({ children }) {
 
   const syncItemPrices = useCallback((repricedItems) => {
     if (!Array.isArray(repricedItems) || repricedItems.length === 0) return;
-    setCart((c) => ({
-      ...c,
-      items: c.items.map((x) => {
+    const round2 = (n) => Math.round(Number(n) * 100) / 100;
+    setCart((c) => {
+      let changed = false;
+      const items = c.items.map((x) => {
         const match = repricedItems.find((row) => row.item_id === x.item_id);
         if (!match) return x;
-        const price = Number(match.price);
+        const nextPrice = round2(Number.isFinite(Number(match.price)) && Number(match.price) > 0 ? match.price : x.price);
+        const nextName = match.name || x.name;
+        if (round2(x.price) === nextPrice && x.name === nextName) return x;
+        changed = true;
         return {
           ...x,
-          name: match.name || x.name,
-          price: Number.isFinite(price) && price > 0 ? price : x.price,
+          name: nextName,
+          price: nextPrice,
         };
-      }),
-    }));
+      });
+      if (!changed) return c;
+      return { ...c, items };
+    });
   }, []);
 
   const subtotal = cart.items.reduce(
