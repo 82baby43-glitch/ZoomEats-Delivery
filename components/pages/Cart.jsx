@@ -12,9 +12,10 @@ import DeliveryFeeCalculator from "@/components/checkout/DeliveryFeeCalculator";
 import { Minus, Plus, Trash2, Loader2 } from "lucide-react";
 import { buildCustomerBreakdownFromQuote } from "@/lib/pricing/orderBreakdown";
 import { CustomerOrderBreakdown } from "@/components/pricing/OrderPricingBreakdown";
+import { formatMoney } from "@/lib/safeData";
 
 export default function Cart() {
-  const { cart, updateQty, clear } = useCart();
+  const { cart, updateQty, clear, syncItemPrices } = useCart();
   const { user } = useAuth();
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
@@ -58,6 +59,9 @@ export default function Cart() {
         promo_code: promoCode.trim() || undefined,
       });
       setQuote(res?.data || null);
+      if (res?.data?.repriced_items?.length) {
+        syncItemPrices(res.data.repriced_items);
+      }
       setPromoMsg("");
     } catch (e) {
       setQuote(null);
@@ -65,7 +69,7 @@ export default function Cart() {
     } finally {
       setQuoteLoading(false);
     }
-  }, [cart.restaurant, cart.items, address, tipAmount, promoCode]);
+  }, [cart.restaurant, cart.items, address, tipAmount, promoCode, syncItemPrices]);
 
   useEffect(() => {
     const timer = setTimeout(fetchQuote, 400);
@@ -93,16 +97,14 @@ export default function Cart() {
     (s, it) => s + Number(it.price || 0) * Number(it.quantity || 1),
     0
   );
+  const breakdownItems = (quote?.repriced_items?.length ? quote.repriced_items : cart.items).map((it) => ({
+    name: it.name,
+    quantity: it.quantity,
+    price: Number(it.price || 0),
+  }));
   const customerBreakdown =
-    quote && cart.items.length > 0
-      ? buildCustomerBreakdownFromQuote(
-          quote,
-          cart.items.map((it) => ({
-            name: it.name,
-            quantity: it.quantity,
-            price: Number(it.price || 0),
-          }))
-        )
+    quote && breakdownItems.length > 0
+      ? buildCustomerBreakdownFromQuote(quote, breakdownItems)
       : null;
   const quotedTotal = customerBreakdown?.total ?? quote?.customer?.customer_total;
   const displayTotal = Math.max(Number(quotedTotal) || 0, cartSubtotal);
@@ -206,7 +208,7 @@ export default function Cart() {
                   <img src={it.image_url} alt="" className="w-20 h-20 rounded-xl object-cover" />
                   <div className="flex-1">
                     <div className="font-bold">{it.name}</div>
-                    <div className="text-sm" style={{ color: "var(--muted)" }}>${it.price.toFixed(2)}</div>
+                    <div className="text-sm" style={{ color: "var(--muted)" }}>${formatMoney(it.price)}</div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button className="btn-ghost !p-2" onClick={() => updateQty(it.item_id, it.quantity - 1)} data-testid={`dec-${it.item_id}`}>
