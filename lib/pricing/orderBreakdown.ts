@@ -146,6 +146,39 @@ export function buildCustomerBreakdownFromSnapshot(
   return { items, subtotal, tax_amount: tax, delivery_fee: delivery, service_fee: service, discount_amount: discount, tip_amount: tip, total, lines };
 }
 
+function resolveQuoteLineItems(
+  items: Array<{ item_id?: string; name: string; quantity: number; price: number }>,
+  quote: {
+    customer?: { subtotal?: number };
+    repriced_items?: Array<{ item_id?: string; name: string; price: number; quantity: number }>;
+  }
+) {
+  const repriced = quote.repriced_items || [];
+  const byId = Object.fromEntries(repriced.filter((row) => row.item_id).map((row) => [row.item_id, row]));
+  const byName = Object.fromEntries(repriced.map((row) => [String(row.name).toLowerCase(), row]));
+
+  let resolved = items.map((it) => {
+    const cartPrice = Number(it.price);
+    const match = (it.item_id && byId[it.item_id]) || byName[String(it.name).toLowerCase()];
+    const price = cartPrice > 0 ? cartPrice : Number(match?.price || 0);
+    return {
+      name: it.name,
+      quantity: it.quantity,
+      price: round2(price),
+    };
+  });
+
+  const itemSubtotal = round2(resolved.reduce((sum, it) => sum + it.price * it.quantity, 0));
+  const quoteSubtotal = Number(quote.customer?.subtotal || 0);
+  if (itemSubtotal <= 0 && quoteSubtotal > 0) {
+    const totalQty = resolved.reduce((sum, it) => sum + it.quantity, 0) || 1;
+    const unitPrice = round2(quoteSubtotal / totalQty);
+    resolved = resolved.map((it) => ({ ...it, price: unitPrice }));
+  }
+
+  return resolved;
+}
+
 export function buildCustomerBreakdownFromQuote(
   quote: {
     customer?: {
@@ -161,14 +194,15 @@ export function buildCustomerBreakdownFromQuote(
       tip_amount?: number;
       customer_total?: number;
     };
+    repriced_items?: Array<{ item_id?: string; name: string; price: number; quantity: number }>;
   },
-  items: Array<{ name: string; quantity: number; price: number }>
+  items: Array<{ item_id?: string; name: string; quantity: number; price: number }>
 ): CustomerOrderBreakdown {
   const c = quote.customer || {};
-  const parsedItems = items.map((it) => ({
+  const parsedItems = resolveQuoteLineItems(items, quote).map((it) => ({
     name: it.name,
     quantity: it.quantity,
-    price: round2(it.price),
+    price: it.price,
   }));
   const snapshotLike: SnapshotRow = {
     subtotal: c.subtotal,
