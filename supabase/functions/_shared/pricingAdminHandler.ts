@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { calculatePricingQuote } from "./pricing/engine.ts";
+import { getPromotionBudgetStatus } from "./pricing/promotionBudget.ts";
+import { PRICING_RULES_DASHBOARD } from "./pricing/ruleFields.ts";
 
 type AdminCtx = {
   path: string;
@@ -20,6 +22,10 @@ const EDITABLE_RULE_TYPES = [
   "small_order_threshold",
   "distance_fee",
   "surge_limit",
+  "surge_multiplier_peak",
+  "surge_multiplier_max",
+  "surge_demand_cap",
+  "surge_traffic_floor",
   "weather_fee",
   "tax_rate",
   "stripe_fee_percent",
@@ -28,6 +34,8 @@ const EDITABLE_RULE_TYPES = [
   "large_order_bonus",
   "large_order_threshold",
   "guaranteed_pay",
+  "long_distance_bonus",
+  "long_distance_threshold",
   "min_platform_profit",
   "subsidy_enabled",
   "promotion_budget",
@@ -136,10 +144,24 @@ export async function handlePricingAdminRequest(
     return data || [];
   }
 
+  if (path === "/admin/pricing/rules/dashboard" && method === "GET") {
+    const { data: rules } = await db.from("pricing_rules").select("*").eq("active", true).order("rule_type");
+    const promotionBudget = await getPromotionBudgetStatus(db);
+    const active = (rules || []).reduce(
+      (acc, r) => {
+        if (!acc[r.rule_type]) acc[r.rule_type] = r;
+        return acc;
+      },
+      {} as Record<string, (typeof rules)[number]>
+    );
+    return { sections: PRICING_RULES_DASHBOARD, rules: active, promotion_budget: promotionBudget };
+  }
+
   if (path === "/admin/pricing/summary" && method === "GET") {
-    const [{ data: snapshots }, { data: rules }] = await Promise.all([
+    const [{ data: snapshots }, { data: rules }, promotionBudget] = await Promise.all([
       db.from("pricing_snapshots").select("customer_total,estimated_profit,driver_payout,restaurant_payout,pricing_version").order("created_at", { ascending: false }).limit(500),
       db.from("pricing_rules").select("*").eq("active", true).order("rule_type"),
+      getPromotionBudgetStatus(db),
     ]);
 
     const rows = snapshots || [];
@@ -153,6 +175,7 @@ export async function handlePricingAdminRequest(
       average_profit: avgProfit,
       active_rules: (rules || []).length,
       rules: rules || [],
+      promotion_budget: promotionBudget,
     };
   }
 

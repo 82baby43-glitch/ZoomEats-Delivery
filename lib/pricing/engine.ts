@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getTimeOfDayMultiplier } from "../dispatch/routing/traffic-ai";
 import { milesBetween, estimateDriveMinutes } from "./geo";
 import { computeSurgeMultiplier } from "./surge";
+import { capDiscountToPromotionBudget } from "./promotionBudget";
 import type { PricingQuote, PricingQuoteInput } from "./types";
 
 function round2(n: number) {
@@ -126,6 +127,13 @@ export async function calculatePricingQuote(
     tip_amount: Number(orderPricing.data.tip_amount ?? tipAmount),
     customer_total: Number(orderPricing.data.customer_total ?? 0),
   };
+
+  const rawDiscount = customer.discount_amount;
+  const cappedDiscount = await capDiscountToPromotionBudget(db, rawDiscount);
+  if (cappedDiscount !== rawDiscount) {
+    customer.discount_amount = cappedDiscount;
+    customer.customer_total = round2(customer.customer_total + (rawDiscount - cappedDiscount));
+  }
 
   const driverCalc = await rpcJson(db, "calculate_driver_pay", {
     p_distance_miles: ctx.distanceMiles,
