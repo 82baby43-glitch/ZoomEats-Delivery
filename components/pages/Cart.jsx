@@ -7,6 +7,8 @@ import { useAuth } from "@/lib/auth";
 import { api, getApiErrorMessage } from "@/lib/api";
 import Header from "@/components/Header";
 import { Minus, Plus, Trash2 } from "lucide-react";
+import { buildCustomerBreakdownFromQuote } from "@/lib/pricing/orderBreakdown";
+import { CustomerOrderBreakdown } from "@/components/pricing/OrderPricingBreakdown";
 
 function money(n) {
   return `$${Number(n || 0).toFixed(2)}`;
@@ -56,15 +58,14 @@ export default function Cart() {
     return () => clearTimeout(timer);
   }, [fetchQuote]);
 
-  const deliveryFeeDisplay =
-    quote?.customer
-      ? quote.customer.delivery_fee +
-        quote.customer.distance_fee +
-        quote.customer.surge_fee +
-        quote.customer.weather_fee +
-        quote.customer.small_order_fee
+  const customerBreakdown =
+    quote && cart.items.length > 0
+      ? buildCustomerBreakdownFromQuote(
+          quote,
+          cart.items.map((it) => ({ name: it.name, quantity: it.quantity, price: it.price }))
+        )
       : null;
-  const total = quote?.customer?.customer_total ?? subtotal;
+  const total = customerBreakdown?.total ?? quote?.customer?.customer_total ?? subtotal;
 
   const placeOrder = async () => {
     setErr("");
@@ -230,29 +231,13 @@ export default function Cart() {
                   data-testid="checkout-notes"
                 />
               </div>
-              <div className="border-t pt-4 space-y-2 text-sm" style={{ borderColor: "var(--border)" }}>
-                <div className="flex justify-between"><span>Items</span><span>{money(quote?.customer?.subtotal ?? subtotal)}</span></div>
-                {quote?.customer?.tax_amount > 0 && (
-                  <div className="flex justify-between"><span>Tax</span><span>{money(quote.customer.tax_amount)}</span></div>
-                )}
-                <div className="flex justify-between">
-                  <span>Delivery fee{quote?.surge_multiplier > 1 ? ` (${quote.surge_multiplier}x surge)` : ""}</span>
-                  <span>{quoteLoading ? "…" : money(deliveryFeeDisplay)}</span>
-                </div>
-                {quote?.customer?.service_fee > 0 && (
-                  <div className="flex justify-between"><span>Service fee</span><span>{money(quote.customer.service_fee)}</span></div>
-                )}
-                {quote?.customer?.discount_amount > 0 && (
-                  <div className="flex justify-between" style={{ color: "var(--primary)" }}>
-                    <span>Discount</span><span>-{money(quote.customer.discount_amount)}</span>
+              <div className="border-t pt-4" style={{ borderColor: "var(--border)" }}>
+                <CustomerOrderBreakdown breakdown={customerBreakdown} loading={quoteLoading} />
+                {!customerBreakdown && (
+                  <div className="flex justify-between font-display font-bold text-lg">
+                    <span>Total</span><span>{quoteLoading ? "…" : money(subtotal)}</span>
                   </div>
                 )}
-                {quote?.customer?.tip_amount > 0 && (
-                  <div className="flex justify-between"><span>Tip</span><span>{money(quote.customer.tip_amount)}</span></div>
-                )}
-                <div className="flex justify-between font-display font-bold text-lg pt-2 border-t" style={{ borderColor: "var(--border)" }}>
-                  <span>Total</span><span>{quoteLoading ? "…" : money(total)}</span>
-                </div>
               </div>
               {err && <div className="text-sm" style={{ color: "var(--primary)" }}>{err}</div>}
               <button

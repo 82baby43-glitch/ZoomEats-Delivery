@@ -12,6 +12,7 @@ import { formatMoney, safeNumber, safeOrderId, sanitizeOrder } from "@/lib/safeD
 import { PAYMENT_STATE_LABEL, resolvePaymentState } from "@/lib/orderState";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import CustomerDeliveryPin from "@/components/orders/CustomerDeliveryPin";
+import { CustomerOrderBreakdown } from "@/components/pricing/OrderPricingBreakdown";
 import DreamlandPostDeliveryFeedback from "@/components/dreamland/DreamlandPostDeliveryFeedback";
 import { logClientError } from "@/lib/clientErrorLog";
 
@@ -46,6 +47,7 @@ function fmtEta(iso) {
 export default function OrderDetail() {
   const { oid } = useParams();
   const [data, setData] = useState(null);
+  const [pricing, setPricing] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [pulse, setPulse] = useState(0);
@@ -53,13 +55,17 @@ export default function OrderDetail() {
   const load = useCallback(async () => {
     if (!oid) return;
     try {
-      const raw = await safeGet(`/orders/${oid}/tracking`, null);
+      const [raw, pricingRes] = await Promise.all([
+        safeGet(`/orders/${oid}/tracking`, null),
+        safeGet(`/orders/${oid}/pricing-breakdown`, null),
+      ]);
       if (raw && typeof raw === "object") {
         setData(raw);
         setError(false);
       } else {
         setError(true);
       }
+      setPricing(pricingRes?.customer ? pricingRes : null);
     } catch (e) {
       logClientError("order-detail", e, { oid });
       setError(true);
@@ -251,21 +257,27 @@ export default function OrderDetail() {
         </div>
 
         <div className="card p-6 mt-6">
-          <h3 className="font-display text-xl font-bold mb-4">Items</h3>
-          {(o.items || []).length === 0 ? (
-            <p className="text-sm" style={{ color: "var(--muted)" }}>No items listed.</p>
+          <h3 className="font-display text-xl font-bold mb-4">Order summary</h3>
+          {pricing?.customer ? (
+            <CustomerOrderBreakdown breakdown={pricing.customer} />
           ) : (
-            o.items.map((it) => (
-              <div key={it.item_id || it.name} className="flex justify-between py-2 border-b last:border-b-0" style={{ borderColor: "var(--border)" }}>
-                <span>{it.quantity}× {it.name}</span>
-                <span>${formatMoney(it.price * it.quantity)}</span>
+            <>
+              {(o.items || []).length === 0 ? (
+                <p className="text-sm" style={{ color: "var(--muted)" }}>No items listed.</p>
+              ) : (
+                o.items.map((it) => (
+                  <div key={it.item_id || it.name} className="flex justify-between py-2 border-b last:border-b-0" style={{ borderColor: "var(--border)" }}>
+                    <span>{it.quantity}× {it.name}</span>
+                    <span>${formatMoney(it.price * it.quantity)}</span>
+                  </div>
+                ))
+              )}
+              <div className="flex justify-between mt-4 font-display font-bold text-lg">
+                <span>Total</span>
+                <span>${formatMoney(o.total)}</span>
               </div>
-            ))
+            </>
           )}
-          <div className="flex justify-between mt-4 font-display font-bold text-lg">
-            <span>Total</span>
-            <span>${formatMoney(o.total)}</span>
-          </div>
         </div>
 
         {o.status === "delivered" && (

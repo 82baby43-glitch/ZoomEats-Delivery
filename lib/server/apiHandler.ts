@@ -57,6 +57,7 @@ import { handleLaunchAuditRequest } from "./launchAuditHandler";
 import { handleFinancialAdminRequest } from "./financialAdminHandler";
 import { handlePricingAdminRequest } from "./pricingAdminHandler";
 import { handlePricingRequest, quoteOrderForCheckout, persistPricingSnapshot } from "../pricing/handler";
+import { handleOrderPricingBreakdownRequest } from "../pricing/breakdownHandler";
 import { handleDriverEarningsRequest } from "../driverEarnings/handler";
 import { handleCompanionRequest } from "../companionMode/handler";
 import { recordOrderFinancials } from "../financial/engine";
@@ -283,6 +284,13 @@ export async function handleApiRequest(
       requireRole,
     });
     if (pricingResult !== null) return pricingResult;
+
+    const breakdownResult = await handleOrderPricingBreakdownRequest(db, {
+      path,
+      method,
+      requireAuth,
+    });
+    if (breakdownResult !== null) return breakdownResult;
 
     const driverEarningsResult = await handleDriverEarningsRequest(db, {
       path,
