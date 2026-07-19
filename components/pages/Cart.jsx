@@ -8,6 +8,8 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import Header from "@/components/Header";
 import DeliveryFeeCalculator from "@/components/checkout/DeliveryFeeCalculator";
 import { Minus, Plus, Trash2 } from "lucide-react";
+import { buildCustomerBreakdownFromQuote } from "@/lib/pricing/orderBreakdown";
+import { CustomerOrderBreakdown } from "@/components/pricing/OrderPricingBreakdown";
 
 export default function Cart() {
   const { cart, updateQty, subtotal, clear } = useCart();
@@ -72,7 +74,14 @@ export default function Cart() {
     }
   };
 
-  const total = quote?.customer?.customer_total ?? subtotal;
+  const customerBreakdown =
+    quote && cart.items.length > 0
+      ? buildCustomerBreakdownFromQuote(
+          quote,
+          cart.items.map((it) => ({ name: it.name, quantity: it.quantity, price: it.price }))
+        )
+      : null;
+  const total = customerBreakdown?.total ?? quote?.customer?.customer_total ?? subtotal;
 
   const placeOrder = async () => {
     setErr("");
@@ -243,11 +252,15 @@ export default function Cart() {
                 />
               </div>
               <div className="border-t pt-4" style={{ borderColor: "var(--border)" }}>
-                <DeliveryFeeCalculator
-                  quote={quote}
-                  loading={quoteLoading}
-                  subtotalFallback={subtotal}
-                />
+                {customerBreakdown ? (
+                  <CustomerOrderBreakdown breakdown={customerBreakdown} loading={quoteLoading} />
+                ) : (
+                  <DeliveryFeeCalculator
+                    quote={quote}
+                    loading={quoteLoading}
+                    subtotalFallback={subtotal}
+                  />
+                )}
               </div>
               {err && <div className="text-sm" style={{ color: "var(--primary)" }}>{err}</div>}
               <button

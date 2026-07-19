@@ -21,6 +21,7 @@ import VendorCommunityProfile from "@/components/vendor/VendorCommunityProfile";
 import MenuImageEnhancer from "@/components/vendor/MenuImageEnhancer";
 import { useAuth } from "@/lib/auth";
 import VendorSettlementsPanel from "@/components/vendor/VendorSettlementsPanel";
+import VendorOrderPricing from "@/components/vendor/VendorOrderPricing";
 
 const STATUS_NEXT = {
   placed: "accepted",
@@ -328,6 +329,7 @@ function VendorDashboardInner() {
                     Mark as {STATUS_NEXT[o.status]}
                   </button>
                 )}
+                {isPaymentConfirmed(o) && <VendorOrderPricing orderId={o.order_id} />}
                 </motion.div>
               ))}
             </AnimatePresence>
