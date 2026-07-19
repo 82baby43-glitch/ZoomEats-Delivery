@@ -87,4 +87,10 @@ export interface PricingQuote {
     meta?: string;
   }>;
   delivery_calculator?: Record<string, number | string | boolean | null>;
+  repriced_items?: Array<{
+    item_id: string;
+    name: string;
+    price: number;
+    quantity: number;
+  }>;
 }
