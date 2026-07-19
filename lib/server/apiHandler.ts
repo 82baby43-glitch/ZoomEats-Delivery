@@ -56,6 +56,7 @@ import { handleGeocodeAdminRequest } from "./geocodeAdmin";
 import { handleLaunchAuditRequest } from "./launchAuditHandler";
 import { handleFinancialAdminRequest } from "./financialAdminHandler";
 import { handlePricingAdminRequest } from "./pricingAdminHandler";
+import { handlePricingOptimizerRequest } from "../pricing/optimizerHandler";
 import { handlePricingRequest, quoteOrderForCheckout, persistPricingSnapshot } from "../pricing/handler";
 import { handleDriverEarningsRequest } from "../driverEarnings/handler";
 import { handleCompanionRequest } from "../companionMode/handler";
@@ -274,6 +275,16 @@ export async function handleApiRequest(
       requireRole,
     });
     if (pricingAdminResult !== null) return pricingAdminResult;
+
+    const optimizerResult = await handlePricingOptimizerRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireRole,
+      anthropicKey,
+    });
+    if (optimizerResult !== null) return optimizerResult;
 
     const pricingResult = await handlePricingRequest(db, {
       path,

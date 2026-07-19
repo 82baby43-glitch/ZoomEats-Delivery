@@ -68,6 +68,7 @@ import { handleGeocodeAdminRequest, geocodeOrderAddress } from "../_shared/geoco
 import { handleLaunchAuditRequest } from "../_shared/launchAuditHandler.ts";
 import { handleFinancialAdminRequest } from "../_shared/financialAdminHandler.ts";
 import { handlePricingAdminRequest } from "../_shared/pricingAdminHandler.ts";
+import { handlePricingOptimizerRequest } from "../_shared/pricing/optimizerHandler.ts";
 import { handlePricingRequest, quoteOrderForCheckout, persistPricingSnapshot } from "../_shared/pricing/handler.ts";
 import { handleDriverEarningsRequest } from "../_shared/driverEarnings/handler.ts";
 import { handleCompanionRequest } from "../_shared/companionMode/handler.ts";
@@ -295,6 +296,16 @@ Deno.serve(async (req) => {
       requireRole,
     });
     if (pricingAdminResult !== null) return json(pricingAdminResult);
+
+    const optimizerResult = await handlePricingOptimizerRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireRole,
+      anthropicKey,
+    });
+    if (optimizerResult !== null) return json(optimizerResult);
 
     const pricingResult = await handlePricingRequest(db, {
       path,

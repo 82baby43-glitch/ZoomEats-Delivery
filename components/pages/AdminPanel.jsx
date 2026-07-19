@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { Download, Truck, CreditCard, MapPin, Activity, DollarSign, Sparkles, Shield, Store, Calculator, BarChart3 } from "lucide-react";
+import { Download, Truck, CreditCard, MapPin, Activity, DollarSign, Sparkles, Shield, Store, Calculator, BarChart3, Brain } from "lucide-react";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import PulseHeader, { MetricsTiles } from "@/components/admin/PulseHeader";
@@ -188,6 +188,9 @@ export default function AdminPanel() {
           </Link>
           <Link href="/admin/pricing" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-pricing-link">
             <Calculator size={16} /> Pricing Engine
+          </Link>
+          <Link href="/admin/pricing-optimizer" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-pricing-optimizer-link">
+            <Brain size={16} /> AI Pricing Optimizer
           </Link>
           <Link href="/admin/spotlight" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-spotlight-link">
             <Sparkles size={16} /> Local Partner Spotlight
