@@ -43,13 +43,14 @@ export default function Cart() {
   }, []);
 
   const syncItemPricesRef = useRef(syncItemPrices);
-  syncItemPricesRef.current = syncItemPrices;
-
   const cartRef = useRef(cart);
-  cartRef.current = cart;
-
   const quoteRef = useRef(quote);
-  quoteRef.current = quote;
+
+  useEffect(() => {
+    syncItemPricesRef.current = syncItemPrices;
+    cartRef.current = cart;
+    quoteRef.current = quote;
+  }, [syncItemPrices, cart, quote]);
 
   const [quoteRefreshNonce, setQuoteRefreshNonce] = useState(0);
 
