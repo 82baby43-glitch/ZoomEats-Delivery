@@ -55,6 +55,8 @@ import { handleStripeAdminRequest } from "./stripeAdmin";
 import { handleGeocodeAdminRequest } from "./geocodeAdmin";
 import { handleLaunchAuditRequest } from "./launchAuditHandler";
 import { handleFinancialAdminRequest } from "./financialAdminHandler";
+import { handlePricingAdminRequest } from "./pricingAdminHandler";
+import { handlePricingRequest, quoteOrderForCheckout, persistPricingSnapshot } from "../pricing/handler";
 import { handleCompanionRequest } from "../companionMode/handler";
 import { recordOrderFinancials } from "../financial/engine";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "./restaurantAdminHandler";
@@ -263,6 +265,23 @@ export async function handleApiRequest(
 
     const financialResult = await handleFinancialAdminRequest(db, complianceCtx);
     if (financialResult !== null) return financialResult;
+
+    const pricingAdminResult = await handlePricingAdminRequest(db, {
+      path,
+      method,
+      body,
+      requireRole,
+    });
+    if (pricingAdminResult !== null) return pricingAdminResult;
+
+    const pricingResult = await handlePricingRequest(db, {
+      path,
+      method,
+      body,
+      requireAuth,
+      requireRole,
+    });
+    if (pricingResult !== null) return pricingResult;
 
     const companionResult = await handleCompanionRequest(db, {
       path,
@@ -531,14 +550,26 @@ export async function handleApiRequest(
         return { item_id: m.item_id, name: m.name, price: m.price, quantity: qty, image_url: m.image_url || "" };
       });
       const subtotal = Math.round(repriced.reduce((s, it) => s + it.price * it.quantity, 0) * 100) / 100;
-      const delivery_fee = 2.99;
-      const total = Math.round((subtotal + delivery_fee) * 100) / 100;
       const deliveryAddress = String(body.address || "").trim();
       const deliveryMethod = body.delivery_method === "leave_at_door" ? "leave_at_door" : "hand_to_me";
       const deliveryInstructions = String(body.delivery_instructions || body.notes || "").trim();
       const requireDeliveryPin = Boolean(body.require_delivery_pin);
       const allowPhotoConfirmation = body.allow_photo_confirmation !== false;
+      const tipAmount = body.tip_amount != null ? Math.max(0, Number(body.tip_amount)) : 0;
+      const promoCode = body.promo_code ? String(body.promo_code) : null;
       const geo = deliveryAddress ? await geocodeOrderAddress(deliveryAddress, u.name as string) : null;
+      const quote = await quoteOrderForCheckout(db, {
+        restaurantId: rest.restaurant_id,
+        subtotal,
+        customerLat: geo?.latitude ?? null,
+        customerLng: geo?.longitude ?? null,
+        restaurantLat: rest.latitude != null ? Number(rest.latitude) : null,
+        restaurantLng: rest.longitude != null ? Number(rest.longitude) : null,
+        tipAmount,
+        promoCode,
+      });
+      const delivery_fee = quote.customer.delivery_fee + quote.customer.distance_fee + quote.customer.surge_fee + quote.customer.weather_fee + quote.customer.small_order_fee;
+      const total = quote.customer.customer_total;
       const pinFields = await prepareOrderDeliveryFields({
         delivery_method: deliveryMethod,
         require_delivery_pin: requireDeliveryPin,
@@ -552,7 +583,13 @@ export async function handleApiRequest(
         restaurant_name: rest.name,
         items: repriced,
         subtotal,
-        delivery_fee,
+        delivery_fee: Math.round(delivery_fee * 100) / 100,
+        tax_amount: quote.customer.tax_amount,
+        service_fee: quote.customer.service_fee,
+        tip_amount: quote.customer.tip_amount,
+        discount_amount: quote.customer.discount_amount,
+        small_order_fee: quote.customer.small_order_fee,
+        pricing_version: quote.version,
         total,
         address: deliveryAddress,
         customer_lat: geo?.latitude ?? null,
@@ -570,6 +607,10 @@ export async function handleApiRequest(
       };
       const { data, error: insertError } = await db.from("orders").insert(order).select().single();
       if (insertError) throwErr(insertError.message, 500);
+      const snap = await persistPricingSnapshot(db, data.order_id, u.user_id as string, rest.restaurant_id, quote);
+      if (!snap.ok) {
+        console.warn("pricing_snapshot_failed", { orderId: data.order_id, error: snap.error });
+      }
       return data;
     }
     if (path === "/orders/my" && method === "GET") {

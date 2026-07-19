@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
 import { api, getApiErrorMessage } from "@/lib/api";
 import Header from "@/components/Header";
 import { Minus, Plus, Trash2 } from "lucide-react";
+
+function money(n) {
+  return `$${Number(n || 0).toFixed(2)}`;
+}
 
 export default function Cart() {
   const { cart, updateQty, subtotal, clear } = useCart();
@@ -17,11 +21,50 @@ export default function Cart() {
   const [deliveryInstructions, setDeliveryInstructions] = useState("");
   const [requirePin, setRequirePin] = useState(false);
   const [allowPhoto, setAllowPhoto] = useState(true);
+  const [tipAmount, setTipAmount] = useState("");
+  const [promoCode, setPromoCode] = useState("");
+  const [quote, setQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const router = useRouter();
-  const deliveryFee = 2.99;
-  const total = subtotal + deliveryFee;
+
+  const fetchQuote = useCallback(async () => {
+    if (!cart.restaurant || cart.items.length === 0) {
+      setQuote(null);
+      return;
+    }
+    setQuoteLoading(true);
+    try {
+      const res = await api.post("/pricing/quote", {
+        restaurant_id: cart.restaurant.restaurant_id,
+        items: cart.items,
+        address: address.trim() || undefined,
+        tip_amount: tipAmount ? Number(tipAmount) : 0,
+        promo_code: promoCode.trim() || undefined,
+      });
+      setQuote(res?.data || null);
+    } catch (e) {
+      setQuote(null);
+    } finally {
+      setQuoteLoading(false);
+    }
+  }, [cart.restaurant, cart.items, address, tipAmount, promoCode]);
+
+  useEffect(() => {
+    const timer = setTimeout(fetchQuote, 400);
+    return () => clearTimeout(timer);
+  }, [fetchQuote]);
+
+  const deliveryFeeDisplay =
+    quote?.customer
+      ? quote.customer.delivery_fee +
+        quote.customer.distance_fee +
+        quote.customer.surge_fee +
+        quote.customer.weather_fee +
+        quote.customer.small_order_fee
+      : null;
+  const total = quote?.customer?.customer_total ?? subtotal;
 
   const placeOrder = async () => {
     setErr("");
@@ -31,6 +74,7 @@ export default function Cart() {
     }
     if (!cart.restaurant || cart.items.length === 0) return;
     if (!address.trim()) { setErr("Please enter delivery address."); return; }
+    if (quote?.blocked) { setErr(quote.block_reason || "This order cannot be placed right now."); return; }
     setLoading(true);
     try {
       const orderRes = await api.post("/orders", {
@@ -42,6 +86,8 @@ export default function Cart() {
         delivery_instructions: deliveryInstructions,
         require_delivery_pin: deliveryMethod === "hand_to_me" && requirePin,
         allow_photo_confirmation: allowPhoto,
+        tip_amount: tipAmount ? Number(tipAmount) : 0,
+        promo_code: promoCode.trim() || undefined,
       });
       const order = orderRes?.data;
       if (!order?.order_id) throw new Error("Could not create order — please try again");
@@ -148,6 +194,31 @@ export default function Cart() {
                 <input type="checkbox" className="mt-1" checked={allowPhoto} onChange={(e) => setAllowPhoto(e.target.checked)} />
                 <span>Allow photo confirmation</span>
               </label>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label-eyebrow">Tip (optional)</label>
+                  <input
+                    className="input-field mt-2"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={tipAmount}
+                    onChange={(e) => setTipAmount(e.target.value)}
+                    placeholder="0.00"
+                    data-testid="checkout-tip"
+                  />
+                </div>
+                <div>
+                  <label className="label-eyebrow">Promo code</label>
+                  <input
+                    className="input-field mt-2"
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value)}
+                    placeholder="SAVE10"
+                    data-testid="checkout-promo"
+                  />
+                </div>
+              </div>
               <div>
                 <label className="label-eyebrow">Order notes (optional)</label>
                 <textarea
@@ -160,20 +231,37 @@ export default function Cart() {
                 />
               </div>
               <div className="border-t pt-4 space-y-2 text-sm" style={{ borderColor: "var(--border)" }}>
-                <div className="flex justify-between"><span>Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>Delivery</span><span>${deliveryFee.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Items</span><span>{money(quote?.customer?.subtotal ?? subtotal)}</span></div>
+                {quote?.customer?.tax_amount > 0 && (
+                  <div className="flex justify-between"><span>Tax</span><span>{money(quote.customer.tax_amount)}</span></div>
+                )}
+                <div className="flex justify-between">
+                  <span>Delivery fee{quote?.surge_multiplier > 1 ? ` (${quote.surge_multiplier}x surge)` : ""}</span>
+                  <span>{quoteLoading ? "…" : money(deliveryFeeDisplay)}</span>
+                </div>
+                {quote?.customer?.service_fee > 0 && (
+                  <div className="flex justify-between"><span>Service fee</span><span>{money(quote.customer.service_fee)}</span></div>
+                )}
+                {quote?.customer?.discount_amount > 0 && (
+                  <div className="flex justify-between" style={{ color: "var(--primary)" }}>
+                    <span>Discount</span><span>-{money(quote.customer.discount_amount)}</span>
+                  </div>
+                )}
+                {quote?.customer?.tip_amount > 0 && (
+                  <div className="flex justify-between"><span>Tip</span><span>{money(quote.customer.tip_amount)}</span></div>
+                )}
                 <div className="flex justify-between font-display font-bold text-lg pt-2 border-t" style={{ borderColor: "var(--border)" }}>
-                  <span>Total</span><span>${total.toFixed(2)}</span>
+                  <span>Total</span><span>{quoteLoading ? "…" : money(total)}</span>
                 </div>
               </div>
               {err && <div className="text-sm" style={{ color: "var(--primary)" }}>{err}</div>}
               <button
                 className="btn-primary w-full"
                 onClick={placeOrder}
-                disabled={loading}
+                disabled={loading || quoteLoading || quote?.blocked}
                 data-testid="checkout-submit-button"
               >
-                {loading ? "Redirecting…" : "Pay with Stripe"}
+                {loading ? "Redirecting…" : quoteLoading ? "Calculating…" : "Pay with Stripe"}
               </button>
             </div>
           </div>
