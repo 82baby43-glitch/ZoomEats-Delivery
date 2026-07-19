@@ -31,8 +31,12 @@ function prefersSupabaseEdge(path: string) {
   );
 }
 
-async function getAccessToken() {
+async function getAccessToken(opts: { refresh?: boolean } = {}) {
   try {
+    if (opts.refresh) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (refreshed?.session?.access_token) return refreshed.session.access_token;
+    }
     const { data } = await supabase.auth.getSession();
     return data?.session?.access_token ?? null;
   } catch {
@@ -103,7 +107,10 @@ async function invokeBackendApi(
   body?: unknown,
   params?: Record<string, string>
 ) {
-  const token = await getAccessToken();
+  const needsFreshAuth =
+    method !== "GET" &&
+    (path === "/orders" || path === "/checkout/session" || path === "/pricing/quote");
+  const token = await getAccessToken({ refresh: needsFreshAuth });
   const payload = JSON.stringify({ path, method, body, params });
 
   // Browser: prefer same-origin /api/backend so logistics + API ship with the Vercel deploy.
