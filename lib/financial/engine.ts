@@ -62,10 +62,29 @@ export async function recordOrderFinancials(
   }
 
   const subtotal = Number(order.subtotal ?? 0);
-  const deliveryFee = Number(order.delivery_fee ?? 0);
-  const total = Number(order.total ?? subtotal + deliveryFee);
   const tip = Number(order.tip ?? order.tip_amount ?? 0);
-  const serviceFee = Math.max(0, round2(total - subtotal - deliveryFee - tip));
+
+  const { data: snapshot } = await db
+    .from("pricing_snapshots")
+    .select("*")
+    .eq("order_id", orderId)
+    .maybeSingle();
+
+  let deliveryFee = Number(order.delivery_fee ?? 0);
+  let serviceFee = Number(order.service_fee ?? 0);
+  let total = Number(order.total ?? subtotal + deliveryFee);
+
+  if (snapshot) {
+    deliveryFee = Number(snapshot.delivery_fee ?? deliveryFee) +
+      Number(snapshot.distance_fee ?? 0) +
+      Number(snapshot.surge_fee ?? 0) +
+      Number(snapshot.weather_fee ?? 0) +
+      Number(snapshot.small_order_fee ?? 0);
+    serviceFee = Number(snapshot.service_fee ?? serviceFee);
+    total = Number(snapshot.customer_total ?? total);
+  } else {
+    serviceFee = Math.max(0, round2(total - subtotal - deliveryFee - tip));
+  }
 
   let distanceMiles = 3;
   if (order.customer_lat && order.customer_lng && order.restaurant_id) {
@@ -94,7 +113,7 @@ export async function recordOrderFinancials(
       p_weather_active: false,
       p_peak_active: false,
       p_bonus_pay: 0,
-    })) || {
+    })) || (snapshot?.rule_snapshot?.driver as Record<string, number>) || {
       base_pay: 5,
       mileage_pay: round2(distanceMiles * 0.75),
       time_pay: 2,
@@ -115,7 +134,8 @@ export async function recordOrderFinancials(
       p_refund_adjustment: 0,
       p_chargeback_adjustment: 0,
       p_include_stripe_fee: false,
-    })) || {
+      p_commission_percent: snapshot?.rule_snapshot?.restaurant?.commission_percent ?? null,
+    })) || (snapshot?.rule_snapshot?.restaurant as Record<string, number>) || {
       gross_sales: subtotal,
       commission_amount: round2(subtotal * 0.2),
       promotion_adjustment: 0,
