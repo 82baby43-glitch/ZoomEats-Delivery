@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getTimeOfDayMultiplier } from "../dispatch/routing/traffic-ai";
 import { milesBetween, estimateDriveMinutes } from "./geo";
 import { computeSurgeMultiplier } from "./surge";
+import { deliveryStackTotal, formatCustomerPricingLines, summarizeDeliveryCalculator } from "./customer.ts";
 import type { PricingQuote, PricingQuoteInput } from "./types";
 
 function round2(n: number) {
@@ -127,6 +128,19 @@ export async function calculatePricingQuote(
     customer_total: Number(orderPricing.data.customer_total ?? 0),
   };
 
+  const freeDelivery = await applyFreeDeliveryBenefits(db, input, customer);
+  if (freeDelivery.applied) {
+    customer.discount_amount = round2(customer.discount_amount + freeDelivery.discountAdded);
+    customer.customer_total = round2(
+      customer.subtotal +
+        customer.tax_amount +
+        deliveryStackTotal(customer) +
+        customer.service_fee -
+        customer.discount_amount +
+        customer.tip_amount
+    );
+  }
+
   const driverCalc = await rpcJson(db, "calculate_driver_pay", {
     p_distance_miles: ctx.distanceMiles,
     p_duration_minutes: ctx.driveMinutes,
@@ -245,7 +259,101 @@ export async function calculatePricingQuote(
     subsidy_allowed: subsidyAllowed,
     blocked,
     block_reason: blockReason,
+    free_delivery: {
+      eligible: freeDelivery.eligible,
+      reason: freeDelivery.reason,
+    },
+    customer_lines: formatCustomerPricingLines(
+      {
+        version,
+        distance_miles: ctx.distanceMiles,
+        estimated_drive_minutes: ctx.driveMinutes,
+        surge_multiplier: ctx.surgeMultiplier,
+        peak_active: ctx.peakActive,
+        customer,
+        driver,
+        restaurant,
+        platform,
+        profit_protected: profitProtected,
+        subsidy_allowed: subsidyAllowed,
+        blocked,
+        block_reason: blockReason,
+        free_delivery: { eligible: freeDelivery.eligible, reason: freeDelivery.reason },
+      },
+      { promoCode: input.promoCode, freeDeliveryApplied: freeDelivery.applied }
+    ),
+    delivery_calculator: summarizeDeliveryCalculator({
+      version,
+      distance_miles: ctx.distanceMiles,
+      estimated_drive_minutes: ctx.driveMinutes,
+      surge_multiplier: ctx.surgeMultiplier,
+      peak_active: ctx.peakActive,
+      customer,
+      driver,
+      restaurant,
+      platform,
+      profit_protected: profitProtected,
+      subsidy_allowed: subsidyAllowed,
+      blocked,
+      block_reason: blockReason,
+      free_delivery: { eligible: freeDelivery.eligible, reason: freeDelivery.reason },
+    }),
   };
+}
+
+async function applyFreeDeliveryBenefits(
+  db: SupabaseClient,
+  input: PricingQuoteInput,
+  customer: PricingQuote["customer"]
+): Promise<{ eligible: boolean; applied: boolean; reason: string | null; discountAdded: number }> {
+  const stack = deliveryStackTotal(customer);
+  if (stack <= 0) {
+    return { eligible: false, applied: false, reason: null, discountAdded: 0 };
+  }
+
+  if (input.customerId) {
+    const { data: membership } = await db
+      .from("customer_memberships")
+      .select("plan,status,expiration_date")
+      .eq("customer_id", input.customerId)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (membership && ["plus", "unlimited"].includes(String(membership.plan))) {
+      const expired = membership.expiration_date && new Date(String(membership.expiration_date)) < new Date();
+      if (!expired) {
+        const remaining = round2(Math.max(0, stack - customer.discount_amount));
+        return {
+          eligible: true,
+          applied: remaining > 0,
+          reason: `${membership.plan} membership`,
+          discountAdded: remaining,
+        };
+      }
+    }
+  }
+
+  if (input.promoCode) {
+    const { data: promo } = await db
+      .from("promotions")
+      .select("*")
+      .ilike("code", String(input.promoCode).trim())
+      .eq("active", true)
+      .maybeSingle();
+
+    if (promo?.discount_type === "free_delivery") {
+      const alreadyDiscounted = customer.discount_amount;
+      const fullFree = round2(Math.max(0, stack - Math.min(alreadyDiscounted, stack)));
+      return {
+        eligible: true,
+        applied: fullFree > 0,
+        reason: `Promo ${promo.code}`,
+        discountAdded: fullFree,
+      };
+    }
+  }
+
+  return { eligible: false, applied: false, reason: null, discountAdded: 0 };
 }
 
 async function applyProfitProtection(

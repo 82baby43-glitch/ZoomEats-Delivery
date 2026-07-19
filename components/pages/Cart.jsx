@@ -6,11 +6,8 @@ import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
 import { api, getApiErrorMessage } from "@/lib/api";
 import Header from "@/components/Header";
+import DeliveryFeeCalculator from "@/components/checkout/DeliveryFeeCalculator";
 import { Minus, Plus, Trash2 } from "lucide-react";
-
-function money(n) {
-  return `$${Number(n || 0).toFixed(2)}`;
-}
 
 export default function Cart() {
   const { cart, updateQty, subtotal, clear } = useCart();
@@ -23,6 +20,7 @@ export default function Cart() {
   const [allowPhoto, setAllowPhoto] = useState(true);
   const [tipAmount, setTipAmount] = useState("");
   const [promoCode, setPromoCode] = useState("");
+  const [promoMsg, setPromoMsg] = useState("");
   const [quote, setQuote] = useState(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -44,6 +42,7 @@ export default function Cart() {
         promo_code: promoCode.trim() || undefined,
       });
       setQuote(res?.data || null);
+      setPromoMsg("");
     } catch (e) {
       setQuote(null);
     } finally {
@@ -56,14 +55,23 @@ export default function Cart() {
     return () => clearTimeout(timer);
   }, [fetchQuote]);
 
-  const deliveryFeeDisplay =
-    quote?.customer
-      ? quote.customer.delivery_fee +
-        quote.customer.distance_fee +
-        quote.customer.surge_fee +
-        quote.customer.weather_fee +
-        quote.customer.small_order_fee
-      : null;
+  const validatePromo = async () => {
+    const code = promoCode.trim();
+    if (!code) return;
+    try {
+      const res = await api.get("/pricing/promotions/validate", { params: { code } });
+      const data = res?.data;
+      if (data?.valid) {
+        setPromoMsg(data.description || "Promo applied");
+        fetchQuote();
+      } else {
+        setPromoMsg(data?.message || "Invalid promo");
+      }
+    } catch (e) {
+      setPromoMsg("Could not validate promo");
+    }
+  };
+
   const total = quote?.customer?.customer_total ?? subtotal;
 
   const placeOrder = async () => {
@@ -194,30 +202,34 @@ export default function Cart() {
                 <input type="checkbox" className="mt-1" checked={allowPhoto} onChange={(e) => setAllowPhoto(e.target.checked)} />
                 <span>Allow photo confirmation</span>
               </label>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label-eyebrow">Tip (optional)</label>
-                  <input
-                    className="input-field mt-2"
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    value={tipAmount}
-                    onChange={(e) => setTipAmount(e.target.value)}
-                    placeholder="0.00"
-                    data-testid="checkout-tip"
-                  />
-                </div>
+              <div className="grid grid-cols-[1fr_auto] gap-2">
                 <div>
                   <label className="label-eyebrow">Promo code</label>
                   <input
                     className="input-field mt-2"
                     value={promoCode}
-                    onChange={(e) => setPromoCode(e.target.value)}
-                    placeholder="SAVE10"
+                    onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                    placeholder="FREEDELIVERY"
                     data-testid="checkout-promo"
                   />
                 </div>
+                <div className="flex items-end">
+                  <button type="button" className="btn-secondary text-sm" onClick={validatePromo}>Apply</button>
+                </div>
+              </div>
+              {promoMsg && <p className="text-xs" style={{ color: "var(--primary)" }}>{promoMsg}</p>}
+              <div>
+                <label className="label-eyebrow">Tip (optional)</label>
+                <input
+                  className="input-field mt-2"
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={tipAmount}
+                  onChange={(e) => setTipAmount(e.target.value)}
+                  placeholder="0.00"
+                  data-testid="checkout-tip"
+                />
               </div>
               <div>
                 <label className="label-eyebrow">Order notes (optional)</label>
@@ -230,29 +242,12 @@ export default function Cart() {
                   data-testid="checkout-notes"
                 />
               </div>
-              <div className="border-t pt-4 space-y-2 text-sm" style={{ borderColor: "var(--border)" }}>
-                <div className="flex justify-between"><span>Items</span><span>{money(quote?.customer?.subtotal ?? subtotal)}</span></div>
-                {quote?.customer?.tax_amount > 0 && (
-                  <div className="flex justify-between"><span>Tax</span><span>{money(quote.customer.tax_amount)}</span></div>
-                )}
-                <div className="flex justify-between">
-                  <span>Delivery fee{quote?.surge_multiplier > 1 ? ` (${quote.surge_multiplier}x surge)` : ""}</span>
-                  <span>{quoteLoading ? "…" : money(deliveryFeeDisplay)}</span>
-                </div>
-                {quote?.customer?.service_fee > 0 && (
-                  <div className="flex justify-between"><span>Service fee</span><span>{money(quote.customer.service_fee)}</span></div>
-                )}
-                {quote?.customer?.discount_amount > 0 && (
-                  <div className="flex justify-between" style={{ color: "var(--primary)" }}>
-                    <span>Discount</span><span>-{money(quote.customer.discount_amount)}</span>
-                  </div>
-                )}
-                {quote?.customer?.tip_amount > 0 && (
-                  <div className="flex justify-between"><span>Tip</span><span>{money(quote.customer.tip_amount)}</span></div>
-                )}
-                <div className="flex justify-between font-display font-bold text-lg pt-2 border-t" style={{ borderColor: "var(--border)" }}>
-                  <span>Total</span><span>{quoteLoading ? "…" : money(total)}</span>
-                </div>
+              <div className="border-t pt-4" style={{ borderColor: "var(--border)" }}>
+                <DeliveryFeeCalculator
+                  quote={quote}
+                  loading={quoteLoading}
+                  subtotalFallback={subtotal}
+                />
               </div>
               {err && <div className="text-sm" style={{ color: "var(--primary)" }}>{err}</div>}
               <button
@@ -261,7 +256,7 @@ export default function Cart() {
                 disabled={loading || quoteLoading || quote?.blocked}
                 data-testid="checkout-submit-button"
               >
-                {loading ? "Redirecting…" : quoteLoading ? "Calculating…" : "Pay with Stripe"}
+                {loading ? "Redirecting…" : quoteLoading ? "Calculating…" : `Pay $${total.toFixed(2)} with Stripe`}
               </button>
             </div>
           </div>
