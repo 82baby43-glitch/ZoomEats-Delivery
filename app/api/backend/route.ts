@@ -6,6 +6,12 @@ import { handleApiRequest } from "@/lib/server/apiHandler";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+function needsSupabaseEdge(path: string) {
+  if (path.startsWith("/admin/uber-direct")) return true;
+  if (path === "/checkout/session" || path.startsWith("/checkout/status/")) return true;
+  return false;
+}
+
 async function proxyToSupabaseEdge(req: NextRequest, payload: unknown) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -49,7 +55,7 @@ export async function POST(req: NextRequest) {
     const hasServiceRole = Boolean(
       process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
     );
-    if (!hasServiceRole || path.startsWith("/admin/uber-direct")) {
+    if (!hasServiceRole || needsSupabaseEdge(path)) {
       return proxyToSupabaseEdge(req, payload);
     }
 

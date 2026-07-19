@@ -22,12 +22,14 @@ function isCacheableGet(path: string) {
   return path.startsWith("/checkout/status/") || path === "/orders/my";
 }
 
-/** Launch audit and Stripe admin read secrets from Supabase edge — not Vercel env. */
+/** Stripe checkout + payment paths run on Supabase edge where Stripe secrets live. */
 function prefersSupabaseEdge(path: string) {
   return (
     path.startsWith("/admin/launch-audit") ||
     path.startsWith("/admin/system-health") ||
-    path.startsWith("/admin/stripe")
+    path.startsWith("/admin/stripe") ||
+    path === "/checkout/session" ||
+    path.startsWith("/checkout/status/")
   );
 }
 

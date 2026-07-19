@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fulfillPaidOrder } from "./fulfillPaidOrder";
 import { isEventProcessed, markEventProcessed } from "./stripeIdempotency";
 
 export type StripeEvent = {
@@ -52,42 +53,21 @@ async function resolveOrderId(
 
 async function markOrderPaid(
   db: SupabaseClient,
-  opts: { orderId: string; sessionId?: string | null; paymentIntentId?: string | null }
-) {
-  const { data: existing } = await db
-    .from("orders")
-    .select("order_id, payment_status")
-    .eq("order_id", opts.orderId)
-    .maybeSingle();
-
-  if (!existing || existing.payment_status === "paid") return;
-
-  const now = new Date().toISOString();
-  const patch: Record<string, unknown> = {
-    payment_status: "paid",
-    updated_at: now,
-  };
-
-  const sessionId = safeStr(opts.sessionId);
-  const paymentIntentId = safeStr(opts.paymentIntentId);
-  if (sessionId) patch.stripe_session_id = sessionId;
-  if (paymentIntentId) patch.stripe_payment_intent_id = paymentIntentId;
-
-  const { error: updateError } = await db
-    .from("orders")
-    .update(patch)
-    .eq("order_id", opts.orderId)
-    .neq("payment_status", "paid");
-
-  if (updateError) return;
-
-  if (sessionId) {
-    await db
-      .from("payment_transactions")
-      .update({ payment_status: "paid", status: "complete" })
-      .eq("session_id", sessionId)
-      .neq("payment_status", "paid");
+  opts: {
+    orderId: string;
+    sessionId?: string | null;
+    paymentIntentId?: string | null;
+    amountPaid?: number | null;
+    currency?: string | null;
   }
+) {
+  await fulfillPaidOrder(db, {
+    orderId: opts.orderId,
+    sessionId: opts.sessionId,
+    paymentIntentId: opts.paymentIntentId,
+    amountPaid: opts.amountPaid,
+    currency: opts.currency,
+  });
 }
 
 async function markOrderFailed(db: SupabaseClient, orderId: string) {
@@ -144,11 +124,19 @@ export async function handleStripeWebhook(db: SupabaseClient, event: StripeEvent
       orderId,
       sessionId: safeStr(obj.id),
       paymentIntentId: safeStr(obj.payment_intent),
+      amountPaid: typeof obj.amount_total === "number" ? obj.amount_total / 100 : null,
+      currency: safeStr(obj.currency),
     });
   } else if (event.type === "payment_intent.succeeded") {
     orderId = await resolveOrderId(db, { orderId: meta.order_id, sessionId: meta.session_id, metadata: meta });
     if (!orderId) return;
-    await markOrderPaid(db, { orderId, sessionId: meta.session_id ?? null, paymentIntentId: safeStr(obj.id) });
+    await markOrderPaid(db, {
+      orderId,
+      sessionId: meta.session_id ?? null,
+      paymentIntentId: safeStr(obj.id),
+      amountPaid: typeof obj.amount === "number" ? obj.amount / 100 : null,
+      currency: safeStr(obj.currency),
+    });
   } else if (event.type === "payment_intent.payment_failed") {
     orderId = await resolveOrderId(db, { orderId: meta.order_id, sessionId: meta.session_id, metadata: meta });
     if (!orderId) return;

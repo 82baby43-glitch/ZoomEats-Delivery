@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { logClientError } from "@/lib/clientErrorLog";
 import Header from "@/components/Header";
 import DeliveryFeeCalculator from "@/components/checkout/DeliveryFeeCalculator";
-import { Minus, Plus, Trash2 } from "lucide-react";
+import { Minus, Plus, Trash2, Loader2 } from "lucide-react";
 import { buildCustomerBreakdownFromQuote } from "@/lib/pricing/orderBreakdown";
 import { CustomerOrderBreakdown } from "@/components/pricing/OrderPricingBreakdown";
 
@@ -26,8 +27,18 @@ export default function Cart() {
   const [quote, setQuote] = useState(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checkoutPhase, setCheckoutPhase] = useState("");
   const [err, setErr] = useState("");
   const router = useRouter();
+  const placingRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("payment") === "cancelled") {
+      setErr("Payment was cancelled. Your cart is still here — tap Pay when you're ready to try again.");
+    }
+  }, []);
 
   const fetchQuote = useCallback(async () => {
     if (!cart.restaurant || cart.items.length === 0) {
@@ -84,15 +95,32 @@ export default function Cart() {
   const total = customerBreakdown?.total ?? quote?.customer?.customer_total ?? subtotal;
 
   const placeOrder = async () => {
+    if (placingRef.current || loading) return;
     setErr("");
     if (!user) {
       router.push("/");
       return;
     }
-    if (!cart.restaurant || cart.items.length === 0) return;
-    if (!address.trim()) { setErr("Please enter delivery address."); return; }
-    if (quote?.blocked) { setErr(quote.block_reason || "This order cannot be placed right now."); return; }
+    if (!cart.restaurant || cart.items.length === 0) {
+      setErr("Your cart is empty.");
+      return;
+    }
+    if (!address.trim()) {
+      setErr("Please enter delivery address.");
+      return;
+    }
+    if (quote?.blocked) {
+      setErr(quote.block_reason || "This order cannot be placed right now.");
+      return;
+    }
+    if (quoteLoading) {
+      setErr("Please wait while we calculate your total.");
+      return;
+    }
+
+    placingRef.current = true;
     setLoading(true);
+    setCheckoutPhase("creating_order");
     try {
       const orderRes = await api.post("/orders", {
         restaurant_id: cart.restaurant.restaurant_id,
@@ -108,16 +136,26 @@ export default function Cart() {
       });
       const order = orderRes?.data;
       if (!order?.order_id) throw new Error("Could not create order — please try again");
+
+      setCheckoutPhase("starting_stripe");
       const checkout = await api.post("/checkout/session", {
         order_id: order.order_id,
         origin_url: typeof window !== "undefined" ? window.location.origin : "",
       });
-      if (!checkout?.data?.url) throw new Error("Could not start checkout");
+      if (!checkout?.data?.url) throw new Error("Could not start Stripe checkout — please try again");
+
       clear();
       if (typeof window !== "undefined") window.location.href = checkout.data.url;
     } catch (e) {
-      setErr(getApiErrorMessage(e, "Could not place order"));
+      logClientError("checkout.placeOrder", e, {
+        restaurantId: cart.restaurant?.restaurant_id,
+        itemCount: cart.items.length,
+        phase: checkoutPhase,
+      });
+      setErr(getApiErrorMessage(e, "Could not place order. Please try again."));
       setLoading(false);
+      setCheckoutPhase("");
+      placingRef.current = false;
     }
   };
 
@@ -264,12 +302,21 @@ export default function Cart() {
               </div>
               {err && <div className="text-sm" style={{ color: "var(--primary)" }}>{err}</div>}
               <button
-                className="btn-primary w-full"
+                className="btn-primary w-full inline-flex items-center justify-center gap-2"
                 onClick={placeOrder}
                 disabled={loading || quoteLoading || quote?.blocked}
                 data-testid="checkout-submit-button"
               >
-                {loading ? "Redirecting…" : quoteLoading ? "Calculating…" : `Pay $${total.toFixed(2)} with Stripe`}
+                {loading ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" aria-hidden />
+                    {checkoutPhase === "starting_stripe" ? "Starting Stripe…" : "Creating order…"}
+                  </>
+                ) : quoteLoading ? (
+                  "Calculating…"
+                ) : (
+                  `Pay $${total.toFixed(2)} with Stripe`
+                )}
               </button>
             </div>
           </div>
