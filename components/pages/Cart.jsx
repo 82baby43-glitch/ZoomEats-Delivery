@@ -69,7 +69,7 @@ export default function Cart() {
     } finally {
       setQuoteLoading(false);
     }
-  }, [cart.restaurant, cart.items, address, tipAmount, promoCode, syncItemPrices]);
+  }, [cart.restaurant, cart.items, address, tipAmount, promoCode, syncItemPrices, user]);
 
   useEffect(() => {
     const timer = setTimeout(fetchQuote, 400);
@@ -153,7 +153,7 @@ export default function Cart() {
       setErr(quote.block_reason || "This order cannot be placed right now.");
       return;
     }
-    if (cartSubtotal <= 0) {
+    if (resolvedCartSubtotal <= 0 && cartSubtotal <= 0) {
       setErr("Your cart has no priced items. Remove and re-add items, then try again.");
       return;
     }
@@ -351,11 +351,16 @@ export default function Cart() {
               {quoteErr && !quoteLoading && (
                 <p className="text-xs" style={{ color: "var(--muted)" }}>{quoteErr}</p>
               )}
+              {quote?.blocked && (
+                <div className="text-sm" style={{ color: "var(--primary)" }}>
+                  {quote.block_reason || "This order cannot be placed right now."}
+                </div>
+              )}
               {err && <div className="text-sm" style={{ color: "var(--primary)" }}>{err}</div>}
               <button
                 className="btn-primary w-full inline-flex items-center justify-center gap-2"
                 onClick={placeOrder}
-                disabled={loading || quote?.blocked || cartSubtotal <= 0}
+                disabled={loading || quote?.blocked || (resolvedCartSubtotal <= 0 && cartSubtotal <= 0)}
                 data-testid="checkout-submit-button"
               >
                 {loading ? (
