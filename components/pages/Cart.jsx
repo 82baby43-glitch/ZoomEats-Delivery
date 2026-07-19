@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
@@ -97,17 +97,42 @@ export default function Cart() {
     (s, it) => s + Number(it.price || 0) * Number(it.quantity || 1),
     0
   );
-  const breakdownItems = (quote?.repriced_items?.length ? quote.repriced_items : cart.items).map((it) => ({
-    name: it.name,
-    quantity: it.quantity,
-    price: Number(it.price || 0),
-  }));
+  const resolvedCartPrices = useMemo(() => {
+    if (!quote) return {};
+    const repriced = quote.repriced_items || [];
+    const byId = Object.fromEntries(repriced.filter((row) => row.item_id).map((row) => [row.item_id, row]));
+    const quoteSubtotal = Number(quote.customer?.subtotal || 0);
+    const fallbackUnit =
+      cart.items.length === 1 && quoteSubtotal > 0
+        ? Math.round((quoteSubtotal / Number(cart.items[0].quantity || 1)) * 100) / 100
+        : 0;
+    return Object.fromEntries(
+      cart.items.map((it) => {
+        const cartPrice = Number(it.price || 0);
+        const match = byId[it.item_id];
+        const price = cartPrice > 0 ? cartPrice : Number(match?.price || fallbackUnit || 0);
+        return [it.item_id, price];
+      })
+    );
+  }, [quote, cart.items]);
   const customerBreakdown =
-    quote && breakdownItems.length > 0
-      ? buildCustomerBreakdownFromQuote(quote, breakdownItems)
+    quote && cart.items.length > 0
+      ? buildCustomerBreakdownFromQuote(
+          quote,
+          cart.items.map((it) => ({
+            item_id: it.item_id,
+            name: it.name,
+            quantity: it.quantity,
+            price: Number(resolvedCartPrices[it.item_id] || it.price || 0),
+          }))
+        )
       : null;
+  const resolvedCartSubtotal = cart.items.reduce(
+    (s, it) => s + Number(resolvedCartPrices[it.item_id] || it.price || 0) * Number(it.quantity || 1),
+    0
+  );
   const quotedTotal = customerBreakdown?.total ?? quote?.customer?.customer_total;
-  const displayTotal = Math.max(Number(quotedTotal) || 0, cartSubtotal);
+  const displayTotal = Math.max(Number(quotedTotal) || 0, resolvedCartSubtotal, cartSubtotal);
 
   const placeOrder = async () => {
     if (placingRef.current || loading) return;
@@ -208,7 +233,7 @@ export default function Cart() {
                   <img src={it.image_url} alt="" className="w-20 h-20 rounded-xl object-cover" />
                   <div className="flex-1">
                     <div className="font-bold">{it.name}</div>
-                    <div className="text-sm" style={{ color: "var(--muted)" }}>${formatMoney(it.price)}</div>
+                    <div className="text-sm" style={{ color: "var(--muted)" }}>${formatMoney(resolvedCartPrices[it.item_id] ?? it.price)}</div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button className="btn-ghost !p-2" onClick={() => updateQty(it.item_id, it.quantity - 1)} data-testid={`dec-${it.item_id}`}>
