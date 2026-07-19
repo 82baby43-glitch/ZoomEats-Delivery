@@ -31,6 +31,11 @@ export function CustomerOrderBreakdown({ breakdown, loading = false, itemsFirst 
   if (loading) return <p className="text-sm" style={{ color: "var(--muted)" }}>Calculating…</p>;
   if (!breakdown) return null;
 
+  const displayLines =
+    itemsFirst && breakdown.items?.length > 0
+      ? breakdown.lines.filter((line) => line.label !== "Items")
+      : breakdown.lines;
+
   return (
     <div className="space-y-3" data-testid="customer-order-breakdown">
       {itemsFirst && breakdown.items?.length > 0 && (
@@ -43,7 +48,7 @@ export function CustomerOrderBreakdown({ breakdown, loading = false, itemsFirst 
           ))}
         </div>
       )}
-      <PriceLines lines={breakdown.lines} showSign />
+      <PriceLines lines={displayLines} showSign />
     </div>
   );
 }
