@@ -69,7 +69,7 @@ function parseItems(order: OrderRow) {
   return raw.map((it) => {
     const row = it as Record<string, unknown>;
     const qty = Number(row.quantity ?? 1);
-    const price = Number(row.price ?? 0);
+    const price = Number(row.price ?? row.unit_price ?? 0);
     return {
       name: String(row.name ?? "Item"),
       quantity: qty,
@@ -168,8 +168,7 @@ export function buildCustomerBreakdownFromQuote(
   const parsedItems = items.map((it) => ({
     name: it.name,
     quantity: it.quantity,
-    unit_price: round2(it.price),
-    line_total: round2(it.price * it.quantity),
+    price: round2(it.price),
   }));
   const snapshotLike: SnapshotRow = {
     subtotal: c.subtotal,
