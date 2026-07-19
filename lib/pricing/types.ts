@@ -38,6 +38,7 @@ export interface DriverBreakdown {
   weather_bonus: number;
   peak_bonus: number;
   large_order_bonus: number;
+  long_distance_bonus: number;
   customer_tip: number;
   guaranteed_pay: number;
   final_driver_pay: number;

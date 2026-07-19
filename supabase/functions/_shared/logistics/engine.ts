@@ -1,20 +1,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { haversineKm } from "../routing/geo.ts";
-import { etaMinutesBetween } from "../routing/eta-engine.ts";
-import { createRoutingDbAdapter } from "../routing/db-adapter.ts";
-import { getGpsStreamState } from "../routing/gps-stream.ts";
+import { haversineKm } from "../dispatch/routing/geo";
+import { etaMinutesBetween } from "../dispatch/routing/eta-engine";
+import { createRoutingDbAdapter } from "../dispatch/routing/db-adapter";
+import { getGpsStreamState } from "../dispatch/routing/gps-stream";
 import {
   buildRoutesFromRouteState,
   remainingDistanceKm,
   computeOrderRoutingIntel,
-} from "./route-state-helpers.ts";
-import { fetchHistoricalDeliveryMinutes, fetchDefaultEstimateMinutes } from "./eta-service.ts";
+} from "./route-state-helpers";
+import { fetchHistoricalDeliveryMinutes, fetchDefaultEstimateMinutes } from "./eta-service";
 import {
   computeDriverApproachAlert,
   distanceFeetBetween,
   fetchDriverVehicleLabel,
-} from "./driver-approach-alerts.ts";
-import type { RestaurantDriverApproachAlert } from "./types.ts";
+} from "./driver-approach-alerts";
+import type { RestaurantDriverApproachAlert } from "./types";
 import type {
   AdminLogisticsView,
   DeliveryQueueItem,
@@ -28,9 +28,10 @@ import type {
   RestaurantLogisticsView,
   RestaurantPerformancePanel,
   RoutePolyline,
-} from "./types.ts";
-import { buildDispatchExplain } from "./dispatchExplain.ts";
-import { fetchDeliveryDemandZonesAsHotspots } from "./delivery-demand-zones.ts";
+} from "./types";
+import { buildDispatchExplain } from "./dispatchExplain";
+import { fetchDeliveryDemandZonesAsHotspots } from "./delivery-demand-zones";
+import { estimateDriverEarningsForOrder, getDriverEarningsSummary } from "../driverEarnings/engine.ts";
 
 const ACTIVE_ORDER_STATUSES = [
   "placed", "confirmed", "accepted", "preparing", "ready",
@@ -150,6 +151,7 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
     ? Math.round(routeState.total_eta_minutes)
     : 0;
   const queue: DeliveryQueueItem[] = [];
+  const restaurantCache = new Map<string, { latitude?: number; longitude?: number }>();
 
   for (const o of orders || []) {
     const rLat = Number(o.restaurant_lat);
@@ -162,14 +164,32 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
       remainingKm += dist;
       etaMin += legEta;
     }
+
+    let restCoords = restaurantCache.get(String(o.restaurant_id));
+    if (!restCoords && o.restaurant_id) {
+      const { data: r } = await db.from("restaurants").select("latitude,longitude").eq("restaurant_id", o.restaurant_id).maybeSingle();
+      restCoords = r || undefined;
+      if (restCoords) restaurantCache.set(String(o.restaurant_id), restCoords);
+    }
+
+    let estimatedPay = 8.5;
+    let estimatedTip = Number(o.tip_amount ?? 0);
+    try {
+      const breakdown = await estimateDriverEarningsForOrder(db, o, restCoords);
+      estimatedPay = breakdown.pre_tip_pay;
+      estimatedTip = breakdown.customer_tip;
+    } catch {
+      estimatedTip = estimatedTip || Math.round(Number(o.total || 0) * 0.15 * 100) / 100;
+    }
+
     queue.push({
       order_id: String(o.order_id),
       restaurant_name: String(o.restaurant_name || "Restaurant"),
       customer_name: String(o.customer_name || "Customer"),
       address: String(o.address || ""),
       distance_km: Math.round(dist * 10) / 10,
-      estimated_pay: 8.5,
-      estimated_tip: Math.round(Number(o.total || 0) * 0.15 * 100) / 100,
+      estimated_pay: estimatedPay,
+      estimated_tip: estimatedTip,
       eta_min: Math.round(legEta),
       priority: status === "delivering" ? 1 : 2,
       prep_status: String(o.status),
@@ -183,20 +203,18 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
   }
 
   const delivered = (recentOrders || []).filter((o) => o.status === "delivered");
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayDelivered = delivered.filter((o) => new Date(String(o.created_at)) >= todayStart);
+  const earningsSummary = await getDriverEarningsSummary(db, userId);
   const earnings: DriverEarningsPanel = {
-    today: todayDelivered.reduce((s, o) => s + 8.5 + Number(o.total || 0) * 0.05, 0),
-    week: delivered.slice(0, 20).reduce((s) => s + 8.5, 0),
-    tips: todayDelivered.reduce((s, o) => s + Number(o.total || 0) * 0.12, 0),
-    bonuses: 0,
-    mileage: Math.round(remainingKm * 10) / 10,
-    deliveries_completed: todayDelivered.length,
-    acceptance_rate: 94,
-    completion_rate: 98,
-    online_minutes: driver?.availability ? 120 : 0,
-    effective_hourly: todayDelivered.length ? Math.round((todayDelivered.length * 12) / 2) : 0,
+    today: earningsSummary.today,
+    week: earningsSummary.week,
+    tips: earningsSummary.tips,
+    bonuses: earningsSummary.bonuses,
+    mileage: earningsSummary.mileage || Math.round(remainingKm * 10) / 10,
+    deliveries_completed: earningsSummary.deliveries_completed,
+    acceptance_rate: earningsSummary.acceptance_rate,
+    completion_rate: earningsSummary.completion_rate,
+    online_minutes: driver?.availability ? earningsSummary.online_minutes || 120 : 0,
+    effective_hourly: earningsSummary.effective_hourly,
   };
 
   const performance: DriverPerformancePanel = {
@@ -206,7 +224,7 @@ export async function buildDriverLogisticsView(db: SupabaseClient, userId: strin
     avg_delivery_min: 24,
     avg_wait_min: 8,
     total_miles: Math.round(delivered.length * 4.2),
-    current_streak: Math.min(7, todayDelivered.length),
+    current_streak: Math.min(7, earningsSummary.deliveries_completed),
   };
 
   const markers: LogisticsMarker[] = [];

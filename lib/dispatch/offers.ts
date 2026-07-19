@@ -9,6 +9,7 @@ import type { RealtimeRuntime } from "../logistics/delivery-realtime";
 import { assignOrderToUberDirect } from "./uberDirect";
 import { resolveUberDirectConfig } from "../server/uberDirectConfigStore";
 import { hasFounderDriverPermission } from "../founderDriver/auth";
+import { estimateDriverEarningsForOrder } from "../driverEarnings/engine";
 
 export const OFFER_TTL_SECONDS = 20;
 export const DRIVER_OFFER_RADIUS_KM = 15;
@@ -296,6 +297,18 @@ export async function createAndBroadcastOffer(
       ) + haversineKm(orderRef.pickup, orderRef.dropoff)
     : null;
 
+  let earningsBreakdown = null;
+  let estimatedEarnings = proposal?.earnings ?? 8.5;
+  try {
+    const { data: rest } = order.restaurant_id
+      ? await db.from("restaurants").select("latitude,longitude").eq("restaurant_id", order.restaurant_id).maybeSingle()
+      : { data: null };
+    earningsBreakdown = await estimateDriverEarningsForOrder(db, order, rest);
+    estimatedEarnings = earningsBreakdown.final_driver_pay;
+  } catch {
+    // keep proposal fallback
+  }
+
   await db.from("driver_order_offers").insert({
     offer_id: offerId,
     order_id: orderId,
@@ -304,12 +317,13 @@ export async function createAndBroadcastOffer(
     offered_at: now.toISOString(),
     expires_at: expiresAt.toISOString(),
     estimated_distance_km: distKm,
-    estimated_earnings: proposal?.earnings ?? 8.5,
+    estimated_earnings: estimatedEarnings,
     estimated_eta_min: Math.round(proposal?.eta ?? 20),
     meta: {
       restaurant_name: order.restaurant_name,
       customer_area: String(order.address || "").split(",").slice(-2).join(",").trim() || "Customer",
       pickup_address: order.restaurant_name,
+      earnings_breakdown: earningsBreakdown,
     },
   });
 
@@ -337,10 +351,11 @@ export async function createAndBroadcastOffer(
     restaurant_name: order.restaurant_name,
     customer_area: String(order.address || "").split(",").slice(-2).join(",").trim() || "Customer",
     estimated_distance_km: distKm,
-    estimated_earnings: proposal?.earnings ?? 8.5,
+    estimated_earnings: estimatedEarnings,
     estimated_eta_min: Math.round(proposal?.eta ?? 20),
     pickup_label: order.restaurant_name,
     dropoff_label: order.address,
+    earnings_breakdown: earningsBreakdown,
   };
 
   await pushDriverOfferBroadcast(String(driver.driver_id), payload, runtime);

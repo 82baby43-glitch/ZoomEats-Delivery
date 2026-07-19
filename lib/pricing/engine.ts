@@ -147,6 +147,7 @@ export async function calculatePricingQuote(
     weather_bonus: Number(driverCalc.data?.weather_bonus ?? 0),
     peak_bonus: Number(driverCalc.data?.peak_bonus ?? 0),
     large_order_bonus: Number(driverCalc.data?.large_order_bonus ?? 0),
+    long_distance_bonus: Number(driverCalc.data?.long_distance_bonus ?? 0),
     customer_tip: Number(driverCalc.data?.customer_tip ?? tipAmount),
     guaranteed_pay: Number(driverCalc.data?.guaranteed_pay ?? 0),
     final_driver_pay: Number(driverCalc.data?.final_driver_pay ?? 0),

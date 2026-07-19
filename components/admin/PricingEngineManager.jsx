@@ -25,6 +25,8 @@ const RULE_LABELS = {
   promotion_budget: "Promotion Budget ($)",
   pricing_version: "Pricing Version",
   guaranteed_pay: "Driver Guaranteed Pay ($)",
+  long_distance_bonus: "Long-Distance Bonus ($)",
+  long_distance_threshold: "Long-Distance Threshold (miles)",
   peak_bonus: "Peak Hour Bonus ($)",
 };
 

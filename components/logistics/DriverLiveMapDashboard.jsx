@@ -82,6 +82,9 @@ export default function DriverLiveMapDashboard() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Link href="/driver/earnings" className="btn-secondary text-sm flex items-center gap-1" data-testid="driver-earnings-link">
+              <DollarSign size={14} /> Earnings
+            </Link>
             <Link href="/driver/navigate" className="btn-primary text-sm flex items-center gap-1" data-testid="driver-nav-link">
               <Navigation size={14} /> Navigation
             </Link>

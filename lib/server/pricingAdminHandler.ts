@@ -28,6 +28,8 @@ const EDITABLE_RULE_TYPES = [
   "large_order_bonus",
   "large_order_threshold",
   "guaranteed_pay",
+  "long_distance_bonus",
+  "long_distance_threshold",
   "min_platform_profit",
   "subsidy_enabled",
   "promotion_budget",
