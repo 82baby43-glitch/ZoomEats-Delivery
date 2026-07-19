@@ -152,6 +152,18 @@ export async function evaluateProfitProtection(
     return { ...base, action: "subsidized", profit_after: profitBefore };
   }
 
+  const adjusted = await applyProfitProtectionAdjustments(db, customer, platform, minProfit);
+  if (adjusted) {
+    return {
+      ...base,
+      action: "adjusted",
+      profit_after: adjusted.net_profit,
+      delivery_fee_after: adjusted.delivery_fee,
+      service_fee_after: adjusted.service_fee,
+      customer_total: adjusted.customer_total,
+    };
+  }
+
   if (profitBefore < 0) {
     return {
       ...base,

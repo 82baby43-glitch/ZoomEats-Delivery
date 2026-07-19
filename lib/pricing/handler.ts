@@ -118,7 +118,7 @@ async function buildQuoteInput(
       discountAmount: body.discount_amount != null ? Number(body.discount_amount) : 0,
       promoCode: body.promo_code ? String(body.promo_code) : null,
       weatherActive: Boolean(body.weather_active),
-      allowSubsidy: user?.role === "admin" || user?.role === "super_admin",
+      allowSubsidy: true,
     },
     repricedItems,
   };

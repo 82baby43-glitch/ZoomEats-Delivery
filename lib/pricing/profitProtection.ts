@@ -152,16 +152,6 @@ export async function evaluateProfitProtection(
     return { ...base, action: "subsidized", profit_after: profitBefore };
   }
 
-  if (profitBefore < 0) {
-    return {
-      ...base,
-      action: "blocked",
-      blocked: true,
-      block_reason:
-        "This order cannot be fulfilled at current pricing. Please try again later or contact support.",
-    };
-  }
-
   const adjusted = await applyProfitProtectionAdjustments(db, customer, platform, minProfit);
   if (adjusted) {
     return {
@@ -171,6 +161,16 @@ export async function evaluateProfitProtection(
       delivery_fee_after: adjusted.delivery_fee,
       service_fee_after: adjusted.service_fee,
       customer_total: adjusted.customer_total,
+    };
+  }
+
+  if (profitBefore < 0) {
+    return {
+      ...base,
+      action: "blocked",
+      blocked: true,
+      block_reason:
+        "This order cannot be fulfilled at current pricing. Please try again later or contact support.",
     };
   }
 
