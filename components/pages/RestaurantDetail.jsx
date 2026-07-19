@@ -12,7 +12,6 @@ import { Star, Clock, Plus, ArrowLeft } from "lucide-react";
 import { formatMoney, safeArray } from "@/lib/safeData";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { logClientError } from "@/lib/clientErrorLog";
-import RestaurantDeliveryEstimate from "@/components/checkout/RestaurantDeliveryEstimate";
 
 export default function RestaurantDetail() {
   const { rid } = useParams();
@@ -212,10 +211,6 @@ export default function RestaurantDetail() {
             </div>
           </div>
         </motion.div>
-
-        <div className="mt-8 max-w-md">
-          <RestaurantDeliveryEstimate restaurantId={r.restaurant_id} subtotal={15} />
-        </div>
 
         <div className="mt-10 space-y-10">
           {groupedMenu.length === 0 ? (

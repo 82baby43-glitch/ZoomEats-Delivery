@@ -8,10 +8,9 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import { supabase } from "@/lib/supabaseClient";
 import { logClientError } from "@/lib/clientErrorLog";
 import Header from "@/components/Header";
-import DeliveryFeeCalculator from "@/components/checkout/DeliveryFeeCalculator";
+import CheckoutPricingPanel from "@/components/checkout/CheckoutPricingPanel";
 import { Minus, Plus, Trash2, Loader2 } from "lucide-react";
 import { buildCustomerBreakdownFromQuote } from "@/lib/pricing/orderBreakdown";
-import { CustomerOrderBreakdown } from "@/components/pricing/OrderPricingBreakdown";
 import { formatMoney } from "@/lib/safeData";
 
 export default function Cart() {
@@ -338,15 +337,12 @@ export default function Cart() {
                 />
               </div>
               <div className="border-t pt-4" style={{ borderColor: "var(--border)" }}>
-                {customerBreakdown ? (
-                  <CustomerOrderBreakdown breakdown={customerBreakdown} loading={quoteLoading} />
-                ) : (
-                  <DeliveryFeeCalculator
-                    quote={quote}
-                    loading={quoteLoading}
-                    subtotalFallback={cartSubtotal}
-                  />
-                )}
+                <CheckoutPricingPanel
+                  quote={quote}
+                  loading={quoteLoading}
+                  subtotalFallback={Math.max(resolvedCartSubtotal, cartSubtotal)}
+                  hasAddress={Boolean(address.trim())}
+                />
               </div>
               {quoteErr && !quoteLoading && (
                 <p className="text-xs" style={{ color: "var(--muted)" }}>{quoteErr}</p>
