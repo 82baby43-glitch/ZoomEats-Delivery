@@ -17,6 +17,7 @@ export default function AdminRevenue() {
             </p>
           </div>
           <Link href="/admin" className="btn-ghost text-sm">← Admin dashboard</Link>
+          <Link href="/admin/financial-analytics" className="btn-secondary text-sm">Financial Analytics</Link>
         </div>
         <RevenueCenter />
       </div>
