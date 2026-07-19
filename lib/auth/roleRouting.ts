@@ -35,6 +35,9 @@ export const ROLE_DASHBOARD_PATHS: Record<string, string> = {
   dispatcher: "/admin",
 };
 
+/** Customer ordering surfaces — also allowed for platform operators placing test orders. */
+const CUSTOMER_ORDER_PREFIXES = ["/cart", "/checkout", "/orders", "/r/"];
+
 /** Route prefixes each role may access (database role is source of truth). */
 export const ROLE_ROUTE_ACCESS: Record<string, string[]> = {
   customer: ["/", "/cart", "/checkout", "/orders", "/account", "/r/", "/local-partners", "/dreamland"],
@@ -151,6 +154,11 @@ export function canAccessPath(user: AuthUserLike | null | undefined, pathname: s
   if (!user) return isPublicPath(pathname);
   if (isPublicPath(pathname)) return true;
 
+  // Admins and dispatchers need the customer checkout flow for smoke tests and live orders.
+  if (isPrivilegedOperator(user) && prefixAllowed(pathname, CUSTOMER_ORDER_PREFIXES)) {
+    return true;
+  }
+
   // Founder multi-role: admin, driver, and customer surfaces without changing DB role.
   if (hasMultiRolePrivileges(user)) {
     return prefixAllowed(pathname, FOUNDER_MULTI_ROLE_PREFIXES);
@@ -162,8 +170,7 @@ export function canAccessPath(user: AuthUserLike | null | undefined, pathname: s
 
   if (prefixAllowed(pathname, allowed)) return true;
 
-  // Shared customer browsing for non-partner roles
-  if (effective !== "customer" && prefixAllowed(pathname, ["/cart", "/checkout", "/orders", "/r/"])) {
+  if (effective !== "customer" && prefixAllowed(pathname, CUSTOMER_ORDER_PREFIXES)) {
     return false;
   }
 
