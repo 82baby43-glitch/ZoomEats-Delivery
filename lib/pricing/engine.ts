@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getTimeOfDayMultiplier } from "../dispatch/routing/traffic-ai";
 import { milesBetween, estimateDriveMinutes } from "./geo";
 import { computeSurgeMultiplier } from "./surge";
+import { evaluateProfitProtection, logProfitProtectionDecision } from "./profitProtection";
+import { resolveCommissionRate } from "../restaurantCommission/engine";
 import type { PricingQuote, PricingQuoteInput } from "./types";
 
 function round2(n: number) {
@@ -38,6 +40,7 @@ export interface QuoteContext {
   surgeMultiplier: number;
   peakActive: boolean;
   commissionPercent: number | null;
+  commissionPlanSlug: string | null;
 }
 
 export async function resolveQuoteContext(
@@ -62,15 +65,11 @@ export async function resolveQuoteContext(
   const surge = await computeSurgeMultiplier(db);
 
   let commissionPercent: number | null = null;
+  let commissionPlanSlug: string | null = null;
   if (input.restaurantId) {
-    const { data: rest } = await db
-      .from("restaurants")
-      .select("commission_rate")
-      .eq("restaurant_id", input.restaurantId)
-      .maybeSingle();
-    if (rest?.commission_rate != null) {
-      commissionPercent = Number(rest.commission_rate);
-    }
+    const resolved = await resolveCommissionRate(db, input.restaurantId);
+    commissionPercent = resolved.commission_percent;
+    commissionPlanSlug = resolved.plan_slug;
   }
 
   return {
@@ -79,6 +78,7 @@ export async function resolveQuoteContext(
     surgeMultiplier: surge.multiplier,
     peakActive: surge.peakActive,
     commissionPercent,
+    commissionPlanSlug,
   };
 }
 
@@ -169,6 +169,7 @@ export async function calculatePricingQuote(
       restaurantCalc.data?.commission_percent != null
         ? Number(restaurantCalc.data.commission_percent)
         : ctx.commissionPercent,
+    commission_plan_slug: ctx.commissionPlanSlug,
     net_payout: Number(restaurantCalc.data?.net_payout ?? 0),
   };
 
@@ -208,27 +209,39 @@ export async function calculatePricingQuote(
   let blocked = false;
   let blockReason: string | undefined;
 
-  if (!input.skipProfitProtection && platform.net_profit < minProfit) {
-    if (subsidyAllowed) {
-      profitProtected = true;
-    } else if (platform.net_profit < 0) {
-      blocked = true;
-      blockReason = "This order cannot be fulfilled at current pricing. Please try again later or contact support.";
-    } else {
-      const adjusted = await applyProfitProtection(db, customer, platform, minProfit);
-      if (adjusted) {
-        customer.delivery_fee = adjusted.delivery_fee;
-        customer.service_fee = adjusted.service_fee;
-        customer.customer_total = adjusted.customer_total;
-        platform.net_profit = adjusted.net_profit;
-        platform.delivery_revenue = adjusted.delivery_revenue;
-        platform.service_fee_revenue = adjusted.service_fee;
-        profitProtected = true;
-      } else if (platform.net_profit < minProfit) {
-        blocked = true;
-        blockReason = "Delivery is temporarily unavailable for this order due to pricing constraints.";
-      }
-    }
+  const profitDecision = await evaluateProfitProtection(db, customer, platform, {
+    minProfit,
+    subsidyAllowed,
+    skip: input.skipProfitProtection,
+  });
+
+  if (profitDecision.action === "adjusted" && profitDecision.delivery_fee_after !== customer.delivery_fee) {
+    customer.delivery_fee = profitDecision.delivery_fee_after;
+    customer.service_fee = profitDecision.service_fee_after;
+    customer.customer_total = profitDecision.customer_total;
+    platform.net_profit = profitDecision.profit_after;
+    platform.delivery_revenue =
+      customer.delivery_fee +
+      customer.distance_fee +
+      customer.surge_fee +
+      customer.weather_fee +
+      customer.small_order_fee;
+    platform.service_fee_revenue = customer.service_fee;
+    profitProtected = true;
+  } else if (profitDecision.action === "subsidized") {
+    profitProtected = true;
+  } else if (profitDecision.blocked) {
+    blocked = true;
+    blockReason = profitDecision.block_reason;
+  }
+
+  if (!input.skipProfitProtection && profitDecision.action !== "passed") {
+    await logProfitProtectionDecision(db, profitDecision, {
+      restaurantId: input.restaurantId,
+      customerId: input.customerId ?? undefined,
+      surge_multiplier: ctx.surgeMultiplier,
+      distance_miles: ctx.distanceMiles,
+    });
   }
 
   return {
@@ -245,86 +258,6 @@ export async function calculatePricingQuote(
     subsidy_allowed: subsidyAllowed,
     blocked,
     block_reason: blockReason,
-  };
-}
-
-async function applyProfitProtection(
-  db: SupabaseClient,
-  customer: PricingQuote["customer"],
-  platform: PricingQuote["platform"],
-  minProfit: number
-): Promise<{ delivery_fee: number; service_fee: number; customer_total: number; net_profit: number; delivery_revenue: number } | null> {
-  const [{ data: deliveryRule }, { data: serviceRule }] = await Promise.all([
-    db.from("pricing_rules").select("minimum_amount,maximum_amount").eq("rule_type", "delivery_fee").eq("active", true).limit(1).maybeSingle(),
-    db.from("pricing_rules").select("minimum_amount,maximum_amount").eq("rule_type", "service_fee").eq("active", true).limit(1).maybeSingle(),
-  ]);
-
-  const deliveryMin = Number(deliveryRule?.minimum_amount ?? 1.99);
-  const deliveryMax = Number(deliveryRule?.maximum_amount ?? 9.99);
-  const serviceMin = Number(serviceRule?.minimum_amount ?? 0.99);
-  const serviceMax = Number(serviceRule?.maximum_amount ?? 4.99);
-
-  const deficit = round2(minProfit - platform.net_profit);
-  if (deficit <= 0) return null;
-
-  let newDeliveryFee = customer.delivery_fee;
-  let newServiceFee = customer.service_fee;
-  let remaining = deficit;
-
-  const deliveryHeadroom = round2(deliveryMax - newDeliveryFee);
-  if (deliveryHeadroom > 0) {
-    const bump = Math.min(deliveryHeadroom, remaining);
-    newDeliveryFee = round2(newDeliveryFee + bump);
-    remaining = round2(remaining - bump);
-  }
-
-  if (remaining > 0) {
-    const serviceHeadroom = round2(serviceMax - newServiceFee);
-    if (serviceHeadroom > 0) {
-      const bump = Math.min(serviceHeadroom, remaining);
-      newServiceFee = round2(newServiceFee + bump);
-      remaining = round2(remaining - bump);
-    }
-  }
-
-  if (remaining > 0) return null;
-
-  const deliveryRevenue =
-    newDeliveryFee +
-    customer.distance_fee +
-    customer.surge_fee +
-    customer.weather_fee +
-    customer.small_order_fee;
-
-  const customerTotal = round2(
-    customer.subtotal +
-      customer.tax_amount +
-      deliveryRevenue +
-      newServiceFee -
-      customer.discount_amount +
-      customer.tip_amount
-  );
-
-  const newProfit = round2(
-    deliveryRevenue +
-      newServiceFee +
-      platform.commission_revenue -
-      platform.driver_cost -
-      platform.restaurant_cost -
-      platform.stripe_cost -
-      customer.discount_amount
-  );
-
-  if (newProfit < minProfit || newDeliveryFee < deliveryMin || newServiceFee < serviceMin) {
-    return null;
-  }
-
-  return {
-    delivery_fee: newDeliveryFee,
-    service_fee: newServiceFee,
-    customer_total: customerTotal,
-    net_profit: newProfit,
-    delivery_revenue: deliveryRevenue,
   };
 }
 

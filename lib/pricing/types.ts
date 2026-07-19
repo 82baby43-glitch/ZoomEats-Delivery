@@ -1,6 +1,7 @@
 export interface PricingQuoteInput {
   subtotal: number;
   restaurantId: string;
+  customerId?: string;
   customerLat?: number | null;
   customerLng?: number | null;
   restaurantLat?: number | null;
@@ -48,6 +49,7 @@ export interface RestaurantBreakdown {
   gross_sales: number;
   commission_amount: number;
   commission_percent: number | null;
+  commission_plan_slug?: string | null;
   net_payout: number;
 }
 

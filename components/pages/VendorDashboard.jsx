@@ -20,6 +20,7 @@ import { useCompanionMode } from "@/lib/hooks/useCompanionMode";
 import VendorCommunityProfile from "@/components/vendor/VendorCommunityProfile";
 import MenuImageEnhancer from "@/components/vendor/MenuImageEnhancer";
 import { useAuth } from "@/lib/auth";
+import VendorSettlementsPanel from "@/components/vendor/VendorSettlementsPanel";
 
 const STATUS_NEXT = {
   placed: "accepted",
@@ -274,7 +275,7 @@ function VendorDashboardInner() {
         </div>
         <p className="mt-2" style={{ color: "var(--muted)" }}>Vendor dashboard</p>
         <div className="flex gap-2 mt-6 border-b" style={{ borderColor: "var(--border)" }}>
-          {["orders", "companion", "menu", "community", "profile"].map((t) => (
+          {["orders", "settlements", "companion", "menu", "community", "profile"].map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -332,6 +333,8 @@ function VendorDashboardInner() {
             </AnimatePresence>
           </div>
         )}
+
+        {tab === "settlements" && <VendorSettlementsPanel />}
 
         {tab === "companion" && (
           <div className="mt-6">
