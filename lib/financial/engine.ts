@@ -135,7 +135,7 @@ export async function recordOrderFinancials(
       p_chargeback_adjustment: 0,
       p_include_stripe_fee: false,
       p_commission_percent: snapshot?.rule_snapshot?.restaurant?.commission_percent ?? null,
-    })) || (snapshot?.rule_snapshot?.restaurant as Record<string, number>) || {
+    })) || (snapshot?.rule_snapshot?.restaurant as Record<string, number | string>) || {
       gross_sales: subtotal,
       commission_amount: round2(subtotal * 0.2),
       promotion_adjustment: 0,
@@ -211,6 +211,10 @@ export async function recordOrderFinancials(
       restaurant_id: order.restaurant_id,
       gross_sales: Number(restaurantCalc.gross_sales ?? subtotal),
       commission_amount: commissionAmount,
+      commission_percent: Number(restaurantCalc.commission_percent ?? snapshot?.rule_snapshot?.restaurant?.commission_percent ?? null),
+      commission_plan_slug: snapshot?.rule_snapshot?.restaurant?.commission_plan_slug
+        ? String(snapshot.rule_snapshot.restaurant.commission_plan_slug)
+        : null,
       promotion_adjustment: Number(restaurantCalc.promotion_adjustment ?? 0),
       refund_adjustment: Number(restaurantCalc.refund_adjustment ?? 0),
       chargeback_adjustment: Number(restaurantCalc.chargeback_adjustment ?? 0),

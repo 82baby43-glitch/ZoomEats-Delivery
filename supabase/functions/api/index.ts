@@ -70,6 +70,7 @@ import { handleFinancialAdminRequest } from "../_shared/financialAdminHandler.ts
 import { handlePricingAdminRequest } from "../_shared/pricingAdminHandler.ts";
 import { handlePricingRequest, quoteOrderForCheckout, persistPricingSnapshot } from "../_shared/pricing/handler.ts";
 import { handleDriverEarningsRequest } from "../_shared/driverEarnings/handler.ts";
+import { handleRestaurantCommissionRequest } from "../_shared/restaurantCommission/handler.ts";
 import { handleCompanionRequest } from "../_shared/companionMode/handler.ts";
 import { recordOrderFinancials } from "../_shared/financial/engine.ts";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "../_shared/restaurantAdminHandler.ts";
@@ -292,6 +293,7 @@ Deno.serve(async (req) => {
       path,
       method,
       body,
+      params,
       requireRole,
     });
     if (pricingAdminResult !== null) return json(pricingAdminResult);
@@ -313,6 +315,16 @@ Deno.serve(async (req) => {
       requireAuth,
     });
     if (driverEarningsResult !== null) return json(driverEarningsResult);
+
+    const commissionResult = await handleRestaurantCommissionRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (commissionResult !== null) return json(commissionResult);
 
     const companionResult = await handleCompanionRequest(db, {
       path,

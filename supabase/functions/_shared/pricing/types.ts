@@ -49,6 +49,7 @@ export interface RestaurantBreakdown {
   gross_sales: number;
   commission_amount: number;
   commission_percent: number | null;
+  commission_plan_slug?: string | null;
   net_payout: number;
 }
 

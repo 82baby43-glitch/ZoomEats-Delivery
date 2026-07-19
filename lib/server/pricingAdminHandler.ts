@@ -1,10 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getProfitProtectionSummary } from "../pricing/profitProtection";
 import { calculatePricingQuote } from "../pricing/engine";
 
 type AdminCtx = {
   path: string;
   method: string;
   body: Record<string, unknown>;
+  params?: Record<string, string>;
   requireRole: (...roles: string[]) => Record<string, unknown>;
 };
 
@@ -166,9 +168,10 @@ export async function handlePricingAdminRequest(
   }
 
   if (path === "/admin/pricing/summary" && method === "GET") {
-    const [{ data: snapshots }, { data: rules }] = await Promise.all([
+    const [{ data: snapshots }, { data: rules }, profitSummary] = await Promise.all([
       db.from("pricing_snapshots").select("customer_total,estimated_profit,driver_payout,restaurant_payout,pricing_version").order("created_at", { ascending: false }).limit(500),
       db.from("pricing_rules").select("*").eq("active", true).order("rule_type"),
+      getProfitProtectionSummary(db, 7),
     ]);
 
     const rows = snapshots || [];
@@ -182,7 +185,13 @@ export async function handlePricingAdminRequest(
       average_profit: avgProfit,
       active_rules: (rules || []).length,
       rules: rules || [],
+      profit_protection: profitSummary,
     };
+  }
+
+  if (path === "/admin/pricing/profit-protection" && method === "GET") {
+    const days = Number(ctx.params?.days ?? body.days ?? 30);
+    return getProfitProtectionSummary(db, days);
   }
 
   return null;

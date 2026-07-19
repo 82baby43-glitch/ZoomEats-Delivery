@@ -58,6 +58,7 @@ import { handleFinancialAdminRequest } from "./financialAdminHandler";
 import { handlePricingAdminRequest } from "./pricingAdminHandler";
 import { handlePricingRequest, quoteOrderForCheckout, persistPricingSnapshot } from "../pricing/handler";
 import { handleDriverEarningsRequest } from "../driverEarnings/handler";
+import { handleRestaurantCommissionRequest } from "../restaurantCommission/handler";
 import { handleCompanionRequest } from "../companionMode/handler";
 import { recordOrderFinancials } from "../financial/engine";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "./restaurantAdminHandler";
@@ -292,6 +293,16 @@ export async function handleApiRequest(
       requireAuth,
     });
     if (driverEarningsResult !== null) return driverEarningsResult;
+
+    const commissionResult = await handleRestaurantCommissionRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (commissionResult !== null) return commissionResult;
 
     const companionResult = await handleCompanionRequest(db, {
       path,

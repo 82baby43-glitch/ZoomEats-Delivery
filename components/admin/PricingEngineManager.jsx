@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
-import { Calculator, DollarSign, Save, ToggleLeft, ToggleRight, Play } from "lucide-react";
+import { Calculator, DollarSign, Save, ToggleLeft, ToggleRight, Play, Shield } from "lucide-react";
 import { logClientError } from "@/lib/clientErrorLog";
 
 const RULE_LABELS = {
@@ -232,7 +232,7 @@ export default function PricingEngineManager() {
         </div>
 
         {summary && (
-          <div className="grid sm:grid-cols-3 gap-4 mb-8">
+          <div className="grid sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
             <div className="card p-4">
               <div className="text-sm" style={{ color: "var(--muted)" }}>Snapshots recorded</div>
               <div className="font-display text-2xl font-bold">{summary.snapshot_count}</div>
@@ -245,6 +245,27 @@ export default function PricingEngineManager() {
               <div className="text-sm" style={{ color: "var(--muted)" }}>Avg platform profit</div>
               <div className="font-display text-2xl font-bold">{money(summary.average_profit)}</div>
             </div>
+            {summary.profit_protection && (
+              <>
+                <div className="card p-4">
+                  <div className="text-sm flex items-center gap-1" style={{ color: "var(--muted)" }}>
+                    <Shield size={14} /> Fee adjusted
+                  </div>
+                  <div className="font-display text-2xl font-bold">{summary.profit_protection.adjusted ?? 0}</div>
+                  <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>Last {summary.profit_protection.period_days}d</div>
+                </div>
+                <div className="card p-4">
+                  <div className="text-sm" style={{ color: "var(--muted)" }}>Subsidized</div>
+                  <div className="font-display text-2xl font-bold">{summary.profit_protection.subsidized ?? 0}</div>
+                </div>
+                <div className="card p-4">
+                  <div className="text-sm" style={{ color: "var(--muted)" }}>Blocked</div>
+                  <div className="font-display text-2xl font-bold" style={{ color: (summary.profit_protection.blocked ?? 0) > 0 ? "var(--primary)" : undefined }}>
+                    {summary.profit_protection.blocked ?? 0}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -275,7 +296,7 @@ export default function PricingEngineManager() {
           </div>
         )}
 
-        <div className="card p-6 space-y-4">
+        <div className="card p-6 space-y-4 mb-10">
           <h2 className="font-display text-xl font-bold flex items-center gap-2">
             <Play size={20} /> Payout Simulator
           </h2>
@@ -328,6 +349,45 @@ export default function PricingEngineManager() {
             </div>
           )}
         </div>
+
+        {summary?.profit_protection?.recent?.length > 0 && (
+          <div className="card p-6 space-y-4">
+            <h2 className="font-display text-xl font-bold flex items-center gap-2">
+              <Shield size={20} /> Profit Protection Log
+            </h2>
+            <p className="text-sm" style={{ color: "var(--muted)" }}>
+              Auditable trail when quotes are adjusted, subsidized, or blocked to protect platform margin.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b" style={{ borderColor: "var(--border)", color: "var(--muted)" }}>
+                    <th className="py-2 pr-4">When</th>
+                    <th className="py-2 pr-4">Action</th>
+                    <th className="py-2 pr-4 text-right">Profit before</th>
+                    <th className="py-2 pr-4 text-right">Profit after</th>
+                    <th className="py-2 pr-4 text-right">Delivery fee</th>
+                    <th className="py-2">Order</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.profit_protection.recent.map((row) => (
+                    <tr key={row.id} className="border-b" style={{ borderColor: "var(--border)" }}>
+                      <td className="py-2 pr-4">{new Date(row.created_at).toLocaleString()}</td>
+                      <td className="py-2 pr-4 capitalize">{row.action}</td>
+                      <td className="py-2 pr-4 text-right">{money(row.profit_before)}</td>
+                      <td className="py-2 pr-4 text-right">{money(row.profit_after)}</td>
+                      <td className="py-2 pr-4 text-right">
+                        {money(row.delivery_fee_before)} → {money(row.delivery_fee_after)}
+                      </td>
+                      <td className="py-2 font-mono text-xs">{row.order_id ? `…${String(row.order_id).slice(-8)}` : "pre-order"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
