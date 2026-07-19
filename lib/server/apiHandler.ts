@@ -613,6 +613,7 @@ export async function handleApiRequest(
         restaurantLng: rest.longitude != null ? Number(rest.longitude) : null,
         tipAmount,
         promoCode,
+        allowSubsidy: u.role === "admin" || u.role === "super_admin",
       });
       const delivery_fee = quote.customer.delivery_fee + quote.customer.distance_fee + quote.customer.surge_fee + quote.customer.weather_fee + quote.customer.small_order_fee;
       const total = quote.customer.customer_total;
