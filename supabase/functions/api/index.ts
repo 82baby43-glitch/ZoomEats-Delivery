@@ -300,6 +300,7 @@ Deno.serve(async (req) => {
       path,
       method,
       body,
+      params,
       requireAuth,
       requireRole,
     });
@@ -579,6 +580,7 @@ Deno.serve(async (req) => {
       const quote = await quoteOrderForCheckout(db, {
         restaurantId: rest.restaurant_id,
         subtotal,
+        customerId: u.user_id as string,
         customerLat: geo?.latitude ?? null,
         customerLng: geo?.longitude ?? null,
         restaurantLat: rest.latitude != null ? Number(rest.latitude) : null,

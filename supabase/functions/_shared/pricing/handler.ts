@@ -1,11 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { calculatePricingQuote, persistPricingSnapshot } from "./engine";
+import { formatCustomerPricingLines, summarizeDeliveryCalculator } from "./customer.ts";
 import type { PricingQuoteInput } from "./types";
 
 type HandlerCtx = {
   path: string;
   method: string;
   body: Record<string, unknown>;
+  params?: Record<string, string>;
   requireAuth: () => Record<string, unknown>;
   requireRole: (...roles: string[]) => Record<string, unknown>;
 };
@@ -16,19 +18,18 @@ function throwErr(message: string, status = 400): never {
   throw e;
 }
 
-export async function handlePricingRequest(
+async function buildQuoteInput(
   db: SupabaseClient,
-  ctx: HandlerCtx
-): Promise<unknown | null> {
-  const { path, method, body } = ctx;
+  body: Record<string, unknown>,
+  user?: Record<string, unknown>
+): Promise<PricingQuoteInput> {
+  const restaurantId = String(body.restaurant_id || "");
+  const items = (body.items as Array<{ item_id: string; quantity: number }>) || [];
+  if (!restaurantId) throwErr("restaurant_id required");
 
-  if (path === "/pricing/quote" && method === "POST") {
-    const u = ctx.requireAuth();
-    const restaurantId = String(body.restaurant_id || "");
-    const items = (body.items as Array<{ item_id: string; quantity: number }>) || [];
-    if (!restaurantId) throwErr("restaurant_id required");
-    if (!items.length) throwErr("items required");
-
+  let subtotal = body.subtotal != null ? Number(body.subtotal) : NaN;
+  if (!Number.isFinite(subtotal)) {
+    if (!items.length) throwErr("items or subtotal required");
     const ids = items.map((i) => i.item_id);
     const { data: menuRows } = await db
       .from("menu_items")
@@ -37,44 +38,107 @@ export async function handlePricingRequest(
       .eq("restaurant_id", restaurantId)
       .eq("available", true);
     const priceMap = Object.fromEntries((menuRows || []).map((m) => [m.item_id, Number(m.price)]));
-    const subtotal = items.reduce((s, line) => {
+    subtotal = items.reduce((s, line) => {
       const price = priceMap[line.item_id];
       if (price == null) throwErr(`Unavailable item: ${line.item_id}`);
       return s + price * Math.max(1, Math.min(Number(line.quantity), 99));
     }, 0);
+  }
 
-    const { data: rest } = await db
-      .from("restaurants")
-      .select("latitude,longitude")
-      .eq("restaurant_id", restaurantId)
-      .maybeSingle();
-    if (!rest) throwErr("Restaurant not found", 404);
+  const { data: rest } = await db
+    .from("restaurants")
+    .select("latitude,longitude")
+    .eq("restaurant_id", restaurantId)
+    .maybeSingle();
+  if (!rest) throwErr("Restaurant not found", 404);
 
-    let customerLat = body.customer_lat != null ? Number(body.customer_lat) : null;
-    let customerLng = body.customer_lng != null ? Number(body.customer_lng) : null;
-    const address = String(body.address || "").trim();
-    if ((customerLat == null || customerLng == null) && address) {
-      const { geocodeOrderAddress } = await import("../geocodeAdmin.ts");
-      const geo = await geocodeOrderAddress(address, String(u.name || ""));
-      if (geo) {
-        customerLat = geo.latitude;
-        customerLng = geo.longitude;
-      }
+  let customerLat = body.customer_lat != null ? Number(body.customer_lat) : null;
+  let customerLng = body.customer_lng != null ? Number(body.customer_lng) : null;
+  const address = String(body.address || "").trim();
+  if ((customerLat == null || customerLng == null) && address) {
+    const { geocodeOrderAddress } = await import("../server/geocodeAdmin");
+    const geo = await geocodeOrderAddress(address, String(user?.name || ""));
+    if (geo) {
+      customerLat = geo.latitude;
+      customerLng = geo.longitude;
     }
+  }
 
-    const input: PricingQuoteInput = {
-      subtotal: Math.round(subtotal * 100) / 100,
-      restaurantId,
-      customerLat,
-      customerLng,
-      restaurantLat: rest.latitude != null ? Number(rest.latitude) : null,
-      restaurantLng: rest.longitude != null ? Number(rest.longitude) : null,
-      tipAmount: body.tip_amount != null ? Number(body.tip_amount) : 0,
-      discountAmount: body.discount_amount != null ? Number(body.discount_amount) : 0,
-      promoCode: body.promo_code ? String(body.promo_code) : null,
-      weatherActive: Boolean(body.weather_active),
+  return {
+    subtotal: Math.round(subtotal * 100) / 100,
+    restaurantId,
+    customerId: user?.user_id ? String(user.user_id) : null,
+    customerLat,
+    customerLng,
+    restaurantLat: rest.latitude != null ? Number(rest.latitude) : null,
+    restaurantLng: rest.longitude != null ? Number(rest.longitude) : null,
+    tipAmount: body.tip_amount != null ? Number(body.tip_amount) : 0,
+    discountAmount: body.discount_amount != null ? Number(body.discount_amount) : 0,
+    promoCode: body.promo_code ? String(body.promo_code) : null,
+    weatherActive: Boolean(body.weather_active),
+  };
+}
+
+export async function handlePricingRequest(
+  db: SupabaseClient,
+  ctx: HandlerCtx
+): Promise<unknown | null> {
+  const { path, method, body } = ctx;
+
+  if (path === "/pricing/delivery-estimate" && method === "POST") {
+    let user: Record<string, unknown> | undefined;
+    try {
+      user = ctx.requireAuth();
+    } catch {
+      user = undefined;
+    }
+    const input = await buildQuoteInput(db, body, user);
+    const quote = await calculatePricingQuote(db, input);
+    return {
+      calculator: quote.delivery_calculator,
+      lines: quote.customer_lines,
+      customer: quote.customer,
+      distance_miles: quote.distance_miles,
+      surge_multiplier: quote.surge_multiplier,
+      free_delivery: quote.free_delivery,
     };
+  }
 
+  const promoMatch = path.match(/^\/pricing\/promotions\/validate$/);
+  if (promoMatch && method === "GET") {
+    const code = String(ctx.params?.code || body.code || "");
+    if (!code) throwErr("code required");
+    const { data: promo } = await db
+      .from("promotions")
+      .select("*")
+      .ilike("code", code.trim())
+      .eq("active", true)
+      .maybeSingle();
+    if (!promo) return { valid: false, message: "Invalid or expired promo code" };
+    if (promo.expiration_date && new Date(String(promo.expiration_date)) < new Date()) {
+      return { valid: false, message: "Promo code has expired" };
+    }
+    if (promo.usage_limit != null && Number(promo.usage_count) >= Number(promo.usage_limit)) {
+      return { valid: false, message: "Promo code usage limit reached" };
+    }
+    return {
+      valid: true,
+      code: promo.code,
+      discount_type: promo.discount_type,
+      discount_value: Number(promo.discount_value),
+      minimum_subtotal: promo.minimum_subtotal != null ? Number(promo.minimum_subtotal) : null,
+      description:
+        promo.discount_type === "free_delivery"
+          ? "Free delivery on this order"
+          : promo.discount_type === "percent"
+            ? `${promo.discount_value}% off`
+            : `$${Number(promo.discount_value).toFixed(2)} off`,
+    };
+  }
+
+  if (path === "/pricing/quote" && method === "POST") {
+    const u = ctx.requireAuth();
+    const input = await buildQuoteInput(db, body, u);
     const quote = await calculatePricingQuote(db, input);
     return quote;
   }
@@ -87,6 +151,7 @@ export async function quoteOrderForCheckout(
   params: {
     restaurantId: string;
     subtotal: number;
+    customerId?: string;
     customerLat?: number | null;
     customerLng?: number | null;
     restaurantLat?: number | null;
@@ -99,6 +164,7 @@ export async function quoteOrderForCheckout(
   const quote = await calculatePricingQuote(db, {
     subtotal: params.subtotal,
     restaurantId: params.restaurantId,
+    customerId: params.customerId,
     customerLat: params.customerLat,
     customerLng: params.customerLng,
     restaurantLat: params.restaurantLat,
@@ -115,4 +181,4 @@ export async function quoteOrderForCheckout(
   return quote;
 }
 
-export { calculatePricingQuote, persistPricingSnapshot };
+export { calculatePricingQuote, persistPricingSnapshot, formatCustomerPricingLines, summarizeDeliveryCalculator };

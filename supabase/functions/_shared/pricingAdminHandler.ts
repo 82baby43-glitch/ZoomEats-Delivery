@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { calculatePricingQuote } from "./pricing/engine.ts";
+import { calculatePricingQuote } from "../pricing/engine";
 
 type AdminCtx = {
   path: string;
@@ -28,6 +28,8 @@ const EDITABLE_RULE_TYPES = [
   "large_order_bonus",
   "large_order_threshold",
   "guaranteed_pay",
+  "long_distance_bonus",
+  "long_distance_threshold",
   "min_platform_profit",
   "subsidy_enabled",
   "promotion_budget",
@@ -134,6 +136,33 @@ export async function handlePricingAdminRequest(
       .limit(limit);
     if (error) throw new Error(error.message);
     return data || [];
+  }
+
+  if (path === "/admin/pricing/promotions" && method === "GET") {
+    const { data, error } = await db.from("promotions").select("*").order("created_at", { ascending: false }).limit(100);
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
+
+  if (path === "/admin/pricing/promotions" && method === "POST") {
+    const code = String(body.code || "").trim().toUpperCase();
+    const discountType = String(body.discount_type || "percent");
+    if (!code) throw new Error("code required");
+    if (!["percent", "fixed", "free_delivery"].includes(discountType)) {
+      throw new Error("Invalid discount_type");
+    }
+    const row = {
+      code,
+      discount_type: discountType,
+      discount_value: Number(body.discount_value ?? 0),
+      usage_limit: body.usage_limit != null ? Number(body.usage_limit) : null,
+      minimum_subtotal: body.minimum_subtotal != null ? Number(body.minimum_subtotal) : null,
+      expiration_date: body.expiration_date || null,
+      active: body.active !== false,
+    };
+    const { data, error } = await db.from("promotions").insert(row).select().single();
+    if (error) throw new Error(error.message);
+    return data;
   }
 
   if (path === "/admin/pricing/summary" && method === "GET") {

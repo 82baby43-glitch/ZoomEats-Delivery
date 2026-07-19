@@ -1,6 +1,7 @@
 export interface PricingQuoteInput {
   subtotal: number;
   restaurantId: string;
+  customerId?: string | null;
   customerLat?: number | null;
   customerLng?: number | null;
   restaurantLat?: number | null;
@@ -75,4 +76,14 @@ export interface PricingQuote {
   subsidy_allowed: boolean;
   blocked: boolean;
   block_reason?: string;
+  free_delivery?: { eligible: boolean; reason: string | null };
+  customer_lines?: Array<{
+    key: string;
+    label: string;
+    amount: number;
+    isDiscount?: boolean;
+    isTotal?: boolean;
+    meta?: string;
+  }>;
+  delivery_calculator?: Record<string, number | string | boolean | null>;
 }

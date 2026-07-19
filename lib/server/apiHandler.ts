@@ -279,6 +279,7 @@ export async function handleApiRequest(
       path,
       method,
       body,
+      params,
       requireAuth,
       requireRole,
     });
@@ -570,6 +571,7 @@ export async function handleApiRequest(
       const quote = await quoteOrderForCheckout(db, {
         restaurantId: rest.restaurant_id,
         subtotal,
+        customerId: u.user_id as string,
         customerLat: geo?.latitude ?? null,
         customerLng: geo?.longitude ?? null,
         restaurantLat: rest.latitude != null ? Number(rest.latitude) : null,
