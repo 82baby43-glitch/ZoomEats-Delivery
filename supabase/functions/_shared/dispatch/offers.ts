@@ -1,14 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createRoutingDbAdapter } from "./routing/db-adapter";
-import { selectOptimalDriverForOrder } from "./routing/dispatch-routing";
-import type { ActiveOrderRef } from "./routing/types";
-import { haversineKm } from "./routing/geo";
-import { initializeRouteForOrder } from "./routing/uber-routing-ai";
-import { handleDispatchAssigned } from "../delivery/handler";
-import type { RealtimeRuntime } from "../logistics/delivery-realtime";
-import { assignOrderToUberDirect } from "./uberDirect";
-import { resolveUberDirectConfig } from "../server/uberDirectConfigStore";
-import { hasFounderDriverPermission } from "../founderDriver/auth";
+import { createRoutingDbAdapter } from "../routing/db-adapter.ts";
+import { selectOptimalDriverForOrder } from "../routing/dispatch-routing.ts";
+import type { ActiveOrderRef } from "../routing/types.ts";
+import { haversineKm } from "../routing/geo.ts";
+import { initializeRouteForOrder } from "../routing/uber-routing-ai.ts";
+import { handleDispatchAssigned } from "../delivery/handler.ts";
+import type { RealtimeRuntime } from "../logistics/delivery-realtime.ts";
+import { assignOrderToUberDirect } from "../uberDirect.ts";
+import { resolveUberDirectConfig } from "../uberDirectConfigStore.ts";
+import { hasFounderDriverPermission } from "../founderDriverAuth.ts";
 import { estimateDriverEarningsForOrder } from "../driverEarnings/engine.ts";
 
 export const OFFER_TTL_SECONDS = 20;

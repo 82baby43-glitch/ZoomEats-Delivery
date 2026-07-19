@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { calculatePricingQuote, persistPricingSnapshot } from "./engine";
+import { calculatePricingQuote, persistPricingSnapshot } from "./engine.ts";
 import { formatCustomerPricingLines, summarizeDeliveryCalculator } from "./customer.ts";
-import type { PricingQuoteInput } from "./types";
+import type { PricingQuoteInput } from "./types.ts";
 
 type HandlerCtx = {
   path: string;
@@ -56,7 +56,7 @@ async function buildQuoteInput(
   let customerLng = body.customer_lng != null ? Number(body.customer_lng) : null;
   const address = String(body.address || "").trim();
   if ((customerLat == null || customerLng == null) && address) {
-    const { geocodeOrderAddress } = await import("../server/geocodeAdmin");
+    const { geocodeOrderAddress } = await import("../geocodeAdmin.ts");
     const geo = await geocodeOrderAddress(address, String(user?.name || ""));
     if (geo) {
       customerLat = geo.latitude;

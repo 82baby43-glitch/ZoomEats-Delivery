@@ -2,11 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-<<<<<<< HEAD
-import { Download, Truck, CreditCard, MapPin, Activity, DollarSign, Sparkles, Shield, Store, Calculator, Percent, SlidersHorizontal, BarChart3 } from "lucide-react";
-=======
-import { Download, Truck, CreditCard, MapPin, Activity, DollarSign, Sparkles, Shield, Store, Calculator, BarChart3, Brain } from "lucide-react";
->>>>>>> origin/cursor/ai-pricing-optimizer-b576
+import { Download, Truck, CreditCard, MapPin, Activity, DollarSign, Sparkles, Shield, Store, Calculator, Percent, SlidersHorizontal, BarChart3, Brain } from "lucide-react";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import PulseHeader, { MetricsTiles } from "@/components/admin/PulseHeader";
@@ -193,16 +189,14 @@ export default function AdminPanel() {
           <Link href="/admin/pricing" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-pricing-link">
             <Calculator size={16} /> Pricing Engine
           </Link>
-<<<<<<< HEAD
           <Link href="/admin/commission" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-commission-link">
             <Percent size={16} /> Commission Engine
           </Link>
           <Link href="/admin/pricing-rules" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-pricing-rules-link">
             <SlidersHorizontal size={16} /> Pricing Rules
-=======
+          </Link>
           <Link href="/admin/pricing-optimizer" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-pricing-optimizer-link">
             <Brain size={16} /> AI Pricing Optimizer
->>>>>>> origin/cursor/ai-pricing-optimizer-b576
           </Link>
           <Link href="/admin/spotlight" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-spotlight-link">
             <Sparkles size={16} /> Local Partner Spotlight

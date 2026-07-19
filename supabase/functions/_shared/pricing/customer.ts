@@ -1,4 +1,4 @@
-import type { PricingQuote } from "./types";
+import type { PricingQuote } from "./types.ts";
 
 export type CustomerPricingLine = {
   key: string;

@@ -1,20 +1,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { haversineKm } from "../dispatch/routing/geo";
-import { etaMinutesBetween } from "../dispatch/routing/eta-engine";
-import { createRoutingDbAdapter } from "../dispatch/routing/db-adapter";
-import { getGpsStreamState } from "../dispatch/routing/gps-stream";
+import { haversineKm } from "../routing/geo.ts";
+import { etaMinutesBetween } from "../routing/eta-engine.ts";
+import { createRoutingDbAdapter } from "../routing/db-adapter.ts";
+import { getGpsStreamState } from "../routing/gps-stream.ts";
 import {
   buildRoutesFromRouteState,
   remainingDistanceKm,
   computeOrderRoutingIntel,
-} from "./route-state-helpers";
-import { fetchHistoricalDeliveryMinutes, fetchDefaultEstimateMinutes } from "./eta-service";
+} from "./route-state-helpers.ts";
+import { fetchHistoricalDeliveryMinutes, fetchDefaultEstimateMinutes } from "./eta-service.ts";
 import {
   computeDriverApproachAlert,
   distanceFeetBetween,
   fetchDriverVehicleLabel,
-} from "./driver-approach-alerts";
-import type { RestaurantDriverApproachAlert } from "./types";
+} from "./driver-approach-alerts.ts";
+import type { RestaurantDriverApproachAlert } from "./types.ts";
 import type {
   AdminLogisticsView,
   DeliveryQueueItem,
@@ -28,9 +28,9 @@ import type {
   RestaurantLogisticsView,
   RestaurantPerformancePanel,
   RoutePolyline,
-} from "./types";
-import { buildDispatchExplain } from "./dispatchExplain";
-import { fetchDeliveryDemandZonesAsHotspots } from "./delivery-demand-zones";
+} from "./types.ts";
+import { buildDispatchExplain } from "./dispatchExplain.ts";
+import { fetchDeliveryDemandZonesAsHotspots } from "./delivery-demand-zones.ts";
 import { estimateDriverEarningsForOrder, getDriverEarningsSummary } from "../driverEarnings/engine.ts";
 
 const ACTIVE_ORDER_STATUSES = [
