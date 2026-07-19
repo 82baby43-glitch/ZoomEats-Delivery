@@ -69,7 +69,7 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) 
         }
 
         const agrRes = role === "vendor"
-          ? await api.get(`/agreements/me?merchant_category=${encodeURIComponent(slug)}`)
+          ? await api.get("/agreements/me", { params: { merchant_category: slug } })
           : await api.get("/agreements/me");
         const list = Array.isArray(agrRes?.data) ? agrRes.data : [];
         setAgreements(list);
@@ -113,7 +113,7 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) 
         status: "category_selected",
       });
       setCategoryLocked(true);
-      const agrRes = await api.get(`/agreements/me?merchant_category=${encodeURIComponent(merchantCategory)}`);
+      const agrRes = await api.get("/agreements/me", { params: { merchant_category: merchantCategory } });
       setAgreements(Array.isArray(agrRes?.data) ? agrRes.data : []);
       setStep(step + 1);
     } catch (e) {
