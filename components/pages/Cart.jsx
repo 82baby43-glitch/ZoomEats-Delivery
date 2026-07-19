@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
@@ -42,38 +42,73 @@ export default function Cart() {
     }
   }, []);
 
-  const fetchQuote = useCallback(async () => {
-    if (!cart.restaurant || cart.items.length === 0) {
-      setQuote(null);
-      return;
-    }
-    setQuoteLoading(true);
-    setQuoteErr("");
-    try {
-      const res = await api.post("/pricing/quote", {
-        restaurant_id: cart.restaurant.restaurant_id,
-        items: cart.items,
-        address: address.trim() || undefined,
+  const syncItemPricesRef = useRef(syncItemPrices);
+  syncItemPricesRef.current = syncItemPrices;
+
+  const cartRef = useRef(cart);
+  cartRef.current = cart;
+
+  const quoteRef = useRef(quote);
+  quoteRef.current = quote;
+
+  const [quoteRefreshNonce, setQuoteRefreshNonce] = useState(0);
+
+  const itemsKey = cart.items.map((i) => `${i.item_id}:${i.quantity}`).join("|");
+
+  const quoteInputKey = useMemo(
+    () =>
+      JSON.stringify({
+        restaurant_id: cart.restaurant?.restaurant_id || "",
+        itemsKey,
+        address: address.trim(),
         tip_amount: tipAmount ? Number(tipAmount) : 0,
-        promo_code: promoCode.trim() || undefined,
-      });
-      setQuote(res?.data || null);
-      if (res?.data?.repriced_items?.length) {
-        syncItemPrices(res.data.repriced_items);
-      }
-      setPromoMsg("");
-    } catch (e) {
-      setQuote(null);
-      setQuoteErr(getApiErrorMessage(e, "Could not load delivery fee estimate."));
-    } finally {
-      setQuoteLoading(false);
-    }
-  }, [cart.restaurant, cart.items, address, tipAmount, promoCode, syncItemPrices, user]);
+        promo_code: promoCode.trim(),
+      }),
+    [cart.restaurant?.restaurant_id, itemsKey, address, tipAmount, promoCode]
+  );
 
   useEffect(() => {
-    const timer = setTimeout(fetchQuote, 400);
-    return () => clearTimeout(timer);
-  }, [fetchQuote]);
+    const currentCart = cartRef.current;
+    if (!currentCart.restaurant || currentCart.items.length === 0) {
+      setQuote(null);
+      setQuoteLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const showLoading = !quoteRef.current;
+    if (showLoading) setQuoteLoading(true);
+
+    const timer = setTimeout(async () => {
+      setQuoteErr("");
+      try {
+        const liveCart = cartRef.current;
+        const res = await api.post("/pricing/quote", {
+          restaurant_id: liveCart.restaurant.restaurant_id,
+          items: liveCart.items,
+          address: address.trim() || undefined,
+          tip_amount: tipAmount ? Number(tipAmount) : 0,
+          promo_code: promoCode.trim() || undefined,
+        });
+        if (cancelled) return;
+        setQuote(res?.data || null);
+        if (res?.data?.repriced_items?.length) {
+          syncItemPricesRef.current(res.data.repriced_items);
+        }
+      } catch (e) {
+        if (cancelled) return;
+        setQuote(null);
+        setQuoteErr(getApiErrorMessage(e, "Could not load delivery fee estimate."));
+      } finally {
+        if (!cancelled) setQuoteLoading(false);
+      }
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [quoteInputKey, quoteRefreshNonce, address, tipAmount, promoCode]);
 
   const validatePromo = async () => {
     const code = promoCode.trim();
@@ -83,7 +118,7 @@ export default function Cart() {
       const data = res?.data;
       if (data?.valid) {
         setPromoMsg(data.description || "Promo applied");
-        fetchQuote();
+        setQuoteRefreshNonce((n) => n + 1);
       } else {
         setPromoMsg(data?.message || "Invalid promo");
       }
