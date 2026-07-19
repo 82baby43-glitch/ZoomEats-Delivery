@@ -6,10 +6,14 @@ import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
 import { api, getApiErrorMessage } from "@/lib/api";
 import Header from "@/components/Header";
-import DeliveryFeeCalculator from "@/components/checkout/DeliveryFeeCalculator";
+import IntelligentCheckoutPricing from "@/components/checkout/IntelligentCheckoutPricing";
 import { Minus, Plus, Trash2 } from "lucide-react";
-import { buildCustomerBreakdownFromQuote } from "@/lib/pricing/orderBreakdown";
-import { CustomerOrderBreakdown } from "@/components/pricing/OrderPricingBreakdown";
+
+const TIP_PRESETS = [
+  { label: "15%", pct: 0.15 },
+  { label: "18%", pct: 0.18 },
+  { label: "20%", pct: 0.2 },
+];
 
 export default function Cart() {
   const { cart, updateQty, subtotal, clear } = useCart();
@@ -21,6 +25,7 @@ export default function Cart() {
   const [requirePin, setRequirePin] = useState(false);
   const [allowPhoto, setAllowPhoto] = useState(true);
   const [tipAmount, setTipAmount] = useState("");
+  const [tipPreset, setTipPreset] = useState(null);
   const [promoCode, setPromoCode] = useState("");
   const [promoMsg, setPromoMsg] = useState("");
   const [quote, setQuote] = useState(null);
@@ -28,6 +33,8 @@ export default function Cart() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const router = useRouter();
+
+  const resolvedTip = tipAmount ? Number(tipAmount) : 0;
 
   const fetchQuote = useCallback(async () => {
     if (!cart.restaurant || cart.items.length === 0) {
@@ -40,22 +47,28 @@ export default function Cart() {
         restaurant_id: cart.restaurant.restaurant_id,
         items: cart.items,
         address: address.trim() || undefined,
-        tip_amount: tipAmount ? Number(tipAmount) : 0,
+        tip_amount: resolvedTip,
         promo_code: promoCode.trim() || undefined,
       });
       setQuote(res?.data || null);
       setPromoMsg("");
-    } catch (e) {
+    } catch {
       setQuote(null);
     } finally {
       setQuoteLoading(false);
     }
-  }, [cart.restaurant, cart.items, address, tipAmount, promoCode]);
+  }, [cart.restaurant, cart.items, address, resolvedTip, promoCode]);
 
   useEffect(() => {
-    const timer = setTimeout(fetchQuote, 400);
+    const timer = setTimeout(fetchQuote, 300);
     return () => clearTimeout(timer);
   }, [fetchQuote]);
+
+  const applyTipPreset = (pct) => {
+    const amount = Math.round(subtotal * pct * 100) / 100;
+    setTipPreset(pct);
+    setTipAmount(amount > 0 ? String(amount) : "");
+  };
 
   const validatePromo = async () => {
     const code = promoCode.trim();
@@ -69,19 +82,18 @@ export default function Cart() {
       } else {
         setPromoMsg(data?.message || "Invalid promo");
       }
-    } catch (e) {
+    } catch {
       setPromoMsg("Could not validate promo");
     }
   };
 
-  const customerBreakdown =
-    quote && cart.items.length > 0
-      ? buildCustomerBreakdownFromQuote(
-          quote,
-          cart.items.map((it) => ({ name: it.name, quantity: it.quantity, price: it.price }))
-        )
-      : null;
-  const total = customerBreakdown?.total ?? quote?.customer?.customer_total ?? subtotal;
+  const cartItems = cart.items.map((it) => ({
+    name: it.name,
+    quantity: it.quantity,
+    price: it.price,
+  }));
+
+  const total = quote?.customer?.customer_total ?? subtotal;
 
   const placeOrder = async () => {
     setErr("");
@@ -90,8 +102,14 @@ export default function Cart() {
       return;
     }
     if (!cart.restaurant || cart.items.length === 0) return;
-    if (!address.trim()) { setErr("Please enter delivery address."); return; }
-    if (quote?.blocked) { setErr(quote.block_reason || "This order cannot be placed right now."); return; }
+    if (!address.trim()) {
+      setErr("Please enter delivery address.");
+      return;
+    }
+    if (quote?.blocked) {
+      setErr(quote.block_reason || "This order cannot be placed right now.");
+      return;
+    }
     setLoading(true);
     try {
       const orderRes = await api.post("/orders", {
@@ -103,7 +121,7 @@ export default function Cart() {
         delivery_instructions: deliveryInstructions,
         require_delivery_pin: deliveryMethod === "hand_to_me" && requirePin,
         allow_photo_confirmation: allowPhoto,
-        tip_amount: tipAmount ? Number(tipAmount) : 0,
+        tip_amount: resolvedTip,
         promo_code: promoCode.trim() || undefined,
       });
       const order = orderRes?.data;
@@ -228,14 +246,45 @@ export default function Cart() {
               </div>
               {promoMsg && <p className="text-xs" style={{ color: "var(--primary)" }}>{promoMsg}</p>}
               <div>
-                <label className="label-eyebrow">Tip (optional)</label>
+                <label className="label-eyebrow">Driver tip</label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {TIP_PRESETS.map(({ label, pct }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${tipPreset === pct ? "font-bold" : ""}`}
+                      style={{
+                        borderColor: tipPreset === pct ? "var(--primary)" : "var(--border)",
+                        background: tipPreset === pct ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "transparent",
+                      }}
+                      onClick={() => applyTipPreset(pct)}
+                      data-testid={`tip-preset-${label}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className={`text-xs px-3 py-1.5 rounded-full border ${tipPreset === null && tipAmount ? "font-bold" : ""}`}
+                    style={{ borderColor: "var(--border)" }}
+                    onClick={() => {
+                      setTipPreset(null);
+                      setTipAmount("");
+                    }}
+                  >
+                    Custom
+                  </button>
+                </div>
                 <input
                   className="input-field mt-2"
                   type="number"
                   min="0"
                   step="0.5"
                   value={tipAmount}
-                  onChange={(e) => setTipAmount(e.target.value)}
+                  onChange={(e) => {
+                    setTipPreset(null);
+                    setTipAmount(e.target.value);
+                  }}
                   placeholder="0.00"
                   data-testid="checkout-tip"
                 />
@@ -252,15 +301,12 @@ export default function Cart() {
                 />
               </div>
               <div className="border-t pt-4" style={{ borderColor: "var(--border)" }}>
-                {customerBreakdown ? (
-                  <CustomerOrderBreakdown breakdown={customerBreakdown} loading={quoteLoading} />
-                ) : (
-                  <DeliveryFeeCalculator
-                    quote={quote}
-                    loading={quoteLoading}
-                    subtotalFallback={subtotal}
-                  />
-                )}
+                <IntelligentCheckoutPricing
+                  quote={quote}
+                  loading={quoteLoading}
+                  subtotalFallback={subtotal}
+                  cartItems={cartItems}
+                />
               </div>
               {err && <div className="text-sm" style={{ color: "var(--primary)" }}>{err}</div>}
               <button

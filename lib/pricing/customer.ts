@@ -1,4 +1,5 @@
 import type { PricingQuote } from "./types";
+import { FEE_HELP_TEXT } from "./checkoutInsights";
 
 export type CustomerPricingLine = {
   key: string;
@@ -7,6 +8,7 @@ export type CustomerPricingLine = {
   isDiscount?: boolean;
   isTotal?: boolean;
   meta?: string;
+  helpText?: string;
 };
 
 function round2(n: number) {
@@ -23,7 +25,7 @@ export function deliveryStackTotal(customer: PricingQuote["customer"]): number {
   );
 }
 
-/** Transparent checkout line items for dynamic customer pricing. */
+/** Transparent checkout line items — only non-zero fees (except Items and Total). */
 export function formatCustomerPricingLines(
   quote: PricingQuote,
   opts: { promoCode?: string | null; freeDeliveryApplied?: boolean } = {}
@@ -31,53 +33,110 @@ export function formatCustomerPricingLines(
   const c = quote.customer;
   const lines: CustomerPricingLine[] = [];
 
-  lines.push({ key: "subtotal", label: "Items", amount: c.subtotal });
+  lines.push({
+    key: "subtotal",
+    label: "Items",
+    amount: c.subtotal,
+    helpText: FEE_HELP_TEXT.subtotal,
+  });
+
+  if (c.discount_amount > 0) {
+    const label = opts.freeDeliveryApplied
+      ? "Free delivery"
+      : opts.promoCode
+        ? `Promo code savings (${opts.promoCode})`
+        : "Discounts";
+    lines.push({
+      key: "discount",
+      label,
+      amount: -c.discount_amount,
+      isDiscount: true,
+      helpText: FEE_HELP_TEXT.discount,
+    });
+  }
 
   if (c.delivery_fee > 0) {
-    lines.push({ key: "delivery_base", label: "Base delivery fee", amount: c.delivery_fee });
+    lines.push({
+      key: "delivery_base",
+      label: "Base delivery fee",
+      amount: c.delivery_fee,
+      helpText: FEE_HELP_TEXT.delivery_base,
+    });
   }
   if (c.distance_fee > 0) {
     lines.push({
       key: "distance_fee",
       label: `Distance fee (${quote.distance_miles.toFixed(1)} mi)`,
       amount: c.distance_fee,
+      helpText: FEE_HELP_TEXT.distance_fee,
+    });
+  }
+  if (c.small_order_fee > 0) {
+    lines.push({
+      key: "small_order_fee",
+      label: "Small order fee",
+      amount: c.small_order_fee,
+      helpText: FEE_HELP_TEXT.small_order_fee,
     });
   }
   if (c.surge_fee > 0) {
     lines.push({
       key: "surge_fee",
-      label: `Surge pricing (${quote.surge_multiplier}x)`,
+      label: `Busy area / surge fee (${quote.surge_multiplier}x)`,
       amount: c.surge_fee,
       meta: "High demand",
+      helpText: FEE_HELP_TEXT.surge_fee,
     });
   }
   if (c.weather_fee > 0) {
-    lines.push({ key: "weather_fee", label: "Weather adjustment", amount: c.weather_fee });
-  }
-  if (c.small_order_fee > 0) {
-    lines.push({ key: "small_order_fee", label: "Small order fee", amount: c.small_order_fee });
+    lines.push({
+      key: "weather_fee",
+      label: "Weather adjustment",
+      amount: c.weather_fee,
+      helpText: FEE_HELP_TEXT.weather_fee,
+    });
   }
   if (c.service_fee > 0) {
-    lines.push({ key: "service_fee", label: "Service fee", amount: c.service_fee });
+    lines.push({
+      key: "service_fee",
+      label: "Service fee",
+      amount: c.service_fee,
+      helpText: FEE_HELP_TEXT.service_fee,
+    });
+  }
+  const regulatory = Number(c.regulatory_fee ?? 0);
+  if (regulatory > 0) {
+    lines.push({
+      key: "regulatory_fee",
+      label: "Regulatory fee",
+      amount: regulatory,
+      helpText: FEE_HELP_TEXT.regulatory_fee,
+    });
+  }
+  if (c.tip_amount > 0) {
+    lines.push({
+      key: "tip",
+      label: "Driver tip",
+      amount: c.tip_amount,
+      helpText: FEE_HELP_TEXT.tip,
+    });
   }
   if (c.tax_amount > 0) {
-    lines.push({ key: "tax", label: "Sales tax", amount: c.tax_amount });
+    lines.push({
+      key: "tax",
+      label: "Sales tax",
+      amount: c.tax_amount,
+      helpText: FEE_HELP_TEXT.tax,
+    });
   }
 
-  if (c.discount_amount > 0) {
-    const label = opts.freeDeliveryApplied
-      ? "Free delivery"
-      : opts.promoCode
-        ? `Promo (${opts.promoCode})`
-        : "Discount";
-    lines.push({ key: "discount", label, amount: -c.discount_amount, isDiscount: true });
-  }
-
-  if (c.tip_amount > 0) {
-    lines.push({ key: "tip", label: "Driver tip", amount: c.tip_amount });
-  }
-
-  lines.push({ key: "total", label: "Total", amount: c.customer_total, isTotal: true });
+  lines.push({
+    key: "total",
+    label: "Total",
+    amount: c.customer_total,
+    isTotal: true,
+    helpText: FEE_HELP_TEXT.total,
+  });
   return lines;
 }
 
