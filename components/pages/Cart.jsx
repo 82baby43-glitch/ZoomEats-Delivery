@@ -113,6 +113,10 @@ export default function Cart() {
       setErr(quote.block_reason || "This order cannot be placed right now.");
       return;
     }
+    if (!quote && !quoteLoading) {
+      setErr("Could not calculate pricing. Check your address and try again.");
+      return;
+    }
     if (quoteLoading) {
       setErr("Please wait while we calculate your total.");
       return;

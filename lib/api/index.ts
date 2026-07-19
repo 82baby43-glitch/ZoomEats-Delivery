@@ -22,14 +22,12 @@ function isCacheableGet(path: string) {
   return path.startsWith("/checkout/status/") || path === "/orders/my";
 }
 
-/** Stripe checkout + payment paths run on Supabase edge where Stripe secrets live. */
+/** Admin/audit paths that must hit Supabase edge directly from the browser. */
 function prefersSupabaseEdge(path: string) {
   return (
     path.startsWith("/admin/launch-audit") ||
     path.startsWith("/admin/system-health") ||
-    path.startsWith("/admin/stripe") ||
-    path === "/checkout/session" ||
-    path.startsWith("/checkout/status/")
+    path.startsWith("/admin/stripe")
   );
 }
 

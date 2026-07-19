@@ -154,8 +154,8 @@ export function canAccessPath(user: AuthUserLike | null | undefined, pathname: s
   if (!user) return isPublicPath(pathname);
   if (isPublicPath(pathname)) return true;
 
-  // Admins and dispatchers need the customer checkout flow for smoke tests and live orders.
-  if (isPrivilegedOperator(user) && prefixAllowed(pathname, CUSTOMER_ORDER_PREFIXES)) {
+  // Any signed-in account may place a personal food order (customer, driver, restaurant, admin).
+  if (prefixAllowed(pathname, CUSTOMER_ORDER_PREFIXES)) {
     return true;
   }
 
@@ -169,10 +169,6 @@ export function canAccessPath(user: AuthUserLike | null | undefined, pathname: s
   if (!allowed) return effective === "customer" && prefixAllowed(pathname, ROLE_ROUTE_ACCESS.customer);
 
   if (prefixAllowed(pathname, allowed)) return true;
-
-  if (effective !== "customer" && prefixAllowed(pathname, CUSTOMER_ORDER_PREFIXES)) {
-    return false;
-  }
 
   return false;
 }

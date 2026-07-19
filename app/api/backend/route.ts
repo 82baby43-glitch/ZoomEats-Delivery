@@ -8,7 +8,11 @@ export const maxDuration = 300;
 
 function needsSupabaseEdge(path: string) {
   if (path.startsWith("/admin/uber-direct")) return true;
+  // Stripe checkout always runs on Supabase edge (secrets live there).
   if (path === "/checkout/session" || path.startsWith("/checkout/status/")) return true;
+  // Keep order creation on the same backend as checkout to avoid split-brain auth/routing.
+  if (path === "/orders") return true;
+  if (path === "/pricing/quote") return true;
   return false;
 }
 
