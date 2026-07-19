@@ -958,6 +958,7 @@ Deno.serve(async (req) => {
       const { data: o } = await db.from("orders").select("*").eq("order_id", order_id).eq("customer_id", u.user_id).maybeSingle();
       if (!o) return err("Order not found", 404);
       if (o.payment_status === "paid") return err("Already paid");
+      if (Number(o.total) < 0.5) return err("Order total must be at least $0.50 for Stripe checkout.", 422);
 
       structuredLog(LOG_EVENTS.CHECKOUT_STARTED, { orderId: order_id, userId: u.user_id });
 
