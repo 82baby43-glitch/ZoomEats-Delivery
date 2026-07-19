@@ -5,6 +5,7 @@ import { computeSurgeMultiplier } from "./surge.ts";
 import { deliveryStackTotal, formatCustomerPricingLines, summarizeDeliveryCalculator } from "./customer.ts";
 import { evaluateProfitProtection, logProfitProtectionDecision } from "./profitProtection.ts";
 import { resolveCommissionRate } from "../restaurantCommission/engine.ts";
+import { capDiscountToPromotionBudget } from "./promotionBudget.ts";
 import type { PricingQuote, PricingQuoteInput } from "./types.ts";
 
 function round2(n: number) {
@@ -139,6 +140,13 @@ export async function calculatePricingQuote(
         customer.discount_amount +
         customer.tip_amount
     );
+  }
+
+  const rawDiscount = customer.discount_amount;
+  const cappedDiscount = await capDiscountToPromotionBudget(db, rawDiscount);
+  if (cappedDiscount !== rawDiscount) {
+    customer.discount_amount = cappedDiscount;
+    customer.customer_total = round2(customer.customer_total + (rawDiscount - cappedDiscount));
   }
 
   const driverCalc = await rpcJson(db, "calculate_driver_pay", {

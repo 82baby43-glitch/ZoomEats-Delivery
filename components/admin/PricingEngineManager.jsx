@@ -229,6 +229,7 @@ export default function PricingEngineManager() {
             </p>
           </div>
           <Link href="/admin" className="btn-ghost text-sm">← Admin</Link>
+          <Link href="/admin/pricing-rules" className="btn-secondary text-sm">Pricing Rules</Link>
         </div>
 
         {summary && (
