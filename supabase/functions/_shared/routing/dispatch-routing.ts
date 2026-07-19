@@ -1,11 +1,12 @@
-import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { computeRouteEta } from "./eta-engine.ts";
-import { isNearRouteCorridor, haversineKm } from "./geo.ts";
-import { insertAndReoptimize, sequenceActiveOrders } from "./sequence-engine.ts";
-import type { ActiveOrderRef } from "./types.ts";
-import { ROUTING_CONFIG } from "./types.ts";
-import type { RoutingDbAdapter } from "./uber-routing-ai.ts";
-import { resolveRouteConflict } from "./uber-routing-ai.ts";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { computeRouteEta } from "./eta-engine";
+import { isNearRouteCorridor, haversineKm } from "./geo";
+import { insertAndReoptimize, sequenceActiveOrders } from "./sequence-engine";
+import type { ActiveOrderRef } from "./types";
+import { ROUTING_CONFIG } from "./types";
+import type { RoutingDbAdapter } from "./uber-routing-ai";
+import { resolveRouteConflict } from "./uber-routing-ai";
+import { calculateDriverEarnings } from "../driverEarnings/engine.ts";
 
 export type DriverRoutingMode = "init" | "insert";
 
@@ -17,10 +18,20 @@ export interface DriverProposal {
   earnings: number;
 }
 
-function estimateOrderEarnings(order: ActiveOrderRef, totalKm: number): number {
-  const base = 4.5;
-  const perKm = 1.2;
-  return base + totalKm * perKm + (order.priority ?? 0) * 0.5;
+async function estimateOrderEarnings(
+  db: SupabaseClient,
+  order: ActiveOrderRef,
+  totalKm: number
+): Promise<number> {
+  try {
+    const breakdown = await calculateDriverEarnings(db, {
+      distanceMiles: Math.max(0.5, totalKm * 0.621371),
+      orderSubtotal: order.priority ? order.priority * 10 : 0,
+    });
+    return breakdown.final_driver_pay;
+  } catch {
+    return 4.5 + totalKm * 1.2 + (order.priority ?? 0) * 0.5;
+  }
 }
 
 function etaVariance(stops: number): number {
@@ -91,7 +102,7 @@ export async function buildDriverProposals(
         mode: "insert",
         eta: afterEta,
         variance: etaVariance(optimized.length),
-        earnings: estimateOrderEarnings(order, state.total_distance_km),
+        earnings: await estimateOrderEarnings(db, order, state.total_distance_km),
       });
       continue;
     }
@@ -105,7 +116,7 @@ export async function buildDriverProposals(
       mode: "init",
       eta: eta.total_eta_minutes + distToPickup * 0.5,
       variance: etaVariance(stops.length),
-      earnings: estimateOrderEarnings(order, eta.total_distance_km),
+      earnings: await estimateOrderEarnings(db, order, eta.total_distance_km),
     });
   }
 

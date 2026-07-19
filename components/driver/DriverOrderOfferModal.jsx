@@ -8,6 +8,7 @@ import { getDriverDeviceId } from "@/lib/driverDeviceId";
 import { playNewOrderOfferSound, playOfferTimeoutSound, primeDriverOfferSound } from "@/lib/driverOfferSound";
 import { useWebPush } from "@/lib/useWebPush";
 import { MapPin, DollarSign, Clock, Truck } from "lucide-react";
+import DriverEarningsBreakdown from "@/components/driver/DriverEarningsBreakdown";
 
 export default function DriverOrderOfferModal({ offer, onClear, onRefresh }) {
   const [secondsLeft, setSecondsLeft] = useState(offer?.ttl_seconds ?? 20);
@@ -88,6 +89,7 @@ export default function DriverOrderOfferModal({ offer, onClear, onRefresh }) {
   const restaurant = offer.restaurant_name || offer.meta?.restaurant_name || "Restaurant";
   const area = offer.customer_area || offer.meta?.customer_area || "Customer area";
   const earnings = offer.estimated_earnings ?? offer.meta?.estimated_earnings;
+  const earningsBreakdown = offer.earnings_breakdown ?? offer.meta?.earnings_breakdown;
   const distance = offer.estimated_distance_km ?? offer.meta?.estimated_distance_km;
   const eta = offer.estimated_eta_min ?? offer.meta?.estimated_eta_min;
 
@@ -154,6 +156,11 @@ export default function DriverOrderOfferModal({ offer, onClear, onRefresh }) {
               <div className="flex items-center gap-3">
                 <DollarSign size={18} style={{ color: "var(--muted)" }} />
                 <span>Est. earnings ${Number(earnings).toFixed(2)}</span>
+              </div>
+            )}
+            {earningsBreakdown && (
+              <div className="rounded-xl border p-3 mt-2" style={{ borderColor: "var(--border)" }}>
+                <DriverEarningsBreakdown breakdown={earningsBreakdown} compact />
               </div>
             )}
             {eta != null && (

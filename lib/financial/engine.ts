@@ -189,8 +189,11 @@ export async function recordOrderFinancials(
       weather_bonus: Number(driverCalc.weather_bonus ?? 0),
       peak_bonus: Number(driverCalc.peak_bonus ?? 0),
       large_order_bonus: Number(driverCalc.large_order_bonus ?? 0),
-      customer_tip: Number(driverCalc.customer_tip ?? 0),
+      long_distance_bonus: Number(driverCalc.long_distance_bonus ?? 0),
+      customer_tip: Number(driverCalc.customer_tip ?? tip),
       guaranteed_pay: Number(driverCalc.guaranteed_pay ?? 0),
+      pre_tip_pay: Number(driverCalc.pre_tip_pay ?? 0),
+      guaranteed_top_up: Number(driverCalc.guaranteed_top_up ?? 0),
       final_driver_pay: Number(driverCalc.final_driver_pay ?? 0),
       status: "calculated",
     })
