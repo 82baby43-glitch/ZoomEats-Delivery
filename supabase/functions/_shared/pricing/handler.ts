@@ -101,6 +101,7 @@ export async function handlePricingRequest(
       distance_miles: quote.distance_miles,
       surge_multiplier: quote.surge_multiplier,
       free_delivery: quote.free_delivery,
+      checkout_insights: quote.checkout_insights,
     };
   }
 

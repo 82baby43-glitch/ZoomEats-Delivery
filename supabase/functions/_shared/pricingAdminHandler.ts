@@ -42,6 +42,8 @@ const EDITABLE_RULE_TYPES = [
   "subsidy_enabled",
   "promotion_budget",
   "pricing_version",
+  "free_delivery_threshold",
+  "regulatory_fee",
 ];
 
 function round2(n: number) {

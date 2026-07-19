@@ -6,6 +6,7 @@ import { deliveryStackTotal, formatCustomerPricingLines, summarizeDeliveryCalcul
 import { evaluateProfitProtection, logProfitProtectionDecision } from "./profitProtection";
 import { resolveCommissionRate } from "../restaurantCommission/engine";
 import { capDiscountToPromotionBudget } from "./promotionBudget";
+import { buildCheckoutInsights } from "./checkoutInsights";
 import type { PricingQuote, PricingQuoteInput } from "./types";
 
 function round2(n: number) {
@@ -16,6 +17,49 @@ async function rpcJson(db: SupabaseClient, fn: string, args: Record<string, unkn
   const { data, error } = await db.rpc(fn, args);
   if (error) return { data: null, error: error.message };
   return { data: data as Record<string, number | string | boolean | null>, error: null };
+}
+
+async function getRuleRow(db: SupabaseClient, ruleType: string) {
+  const { data } = await db
+    .from("pricing_rules")
+    .select("value,percentage,minimum_amount,maximum_amount,active")
+    .eq("rule_type", ruleType)
+    .eq("active", true)
+    .order("effective_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data;
+}
+
+async function applyRegulatoryFee(
+  db: SupabaseClient,
+  customer: PricingQuote["customer"],
+  orderSubtotal: number
+): Promise<number> {
+  const rule = await getRuleRow(db, "regulatory_fee");
+  if (!rule) return 0;
+  let fee = 0;
+  if (rule.percentage != null && Number(rule.percentage) > 0) {
+    fee = round2(orderSubtotal * (Number(rule.percentage) / 100));
+  } else if (rule.value != null && Number(rule.value) > 0) {
+    fee = round2(Number(rule.value));
+  }
+  if (fee <= 0) return 0;
+  customer.regulatory_fee = fee;
+  customer.customer_total = round2(customer.customer_total + fee);
+  return fee;
+}
+
+function recalcCustomerTotal(customer: PricingQuote["customer"]) {
+  customer.customer_total = round2(
+    customer.subtotal +
+      customer.tax_amount +
+      deliveryStackTotal(customer) +
+      customer.service_fee +
+      Number(customer.regulatory_fee ?? 0) -
+      customer.discount_amount +
+      customer.tip_amount
+  );
 }
 
 async function getRuleValue(db: SupabaseClient, ruleType: string): Promise<number> {
@@ -95,9 +139,10 @@ export async function calculatePricingQuote(
   const ctx = await resolveQuoteContext(db, input);
   const version = await getPricingVersion(db);
 
-  const [minProfit, subsidyRule] = await Promise.all([
+  const [minProfit, subsidyRule, freeDeliveryThreshold] = await Promise.all([
     getRuleValue(db, "min_platform_profit"),
     getRuleValue(db, "subsidy_enabled"),
+    getRuleValue(db, "free_delivery_threshold"),
   ]);
   const subsidyAllowed = Boolean(input.allowSubsidy || subsidyRule > 0);
 
@@ -127,19 +172,13 @@ export async function calculatePricingQuote(
     discount_amount: Number(orderPricing.data.discount_amount ?? 0),
     tip_amount: Number(orderPricing.data.tip_amount ?? tipAmount),
     customer_total: Number(orderPricing.data.customer_total ?? 0),
+    regulatory_fee: 0,
   };
 
   const freeDelivery = await applyFreeDeliveryBenefits(db, input, customer);
   if (freeDelivery.applied) {
     customer.discount_amount = round2(customer.discount_amount + freeDelivery.discountAdded);
-    customer.customer_total = round2(
-      customer.subtotal +
-        customer.tax_amount +
-        deliveryStackTotal(customer) +
-        customer.service_fee -
-        customer.discount_amount +
-        customer.tip_amount
-    );
+    recalcCustomerTotal(customer);
   }
 
   const rawDiscount = customer.discount_amount;
@@ -148,6 +187,8 @@ export async function calculatePricingQuote(
     customer.discount_amount = cappedDiscount;
     customer.customer_total = round2(customer.customer_total + (rawDiscount - cappedDiscount));
   }
+
+  await applyRegulatoryFee(db, customer, customer.subtotal);
 
   const driverCalc = await rpcJson(db, "calculate_driver_pay", {
     p_distance_miles: ctx.distanceMiles,
@@ -266,7 +307,7 @@ export async function calculatePricingQuote(
     });
   }
 
-  return {
+  const baseQuote: PricingQuote = {
     version,
     distance_miles: ctx.distanceMiles,
     estimated_drive_minutes: ctx.driveMinutes,
@@ -284,40 +325,18 @@ export async function calculatePricingQuote(
       eligible: freeDelivery.eligible,
       reason: freeDelivery.reason,
     },
-    customer_lines: formatCustomerPricingLines(
-      {
-        version,
-        distance_miles: ctx.distanceMiles,
-        estimated_drive_minutes: ctx.driveMinutes,
-        surge_multiplier: ctx.surgeMultiplier,
-        peak_active: ctx.peakActive,
-        customer,
-        driver,
-        restaurant,
-        platform,
-        profit_protected: profitProtected,
-        subsidy_allowed: subsidyAllowed,
-        blocked,
-        block_reason: blockReason,
-        free_delivery: { eligible: freeDelivery.eligible, reason: freeDelivery.reason },
-      },
-      { promoCode: input.promoCode, freeDeliveryApplied: freeDelivery.applied }
-    ),
-    delivery_calculator: summarizeDeliveryCalculator({
-      version,
-      distance_miles: ctx.distanceMiles,
-      estimated_drive_minutes: ctx.driveMinutes,
-      surge_multiplier: ctx.surgeMultiplier,
-      peak_active: ctx.peakActive,
-      customer,
-      driver,
-      restaurant,
-      platform,
-      profit_protected: profitProtected,
-      subsidy_allowed: subsidyAllowed,
-      blocked,
-      block_reason: blockReason,
-      free_delivery: { eligible: freeDelivery.eligible, reason: freeDelivery.reason },
+  };
+
+  return {
+    ...baseQuote,
+    customer_lines: formatCustomerPricingLines(baseQuote, {
+      promoCode: input.promoCode,
+      freeDeliveryApplied: freeDelivery.applied,
+    }),
+    delivery_calculator: summarizeDeliveryCalculator(baseQuote),
+    checkout_insights: buildCheckoutInsights(baseQuote, {
+      freeDeliveryThreshold,
+      cartSubtotal: customer.subtotal,
     }),
   };
 }

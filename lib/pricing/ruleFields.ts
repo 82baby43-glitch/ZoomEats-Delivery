@@ -34,9 +34,15 @@ export const PRICING_RULES_DASHBOARD: DashboardSection[] = [
     rules: [
       {
         type: "delivery_fee",
-        label: "Delivery fee",
-        help: "Base delivery charge with min/max bounds",
+        label: "Base delivery fee",
+        help: "Flat delivery charge with min/max bounds",
         fields: ["value", "minimum_amount", "maximum_amount"],
+      },
+      {
+        type: "distance_fee",
+        label: "Distance rate",
+        help: "Per-mile charge added for longer deliveries",
+        fields: ["value", "maximum_amount"],
       },
       {
         type: "service_fee",
@@ -44,7 +50,20 @@ export const PRICING_RULES_DASHBOARD: DashboardSection[] = [
         help: "Percentage of subtotal with min/max bounds",
         fields: ["percentage", "minimum_amount", "maximum_amount"],
       },
+      { type: "small_order_fee", label: "Small order fee", help: "Fee when subtotal is below threshold", fields: ["value"] },
       { type: "small_order_threshold", label: "Small-order threshold", help: "Subtotal below this triggers small-order fee", fields: ["value"] },
+      {
+        type: "free_delivery_threshold",
+        label: "Free delivery threshold",
+        help: "Subtotal at or above this unlocks free delivery messaging",
+        fields: ["value"],
+      },
+      {
+        type: "regulatory_fee",
+        label: "Regulatory fee",
+        help: "Flat or percentage local regulatory fee (set value 0 to disable)",
+        fields: ["value", "percentage"],
+      },
     ],
   },
   {

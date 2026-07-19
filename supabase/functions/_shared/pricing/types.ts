@@ -27,6 +27,7 @@ export interface CustomerBreakdown {
   weather_fee: number;
   discount_amount: number;
   tip_amount: number;
+  regulatory_fee?: number;
   customer_total: number;
 }
 
@@ -78,6 +79,14 @@ export interface PricingQuote {
   blocked: boolean;
   block_reason?: string;
   free_delivery?: { eligible: boolean; reason: string | null };
+  checkout_insights?: {
+    total_savings: number;
+    savings_labels: string[];
+    smart_messages: string[];
+    free_delivery_gap: number | null;
+    surge_active: boolean;
+    peak_active: boolean;
+  };
   customer_lines?: Array<{
     key: string;
     label: string;
@@ -85,6 +94,7 @@ export interface PricingQuote {
     isDiscount?: boolean;
     isTotal?: boolean;
     meta?: string;
+    helpText?: string;
   }>;
   delivery_calculator?: Record<string, number | string | boolean | null>;
 }
