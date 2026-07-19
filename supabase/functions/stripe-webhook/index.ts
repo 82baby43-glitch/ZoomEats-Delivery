@@ -1,6 +1,7 @@
 // Stripe webhook — verify signature, process idempotently, update orders + payments.
 import Stripe from "npm:stripe@16.11.0";
 import { getServiceDb, isEventProcessed, markEventProcessed } from "../_shared/stripeIdempotency.ts";
+import { fulfillPaidOrder } from "../_shared/fulfillPaidOrder.ts";
 import { getStripeApiKey, getStripeWebhookSecret } from "../_shared/stripeEnv.ts";
 
 const HANDLED_EVENTS = new Set([
@@ -103,43 +104,18 @@ async function markOrderPaid(
     return;
   }
 
-  if (existing.payment_status === "paid") {
-    console.log(JSON.stringify({ skipped: "already_paid", order_id: opts.orderId }));
-    return;
-  }
+  const result = await fulfillPaidOrder(db, {
+    orderId: opts.orderId,
+    sessionId: opts.sessionId,
+    paymentIntentId: opts.paymentIntentId,
+    amountPaid: opts.amountPaid,
+    currency: opts.currency,
+  });
 
-  const now = new Date().toISOString();
-  const patch: Record<string, unknown> = {
-    payment_status: "paid",
-    updated_at: now,
-    webhook_processed_at: now,
-  };
+  if (!result.updated && !result.alreadyFulfilled) return;
 
   const sessionId = safeStr(opts.sessionId);
   const paymentIntentId = safeStr(opts.paymentIntentId);
-  if (sessionId) patch.stripe_session_id = sessionId;
-  if (paymentIntentId) patch.stripe_payment_intent_id = paymentIntentId;
-  if (opts.amountPaid != null) patch.amount_paid = opts.amountPaid;
-  if (opts.currency) patch.currency = opts.currency;
-
-  const { error: updateError } = await db
-    .from("orders")
-    .update(patch)
-    .eq("order_id", opts.orderId)
-    .neq("payment_status", "paid");
-
-  if (updateError) {
-    console.log(JSON.stringify({ error: updateError.message, order_id: opts.orderId }));
-    return;
-  }
-
-  if (sessionId) {
-    await db
-      .from("payment_transactions")
-      .update({ payment_status: "paid", status: "complete" })
-      .eq("session_id", sessionId)
-      .neq("payment_status", "paid");
-  }
 
   await syncPaymentsRow(db, {
     orderId: opts.orderId,
@@ -151,7 +127,7 @@ async function markOrderPaid(
     currency: opts.currency ?? null,
   });
 
-  console.log(JSON.stringify({ updated: true, order_id: opts.orderId, session_id: sessionId }));
+  console.log(JSON.stringify({ updated: result.updated, order_id: opts.orderId, session_id: sessionId }));
 }
 
 async function markOrderFailed(
