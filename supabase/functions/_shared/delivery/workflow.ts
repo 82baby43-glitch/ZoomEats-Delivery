@@ -1,6 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { metersBetween } from "../routing/geo.ts";
 import { pushDeliveryEvent, type RealtimeRuntime } from "../logistics/delivery-realtime.ts";
+import {
+  customerFirstName,
+  formatDisplayOrderNumber,
+  pickupVerbalScript,
+} from "./displayOrder.ts";
 
 export type DeliveryMethod = "leave_at_door" | "hand_to_me";
 
@@ -103,9 +108,11 @@ export const CUSTOMER_MILESTONE_MESSAGES: Record<string, string> = {
   delivered: "Your order has been delivered.",
   photo_uploaded: "Delivery photo confirmed.",
   pin_verified: "Delivery verified.",
+  pickup_confirmed: "Driver confirmed the correct order at pickup.",
 };
 
 export function driverVisibleDeliveryPrefs(order: Record<string, unknown>) {
+  const orderId = String(order.order_id || "");
   return {
     delivery_method: order.delivery_method || "hand_to_me",
     delivery_instructions: order.delivery_instructions || order.notes || "",
@@ -113,6 +120,11 @@ export function driverVisibleDeliveryPrefs(order: Record<string, unknown>) {
     allow_photo_confirmation: order.allow_photo_confirmation !== false,
     pin_required: shouldRequireDeliveryPin(order as { delivery_method?: string; require_delivery_pin?: boolean; total?: number }),
     restaurant_ready: Boolean(order.restaurant_ready_at),
+    display_order_number: formatDisplayOrderNumber(orderId),
+    customer_first_name: customerFirstName(order.customer_name as string | undefined),
+    pickup_verbal_script: pickupVerbalScript(orderId, order.customer_name as string | undefined),
+    item_count: Array.isArray(order.items) ? order.items.length : null,
+    restaurant_name: order.restaurant_name || null,
   };
 }
 
