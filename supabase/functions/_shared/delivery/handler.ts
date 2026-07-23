@@ -285,6 +285,25 @@ export async function handleDeliveryWorkflowRequest(
     return { ok: true, verified: true, pin_required: true };
   }
 
+  const pickupPhotoPresignMatch = path.match(/^\/driver\/orders\/([^/]+)\/pickup-photo\/presign$/);
+  if (pickupPhotoPresignMatch && method === "POST") {
+    const u = opts.requireAuth();
+    if (!canUseDriverApis(u as { user_id: string; role?: string; founder_driver?: boolean })) {
+      throwErr("Delivery access required", 403);
+    }
+    const { order } = await loadDriverOrder(db, String(u.user_id), pickupPhotoPresignMatch[1]);
+    if (!["assigned_internal", "arrived_at_store", "ready"].includes(String(order.status))) {
+      throwErr("Pickup photo is only available before pickup is complete");
+    }
+    if (!order.restaurant_ready_at && String(order.status) !== "ready") {
+      throwErr("Restaurant has not marked the order ready yet");
+    }
+    const storagePath = `${order.order_id}/pickup_${uid("bag")}.jpg`;
+    const { data, error } = await db.storage.from("pickup-photos").createSignedUploadUrl(storagePath);
+    if (error) throwErr(error.message, 500);
+    return { upload_url: data?.signedUrl, storage_path: storagePath, token: data?.token };
+  }
+
   const photoPresignMatch = path.match(/^\/driver\/orders\/([^/]+)\/delivery-photo\/presign$/);
   if (photoPresignMatch && method === "POST") {
     const u = opts.requireAuth();
@@ -414,7 +433,7 @@ export async function handleDeliveryWorkflowRequest(
   return null;
 }
 
-/** Enhanced pickup — requires restaurant ready + GPS at store when applicable */
+/** Enhanced pickup — Option A: confirm correct order + sealed bag photo */
 export async function handleDriverPickup(
   db: SupabaseClient,
   order: Record<string, unknown>,
@@ -430,19 +449,58 @@ export async function handleDriverPickup(
     throwErr("Restaurant has not marked the order ready yet");
   }
 
+  if (body.order_confirmed !== true) {
+    throwErr("Confirm you received the correct order before pickup");
+  }
+
+  const storagePath = String(body.storage_path || "").trim();
+  if (!storagePath || !storagePath.startsWith(`${order.order_id}/`)) {
+    throwErr("Upload a photo of the sealed order bag before pickup");
+  }
+
+  const { data: signed, error: signErr } = await db.storage.from("pickup-photos").createSignedUrl(storagePath, 86400);
+  if (signErr) throwErr("Pickup photo not found — upload the bag photo first", 400);
+
   const now = new Date().toISOString();
+  const lat = body.latitude != null ? Number(body.latitude) : undefined;
+  const lng = body.longitude != null ? Number(body.longitude) : undefined;
+
   await db
     .from("orders")
-    .update({ status: "picked_up", picked_up_at: now, updated_at: now })
+    .update({
+      status: "picked_up",
+      picked_up_at: now,
+      pickup_confirmed_at: now,
+      pickup_photo_storage_path: storagePath,
+      pickup_photo_url: signed?.signedUrl || storagePath,
+      updated_at: now,
+    })
     .eq("order_id", order.order_id);
   await db.from("deliveries").update({ status: "picked_up" }).eq("order_id", order.order_id);
+
+  await recordDeliveryEvent(db, String(order.order_id), "pickup_confirmed", {
+    actorRole: "driver",
+    actorId: String(driver.driver_id),
+    message: CUSTOMER_MILESTONE_MESSAGES.pickup_confirmed,
+    latitude: lat,
+    longitude: lng,
+  });
+
+  await recordDeliveryEvent(db, String(order.order_id), "pickup_photo", {
+    actorRole: "driver",
+    actorId: String(driver.driver_id),
+    message: "Pickup bag photo captured",
+    latitude: lat,
+    longitude: lng,
+    meta: { storage_path: storagePath },
+  });
 
   await recordDeliveryEvent(db, String(order.order_id), "picked_up", {
     actorRole: "driver",
     actorId: String(driver.driver_id),
     message: CUSTOMER_MILESTONE_MESSAGES.picked_up,
-    latitude: body.latitude != null ? Number(body.latitude) : undefined,
-    longitude: body.longitude != null ? Number(body.longitude) : undefined,
+    latitude: lat,
+    longitude: lng,
   });
 
   await notifyDeliveryMilestone(
