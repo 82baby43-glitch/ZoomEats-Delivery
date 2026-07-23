@@ -5,6 +5,8 @@ import { findSimulationRestaurant } from "../restaurant/stripeConnect.ts";
 import { resolveSimulationCustomerId } from "./simulationCustomer.ts";
 import { getSupabasePublicUrl } from "../supabaseEnv.ts";
 import { recordOrderFinancials } from "../financial/engine.ts";
+import { evaluateDispatchResult } from "./dispatchEval.ts";
+import { internalDispatchHeaders } from "./edgeInternal.ts";
 
 function mk(
   id: string,
@@ -118,24 +120,18 @@ export async function runFullDeliverySimulation(db: SupabaseClient): Promise<Ful
     try {
       const res = await fetch(`${fnBase}/dispatch-order`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: internalDispatchHeaders(),
         body: JSON.stringify({ order_id: testOrderId }),
       });
-      const data = await res.json();
-      driverId = data.driver_id || null;
-      const dispatchOk = res.ok && (driverId || data.reason === "deferred_to_driver_offers" || data.uber_delivery_id || data.delivery_type === "uber");
+      const data = (await res.json()) as Record<string, unknown>;
+      driverId = typeof data.driver_id === "string" ? data.driver_id : null;
+      const dispatch = evaluateDispatchResult(res, data);
       checks.push(mk(
         `${prefix}_dispatch`,
         "Driver assignment",
-        dispatchOk ? "pass" : "warn",
+        dispatch.status,
         "high",
-        driverId
-          ? `driver ${driverId}`
-          : data.reason === "deferred_to_driver_offers"
-            ? "deferred_to_driver_offers — offer queue active"
-            : data.uber_delivery_id
-              ? `uber ${data.uber_delivery_id}`
-              : data.reason || "not assigned"
+        dispatch.detail
       ));
     } catch (e) {
       checks.push(mk(`${prefix}_dispatch`, "Driver assignment", "fail", "high", String(e)));

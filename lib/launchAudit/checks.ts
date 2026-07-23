@@ -5,6 +5,8 @@ import { getAdminEmails, isAdminEmailsConfigured } from "../adminEnv";
 import { getRateLimitMetrics } from "../rateLimiter";
 import { getStripeApiKey, getStripeWebhookSecret } from "../server/stripeEnv";
 import { resolveSimulationCustomerId } from "./simulationCustomer";
+import { evaluateDispatchResult } from "./dispatchEval";
+import { internalDispatchHeaders, resolveEdgeFunctionSecretFromEnv } from "./edgeInternal";
 
 function fix(
   problem: string,
@@ -907,18 +909,18 @@ export async function runE2eSimulation(db: SupabaseClient, options: LaunchAuditO
   try {
     const res = await fetch(`${fnBase}/dispatch-order`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: internalDispatchHeaders(resolveEdgeFunctionSecretFromEnv()),
       body: JSON.stringify({ order_id: testOrderId }),
     });
-    const data = await res.json();
-    const dispatched = res.ok && (data.driver_id || data.uber_delivery_id || data.delivery_type === "uber");
+    const data = (await res.json()) as Record<string, unknown>;
+    const dispatch = evaluateDispatchResult(res, data);
     checks.push(mk(
       "e2e_dispatch",
       "e2e_simulation",
       "Driver assignment",
-      dispatched ? "pass" : "warn",
+      dispatch.status,
       "high",
-      dispatched ? JSON.stringify(data).slice(0, 80) : data.reason || "not assigned"
+      dispatch.detail
     ));
   } catch (e) {
     checks.push(mk("e2e_dispatch", "e2e_simulation", "Driver assignment", "fail", "high", String(e)));
