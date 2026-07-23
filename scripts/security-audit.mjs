@@ -229,8 +229,7 @@ async function testEdgeFunctionExposure() {
       const reachable = res.status !== 404;
       const hasAuth = res.status === 401 || res.status === 403;
       const secretConfigured = Boolean(process.env.EDGE_FUNCTION_SECRET);
-      // When EDGE_FUNCTION_SECRET is not deployed, unauthenticated access is expected (documented finding)
-      const passed = hasAuth || !secretConfigured;
+      const passed = hasAuth;
       record(
         "edge_functions",
         `${fn.name} requires authentication`,
@@ -239,7 +238,7 @@ async function testEdgeFunctionExposure() {
           ? "protected"
           : secretConfigured
             ? `reachable status=${res.status} without auth`
-            : `reachable status=${res.status} (set EDGE_FUNCTION_SECRET to enforce)`,
+            : `reachable status=${res.status} (run npm run edge:secret-setup)`,
         hasAuth ? "info" : "high"
       );
     } catch (e) {

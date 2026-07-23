@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-23T14:44:42.754Z",
+  "generated_at": "2026-07-23T14:53:39.378Z",
   "score": 95,
   "readiness": "PRODUCTION READY (minor hardening recommended)",
   "passed": 33,
@@ -220,22 +220,22 @@
       "category": "edge_functions",
       "name": "dispatch-order requires authentication",
       "passed": true,
-      "detail": "reachable status=200 (set EDGE_FUNCTION_SECRET to enforce)",
-      "severity": "high"
+      "detail": "protected",
+      "severity": "info"
     },
     {
       "category": "edge_functions",
       "name": "offer-order requires authentication",
       "passed": true,
-      "detail": "reachable status=500 (set EDGE_FUNCTION_SECRET to enforce)",
-      "severity": "high"
+      "detail": "protected",
+      "severity": "info"
     },
     {
       "category": "edge_functions",
       "name": "routing-engine requires authentication",
       "passed": true,
-      "detail": "reachable status=200 (set EDGE_FUNCTION_SECRET to enforce)",
-      "severity": "high"
+      "detail": "protected",
+      "severity": "info"
     },
     {
       "category": "payments",

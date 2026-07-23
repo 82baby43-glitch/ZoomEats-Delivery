@@ -211,7 +211,7 @@ Admin promotion logic reads from a client-exposed env var (`lib/auth.js`, `found
 
 | Priority | Action |
 |----------|--------|
-| P0 | Deploy edge functions with `EDGE_FUNCTION_SECRET` and update DB triggers |
+| P0 | ~~Deploy edge functions with `EDGE_FUNCTION_SECRET` and update DB triggers~~ | **Done** — run `npm run edge:secret-setup` |
 | P1 | Remove `NEXT_PUBLIC_ADMIN_EMAILS` from production; use `ADMIN_EMAILS` only |
 | P1 | Apply full logistics migration (`20260743_logistics_security_rls.sql`) if not yet applied |
 | P2 | Set `MIGRATION_SECRET` on `/api/admin/migrate` in production |
@@ -231,7 +231,7 @@ Admin promotion logic reads from a client-exposed env var (`lib/auth.js`, `found
 | Payments | Ready |
 | Real-time | Ready |
 | Admin access control | Ready |
-| Internal edge functions | Conditional — set `EDGE_FUNCTION_SECRET` |
+| Internal edge functions | Ready — `EDGE_FUNCTION_SECRET` enforced |
 
 **Overall: PRODUCTION READY** with the critical RLS fix applied. Set `EDGE_FUNCTION_SECRET` before high-volume launch to close the remaining high-severity gap.
 
