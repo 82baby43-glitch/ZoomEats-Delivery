@@ -7,6 +7,7 @@ import {
   tryInsertOrderIntoRoute,
 } from "../_shared/routing/uber-routing-ai.ts";
 import { createRoutingDbAdapter } from "../_shared/routing/db-adapter.ts";
+import { verifyInternalCall } from "../_shared/internalAuth.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -15,6 +16,9 @@ const cors = {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+
+  const authDenied = verifyInternalCall(req);
+  if (authDenied) return new Response(authDenied.body, { status: authDenied.status, headers: cors });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

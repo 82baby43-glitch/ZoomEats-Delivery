@@ -1,0 +1,248 @@
+{
+  "generated_at": "2026-07-23T14:44:42.754Z",
+  "score": 95,
+  "readiness": "PRODUCTION READY (minor hardening recommended)",
+  "passed": 33,
+  "failed": 1,
+  "total": 34,
+  "results": [
+    {
+      "category": "secrets",
+      "name": "Service role key not in NEXT_PUBLIC_*",
+      "passed": true,
+      "detail": "ok",
+      "severity": "info"
+    },
+    {
+      "category": "secrets",
+      "name": "ADMIN_EMAILS not client-exposed",
+      "passed": false,
+      "detail": "NEXT_PUBLIC_ADMIN_EMAILS is set (1 email(s))",
+      "severity": "medium"
+    },
+    {
+      "category": "api_auth",
+      "name": "auth/me without token",
+      "passed": true,
+      "detail": "blocked",
+      "severity": "info"
+    },
+    {
+      "category": "api_auth",
+      "name": "admin/metrics without token",
+      "passed": true,
+      "detail": "blocked",
+      "severity": "info"
+    },
+    {
+      "category": "api_auth",
+      "name": "vendor/orders without token",
+      "passed": true,
+      "detail": "blocked",
+      "severity": "info"
+    },
+    {
+      "category": "api_auth",
+      "name": "delivery/available without token",
+      "passed": true,
+      "detail": "blocked",
+      "severity": "info"
+    },
+    {
+      "category": "api_auth",
+      "name": "orders/my without token",
+      "passed": true,
+      "detail": "blocked",
+      "severity": "info"
+    },
+    {
+      "category": "api_auth",
+      "name": "wallet/balance without token",
+      "passed": true,
+      "detail": "blocked",
+      "severity": "info"
+    },
+    {
+      "category": "api_auth",
+      "name": "Invalid JWT rejected",
+      "passed": true,
+      "detail": "blocked",
+      "severity": "info"
+    },
+    {
+      "category": "rbac",
+      "name": "Test user created with session",
+      "passed": true,
+      "detail": "",
+      "severity": "info"
+    },
+    {
+      "category": "rbac",
+      "name": "Customer blocked from /admin/metrics",
+      "passed": true,
+      "detail": "Requires role: admin",
+      "severity": "info"
+    },
+    {
+      "category": "rbac",
+      "name": "Customer blocked from /vendor/orders",
+      "passed": true,
+      "detail": "Requires role: vendor",
+      "severity": "info"
+    },
+    {
+      "category": "rbac",
+      "name": "Customer blocked from /delivery/available",
+      "passed": true,
+      "detail": "Driver access requires delivery permissions.",
+      "severity": "info"
+    },
+    {
+      "category": "rbac",
+      "name": "Driver role self-assignment",
+      "passed": true,
+      "detail": "delivery",
+      "severity": "info"
+    },
+    {
+      "category": "rbac",
+      "name": "Driver blocked from /admin/users",
+      "passed": true,
+      "detail": "Requires role: admin",
+      "severity": "info"
+    },
+    {
+      "category": "rbac",
+      "name": "Driver blocked from /vendor/restaurant",
+      "passed": true,
+      "detail": "Requires role: vendor",
+      "severity": "info"
+    },
+    {
+      "category": "input_validation",
+      "name": "SQL injection in search handled",
+      "passed": true,
+      "detail": "no server error",
+      "severity": "info"
+    },
+    {
+      "category": "rbac",
+      "name": "Test user cleanup",
+      "passed": true,
+      "detail": "",
+      "severity": "info"
+    },
+    {
+      "category": "rls_anon",
+      "name": "Anon blocked from payment_transactions",
+      "passed": true,
+      "detail": "permission denied for table payment_transactions",
+      "severity": "info"
+    },
+    {
+      "category": "rls_anon",
+      "name": "Anon blocked from stripe_event_log",
+      "passed": true,
+      "detail": "Could not find the table 'public.stripe_event_log' in the schema cache",
+      "severity": "info"
+    },
+    {
+      "category": "rls_anon",
+      "name": "Anon blocked from stripe_checkout_sessions",
+      "passed": true,
+      "detail": "Could not find the table 'public.stripe_checkout_sessions' in the schema cache",
+      "severity": "info"
+    },
+    {
+      "category": "rls_anon",
+      "name": "Anon blocked from payment_audit_log",
+      "passed": true,
+      "detail": "Could not find the table 'public.payment_audit_log' in the schema cache",
+      "severity": "info"
+    },
+    {
+      "category": "rls_anon",
+      "name": "Anon blocked from tax_information",
+      "passed": true,
+      "detail": "0 rows",
+      "severity": "info"
+    },
+    {
+      "category": "rls_anon",
+      "name": "Anon blocked from background_checks",
+      "passed": true,
+      "detail": "0 rows",
+      "severity": "info"
+    },
+    {
+      "category": "rls_anon",
+      "name": "Anon blocked from audit_logs",
+      "passed": true,
+      "detail": "0 rows",
+      "severity": "info"
+    },
+    {
+      "category": "rls_anon",
+      "name": "Anon blocked from uber_direct_config",
+      "passed": true,
+      "detail": "permission denied for table uber_direct_config",
+      "severity": "info"
+    },
+    {
+      "category": "rls_auth",
+      "name": "Authenticated blocked from payment_transactions",
+      "passed": true,
+      "detail": "permission denied for table payment_transactions",
+      "severity": "info"
+    },
+    {
+      "category": "rls_auth",
+      "name": "Authenticated blocked from stripe_event_log",
+      "passed": true,
+      "detail": "Could not find the table 'public.stripe_event_log' in the schema cache",
+      "severity": "info"
+    },
+    {
+      "category": "rls_auth",
+      "name": "Authenticated blocked from payment_audit_log",
+      "passed": true,
+      "detail": "Could not find the table 'public.payment_audit_log' in the schema cache",
+      "severity": "info"
+    },
+    {
+      "category": "rls_auth",
+      "name": "Users table scoped to own row",
+      "passed": true,
+      "detail": "1 row(s)",
+      "severity": "info"
+    },
+    {
+      "category": "edge_functions",
+      "name": "dispatch-order requires authentication",
+      "passed": true,
+      "detail": "reachable status=200 (set EDGE_FUNCTION_SECRET to enforce)",
+      "severity": "high"
+    },
+    {
+      "category": "edge_functions",
+      "name": "offer-order requires authentication",
+      "passed": true,
+      "detail": "reachable status=500 (set EDGE_FUNCTION_SECRET to enforce)",
+      "severity": "high"
+    },
+    {
+      "category": "edge_functions",
+      "name": "routing-engine requires authentication",
+      "passed": true,
+      "detail": "reachable status=200 (set EDGE_FUNCTION_SECRET to enforce)",
+      "severity": "high"
+    },
+    {
+      "category": "payments",
+      "name": "Stripe webhook rejects invalid signature",
+      "passed": true,
+      "detail": "status=400",
+      "severity": "info"
+    }
+  ]
+}
