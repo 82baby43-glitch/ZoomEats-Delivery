@@ -2,6 +2,7 @@
 // Triggered by Postgres on paid orders. Defers to driver offers; Uber Direct fallback runs in offer-order.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { verifyInternalCall } from "../_shared/internalAuth.ts";
 import { createRoutingDbAdapter } from "../_shared/routing/db-adapter.ts";
 import { tryInsertOrderIntoRoute } from "../_shared/routing/uber-routing-ai.ts";
 
@@ -14,6 +15,9 @@ type OrderRow = {
 };
 
 Deno.serve(async (req) => {
+  const authDenied = verifyInternalCall(req);
+  if (authDenied) return authDenied;
+
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }

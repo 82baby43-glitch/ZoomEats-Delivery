@@ -44,6 +44,31 @@ async function fetchStatus(url, label) {
   }
 }
 
+async function resolveEdgeFunctionSecret() {
+  if (process.env.EDGE_FUNCTION_SECRET) return process.env.EDGE_FUNCTION_SECRET;
+  const token = process.env.SUPABASE_ACCESS_TOKEN;
+  if (!token) return "";
+  try {
+    const res = await fetch("https://api.supabase.com/v1/projects/njrrhckegbfqhwkqkzvw/database/query", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: "select decrypted_secret from vault.decrypted_secrets where name = 'EDGE_FUNCTION_SECRET' limit 1",
+      }),
+    });
+    const rows = await res.json();
+    return rows?.[0]?.decrypted_secret || "";
+  } catch {
+    return "";
+  }
+}
+
+function internalEdgeHeaders(secret) {
+  const headers = { "Content-Type": "application/json" };
+  if (secret) headers.Authorization = `Bearer ${secret}`;
+  return headers;
+}
+
 async function resolveLaunchTestCustomerId(db) {
   const SIM_USER_ID = "user_launch_simulation";
   const { data: simUser } = await db.from("users").select("user_id").eq("user_id", SIM_USER_ID).maybeSingle();
@@ -90,6 +115,7 @@ async function main() {
 
   const db = createClient(SUPABASE_URL, SERVICE_KEY);
   const fnBase = `${SUPABASE_URL.replace(/\/$/, "")}/functions/v1`;
+  const edgeSecret = await resolveEdgeFunctionSecret();
 
   // --- API health ---
   console.log("\n--- API & edge functions ---");
@@ -261,7 +287,7 @@ async function main() {
         try {
           const dispatchRes = await fetch(`${fnBase}/dispatch-order`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: internalEdgeHeaders(edgeSecret),
             body: JSON.stringify({ order_id: testOrderId }),
           });
           const dispatchData = await dispatchRes.json();

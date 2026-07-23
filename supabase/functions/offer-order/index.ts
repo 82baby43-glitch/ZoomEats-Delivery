@@ -3,8 +3,12 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { createAndBroadcastOffer } from "../_shared/dispatch/offers.ts";
+import { verifyInternalCall } from "../_shared/internalAuth.ts";
 
 Deno.serve(async (req) => {
+  const authDenied = verifyInternalCall(req);
+  if (authDenied) return authDenied;
+
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), { status: 405 });
   }
