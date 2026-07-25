@@ -67,7 +67,7 @@ export async function enrichSpotlights(
     db
       .from("restaurants")
       .select(
-        "restaurant_id,name,description,cuisine,image_url,cover_url,address,city,state,rating,delivery_time_min,latitude,longitude"
+        "restaurant_id,name,description,cuisine,image_url,cover_url,address,city,state,rating,delivery_time_min,latitude,longitude,merchant_category_slug,business_category,is_local_partner,is_featured_partner,claim_status"
       )
       .in("restaurant_id", restaurantIds),
     db
