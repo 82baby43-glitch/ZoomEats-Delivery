@@ -66,6 +66,9 @@ import { handleRestaurantCommissionRequest } from "../restaurantCommission/handl
 import { handleCompanionRequest } from "../companionMode/handler";
 import { recordOrderFinancials } from "../financial/engine";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "./restaurantAdminHandler";
+import { handleRestaurantSimulatorRequest } from "./restaurantSimulatorHandler";
+import { isTestOrder } from "../orders/isTestOrder";
+import { isSandboxRestaurant } from "../restaurants";
 import { handleMarketplaceRequest } from "../marketplace/handler";
 import { syncRestaurantLaunchState } from "../restaurant/readiness";
 import { getAdminEmails } from "../adminEnv";
@@ -269,6 +272,9 @@ export async function handleApiRequest(
     const launchAuditResult = await handleLaunchAuditRequest(db, complianceCtx);
     if (launchAuditResult !== null) return launchAuditResult;
 
+    const restaurantSimulatorResult = await handleRestaurantSimulatorRequest(db, complianceCtx);
+    if (restaurantSimulatorResult !== null) return restaurantSimulatorResult;
+
     const financialResult = await handleFinancialAdminRequest(db, complianceCtx);
     if (financialResult !== null) return financialResult;
 
@@ -467,7 +473,7 @@ export async function handleApiRequest(
     if (restMatch && method === "GET") {
       const rid = restMatch[1];
       const { data: restaurant } = await db.from("restaurants").select("*").eq("restaurant_id", rid).maybeSingle();
-      if (!restaurant || isTestRestaurantName(restaurant.name)) throwErr("Not found", 404);
+      if (!restaurant || isSandboxRestaurant(restaurant)) throwErr("Not found", 404);
       const { data: menu } = await db.from("menu_items").select("*").eq("restaurant_id", rid).eq("available", true);
       return { restaurant, menu: menu || [] };
     }
@@ -650,6 +656,7 @@ export async function handleApiRequest(
         status: "pending_payment",
         order_status: "awaiting_payment",
         payment_status: "pending",
+        test_order: isSandboxRestaurant(rest),
         price_hash: computePriceHash(repriced),
         created_at: new Date().toISOString(),
       };
@@ -948,6 +955,17 @@ export async function handleApiRequest(
       if (o.payment_status === "paid") throwErr("Already paid");
       if (Number(o.total) < 0.5) throwErr("Order total must be at least $0.50 for Stripe checkout.", 422);
 
+      if (isTestOrder(o)) {
+        const session_id = `cs_test_${order_id}`;
+        await fulfillPaidOrder(db, {
+          orderId: order_id,
+          sessionId: session_id,
+          amountPaid: Number(o.total),
+          currency: "usd",
+        });
+        return { url: `${origin_url}/checkout/success?session_id=${session_id}`, session_id, test_order: true };
+      }
+
       structuredLog(LOG_EVENTS.CHECKOUT_STARTED, { orderId: order_id, userId: u.user_id });
 
       if (o.stripe_session_id) {
@@ -1188,9 +1206,16 @@ export async function handleApiRequest(
         db.from("restaurants").select("*", { count: "exact", head: true }),
         db.from("orders").select("*", { count: "exact", head: true }),
       ]);
-      const { data: paidOrders } = await db.from("orders").select("total").eq("payment_status", "paid");
-      const revenue = (paidOrders || []).reduce((s, o) => s + (o.total || 0), 0);
-      return { users: users || 0, restaurants: restaurants || 0, orders: orders || 0, paid_orders: paidOrders?.length || 0, revenue: Math.round(revenue * 100) / 100 };
+      const { data: paidOrders } = await db.from("orders").select("total,test_order").eq("payment_status", "paid");
+      const productionPaid = (paidOrders || []).filter((o) => !isTestOrder(o));
+      const revenue = productionPaid.reduce((s, o) => s + (o.total || 0), 0);
+      return {
+        users: users || 0,
+        restaurants: restaurants || 0,
+        orders: orders || 0,
+        paid_orders: productionPaid.length,
+        revenue: Math.round(revenue * 100) / 100,
+      };
     }
     if (path === "/admin/users" && method === "GET") {
       requireRole("admin");

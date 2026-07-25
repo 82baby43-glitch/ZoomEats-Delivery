@@ -119,8 +119,9 @@ export async function getFinancialAnalytics(
       .limit(2000),
     db
       .from("orders")
-      .select("subtotal,total,payment_status,created_at")
+      .select("subtotal,total,payment_status,created_at,test_order")
       .eq("payment_status", "paid")
+      .eq("test_order", false)
       .gte("created_at", sinceIso)
       .order("created_at", { ascending: false })
       .limit(2000),

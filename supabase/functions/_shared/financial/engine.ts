@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isTestOrder } from "../orders/isTestOrder.ts";
 
 export interface FinancialRecordResult {
   ok: boolean;
@@ -59,6 +60,10 @@ export async function recordOrderFinancials(
 
   if (order.payment_status !== "paid") {
     return { ok: false, order_id: orderId, error: `Payment status is ${order.payment_status}` };
+  }
+
+  if (isTestOrder(order)) {
+    return { ok: true, skipped: true, order_id: orderId };
   }
 
   const subtotal = Number(order.subtotal ?? 0);

@@ -101,6 +101,7 @@ export async function runFullDeliverySimulation(db: SupabaseClient): Promise<Ful
     customer_lng: -122.4194,
     status: "placed",
     payment_status: "paid",
+    test_order: true,
     created_at: now,
     updated_at: now,
   };

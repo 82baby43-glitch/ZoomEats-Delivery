@@ -896,6 +896,7 @@ export async function runE2eSimulation(db: SupabaseClient, options: LaunchAuditO
     customer_lng: -122.4194,
     status: "placed",
     payment_status: "paid",
+    test_order: true,
     created_at: new Date().toISOString(),
   };
 
