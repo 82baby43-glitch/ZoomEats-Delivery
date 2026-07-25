@@ -7,7 +7,7 @@ import {
   resetTestEnvironment,
   setupTestRestaurant,
   updateTestOrderStatus,
-} from "../restaurant/simulator.ts";
+} from "./restaurant/simulator.ts";
 
 function throwErr(message: string, status = 400): never {
   const e = new Error(message) as Error & { status?: number };
