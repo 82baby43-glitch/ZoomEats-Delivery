@@ -7,7 +7,7 @@ import {
   hasGooglePlacesApiKey,
   sanitizeImportString,
 } from "./googlePlacesImport.ts";
-import { mapGoogleTypesToCategories, isClaimableBusinessStatus } from "../merchant/googleCategoryMap.ts";
+import { mapGoogleTypesToCategories, isClaimableBusinessStatus } from "./merchant/googleCategoryMap.ts";
 
 type PlaceRow = Record<string, unknown>;
 

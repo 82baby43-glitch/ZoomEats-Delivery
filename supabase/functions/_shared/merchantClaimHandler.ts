@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { hasGooglePlacesApiKey } from "../googlePlacesClaim.ts";
+import { hasGooglePlacesApiKey } from "./googlePlacesClaim.ts";
 import {
   approveMerchantClaim,
   getMyClaimStatus,
@@ -9,7 +9,7 @@ import {
   searchClaimableBusinesses,
   submitBusinessClaim,
   updateMerchantClaimInfo,
-} from "../merchant/claim.ts";
+} from "./merchant/claim.ts";
 
 function throwErr(message: string, status = 400): never {
   const e = new Error(message) as Error & { status?: number };
