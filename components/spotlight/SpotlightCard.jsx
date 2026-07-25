@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Star, MapPin, Clock, Sparkles } from "lucide-react";
+import { businessCategoryLabel } from "@/lib/merchant/googleCategoryMap";
 import FeaturedDishCarousel from "./FeaturedDishCarousel";
 
 export default function SpotlightCard({ spotlight, featured = false, onView }) {
@@ -37,7 +38,15 @@ export default function SpotlightCard({ spotlight, featured = false, onView }) {
         )}
       </div>
       <div className="p-5 space-y-3">
-        <div className="label-eyebrow">{restaurant.cuisine || "Local partner"}</div>
+        <div className="label-eyebrow flex flex-wrap items-center gap-2">
+          <span>{restaurant.cuisine || businessCategoryLabel(restaurant.business_category) || "Local partner"}</span>
+          {restaurant.is_local_partner && (
+            <span className="badge text-[10px]">Locally Owned</span>
+          )}
+          {restaurant.business_category && (
+            <span className="badge text-[10px]">{businessCategoryLabel(restaurant.business_category)}</span>
+          )}
+        </div>
         <h3 className="font-display text-2xl font-black tracking-tight">
           {spotlight?.title || restaurant.name}
         </h3>

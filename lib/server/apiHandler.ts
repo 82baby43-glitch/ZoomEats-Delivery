@@ -67,6 +67,7 @@ import { handleCompanionRequest } from "../companionMode/handler";
 import { recordOrderFinancials } from "../financial/engine";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "./restaurantAdminHandler";
 import { handleRestaurantSimulatorRequest } from "./restaurantSimulatorHandler";
+import { handleMerchantClaimRequest } from "./merchantClaimHandler";
 import { isTestOrder } from "../orders/isTestOrder";
 import { isSandboxRestaurant } from "../restaurants";
 import { handleMarketplaceRequest } from "../marketplace/handler";
@@ -274,6 +275,16 @@ export async function handleApiRequest(
 
     const restaurantSimulatorResult = await handleRestaurantSimulatorRequest(db, complianceCtx);
     if (restaurantSimulatorResult !== null) return restaurantSimulatorResult;
+
+    const merchantClaimResult = await handleMerchantClaimRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (merchantClaimResult !== null) return merchantClaimResult;
 
     const financialResult = await handleFinancialAdminRequest(db, complianceCtx);
     if (financialResult !== null) return financialResult;

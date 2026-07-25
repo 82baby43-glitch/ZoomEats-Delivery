@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -33,6 +34,15 @@ export default function RoleAgreementCenter({ roleLabel }) {
         <p className="mt-2" style={{ color: "var(--muted)" }}>
           Complete your application, background authorization (drivers), and electronically sign all required agreements.
         </p>
+        {(label === "Restaurant" || user?.role === "vendor") && (
+          <div className="mt-4 p-4 rounded-xl text-sm" style={{ background: "var(--surface-2)" }}>
+            Already on Google?{" "}
+            <Link href="/claim" className="font-bold" style={{ color: "var(--primary)" }}>
+              Claim your business listing
+            </Link>{" "}
+            to import your address, hours, and category automatically.
+          </div>
+        )}
         <div className="mt-8">
           <ComplianceAgreementWizard roleLabel={label} onAllComplete={handleComplete} />
         </div>

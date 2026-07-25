@@ -11,6 +11,19 @@ export async function ensureMerchantStub(
   opts: { name?: string; merchant_category_slug?: string } = {}
 ) {
   const slug = opts.merchant_category_slug || "restaurants";
+  const { data: claimed } = await db
+    .from("restaurants")
+    .select("restaurant_id, merchant_category_slug, name, claim_status")
+    .eq("owner_id", userId)
+    .in("claim_status", ["pending_verification", "verified_local_partner", "claim_requested"])
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (claimed?.restaurant_id) {
+    return claimed.restaurant_id;
+  }
+
   const { data: existing } = await db
     .from("restaurants")
     .select("restaurant_id, merchant_category_slug, name")

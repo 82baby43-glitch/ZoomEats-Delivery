@@ -79,6 +79,7 @@ import { handleCompanionRequest } from "../_shared/companionMode/handler.ts";
 import { recordOrderFinancials } from "../_shared/financial/engine.ts";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "../_shared/restaurantAdminHandler.ts";
 import { handleRestaurantSimulatorRequest } from "../_shared/restaurantSimulatorHandler.ts";
+import { handleMerchantClaimRequest } from "../_shared/merchantClaimHandler.ts";
 import { isTestOrder } from "../_shared/orders/isTestOrder.ts";
 import { isSandboxRestaurant } from "../_shared/restaurants.ts";
 import { handleMarketplaceRequest } from "../_shared/marketplaceHandler.ts";
@@ -295,6 +296,16 @@ Deno.serve(async (req) => {
 
     const restaurantSimulatorResult = await handleRestaurantSimulatorRequest(db, complianceCtx);
     if (restaurantSimulatorResult !== null) return json(restaurantSimulatorResult);
+
+    const merchantClaimResult = await handleMerchantClaimRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+    });
+    if (merchantClaimResult !== null) return json(merchantClaimResult);
 
     const financialResult = await handleFinancialAdminRequest(db, complianceCtx);
     if (financialResult !== null) return json(financialResult);
