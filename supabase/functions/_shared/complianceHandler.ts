@@ -8,7 +8,7 @@ import {
 import { computeComplianceStatus, normalizeRole, VALID_ROLES } from "./complianceAuthz.ts";
 import { encryptTaxPayload, maskTaxId } from "./taxCrypto.ts";
 import { syncRestaurantLaunchState } from "./restaurant/readiness.ts";
-import { ensureMerchantStub, isDispensaryCategory } from "./merchant/onboarding.ts";
+import { ensureMerchantStub, isDispensaryCategory, isLiquorCategory, businessCategoryForSlug } from "./merchant/onboarding.ts";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -302,6 +302,7 @@ async function loadComplianceContext(db: SupabaseClient, user: Record<string, un
     driver,
     restaurant,
     acceptedTypes,
+    merchantCategory: (restaurant as { merchant_category_slug?: string } | null)?.merchant_category_slug || null,
   });
 }
 
@@ -901,6 +902,19 @@ export async function handleComplianceRequest(
         }
         payload.verification_status = "documents_submitted";
       }
+    } else if (isLiquorCategory(categorySlug)) {
+      if (body.status === "submitted" || body.verification_status === "documents_submitted") {
+        if (!body.business_license_number) throwErr("Business license number required");
+        if (!body.license_expiration_date) throwErr("Liquor license expiration date required");
+        if (!body.delivery_agreement_accepted || !body.age_restricted_confirmed) {
+          throwErr("Delivery agreement and age-restricted confirmation required");
+        }
+        payload.verification_status = "documents_submitted";
+      }
+    } else if (categorySlug === "convenience_stores" || categorySlug === "local_retail") {
+      if (body.status === "submitted" && !body.business_license_number) {
+        throwErr("Business license number required");
+      }
     }
 
     const meta: Record<string, unknown> = {};
@@ -917,7 +931,11 @@ export async function handleComplianceRequest(
       });
       await db
         .from("restaurants")
-        .update({ merchant_category_slug: categorySlug, updated_at: new Date().toISOString() })
+        .update({
+          merchant_category_slug: categorySlug,
+          business_category: businessCategoryForSlug(categorySlug),
+          updated_at: new Date().toISOString(),
+        })
         .eq("owner_id", u.user_id);
     }
 

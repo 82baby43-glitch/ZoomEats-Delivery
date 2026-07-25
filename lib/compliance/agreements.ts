@@ -61,19 +61,48 @@ export const DISPENSARY_EXTRA_AGREEMENTS: AgreementDef[] = [
   },
 ];
 
+function applyRetailAgreementRules(list: AgreementDef[]): AgreementDef[] {
+  return list.map((a) =>
+    a.type === "food_safety_certification"
+      ? { ...a, required: false, title: "Food Safety Certification (optional)" }
+      : a
+  );
+}
+
+function applyLiquorAgreementRules(list: AgreementDef[]): AgreementDef[] {
+  return list.map((a) => {
+    if (a.type === "alcohol_compliance" || a.type === "age_verification") return { ...a, required: true };
+    if (a.type === "food_safety_certification") {
+      return { ...a, required: false, title: "Food Safety Certification (optional)" };
+    }
+    return a;
+  });
+}
+
+function applyDispensaryAgreementRules(list: AgreementDef[]): AgreementDef[] {
+  const next = list.map((a) =>
+    a.type === "age_verification" || a.type === "alcohol_compliance"
+      ? { ...a, required: false }
+      : a.type === "food_safety_certification"
+        ? { ...a, required: false, title: "Product Safety (optional)" }
+        : a
+  );
+  return [...next, ...DISPENSARY_EXTRA_AGREEMENTS];
+}
+
 export function agreementsForRole(role: string, merchantCategory?: string | null): AgreementDef[] {
   if (role === "delivery" || role === "driver") return DRIVER_AGREEMENTS;
   if (role === "vendor" || role === "restaurant") {
     let list = [...RESTAURANT_AGREEMENTS];
     if (merchantCategory === "licensed_dispensary") {
-      list = list.map((a) =>
-        a.type === "age_verification" || a.type === "alcohol_compliance"
-          ? { ...a, required: false }
-          : a.type === "food_safety_certification"
-            ? { ...a, required: false, title: "Product Safety (optional)" }
-            : a
-      );
-      list = [...list, ...DISPENSARY_EXTRA_AGREEMENTS];
+      list = applyDispensaryAgreementRules(list);
+    } else if (merchantCategory === "liquor_stores") {
+      list = applyLiquorAgreementRules(list);
+    } else if (
+      merchantCategory === "local_retail" ||
+      merchantCategory === "convenience_stores"
+    ) {
+      list = applyRetailAgreementRules(list);
     }
     return list;
   }

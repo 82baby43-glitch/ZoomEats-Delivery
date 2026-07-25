@@ -9,6 +9,7 @@ import RestaurantApplicationForm from "@/components/compliance/RestaurantApplica
 import DriverApplicationForm from "@/components/compliance/DriverApplicationForm";
 import MerchantCategoryPicker from "@/components/compliance/MerchantCategoryPicker";
 import DispensaryApplicationForm from "@/components/compliance/DispensaryApplicationForm";
+import { categoryLabel, isAgeRestrictedCategory } from "@/lib/merchant/categoryConfig";
 
 function clientMeta() {
   if (typeof window === "undefined") return {};
@@ -24,11 +25,11 @@ const DRIVER_STEPS = ["application", "background", "agreements"];
 const VENDOR_STEPS_RESTAURANT = ["application", "agreements"];
 const VENDOR_STEPS_WITH_CATEGORY = ["category", "application", "agreements"];
 
-export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) {
+export default function ComplianceAgreementWizard({ roleLabel, onAllComplete, initialMerchantCategory = null }) {
   const { user } = useAuth();
   const role = user?.role === "vendor" || user?.role === "restaurant" ? "vendor" : "delivery";
 
-  const [merchantCategory, setMerchantCategory] = useState("restaurants");
+  const [merchantCategory, setMerchantCategory] = useState(initialMerchantCategory || "restaurants");
   const [categoryLocked, setCategoryLocked] = useState(false);
   const [steps, setSteps] = useState(role === "vendor" ? VENDOR_STEPS_WITH_CATEGORY : DRIVER_STEPS);
   const [step, setStep] = useState(0);
@@ -40,6 +41,24 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) 
   const [error, setError] = useState("");
   const [appDone, setAppDone] = useState(false);
   const [bgDone, setBgDone] = useState(false);
+
+  useEffect(() => {
+    if (!user || role !== "vendor" || !initialMerchantCategory || categoryLocked) return;
+    (async () => {
+      try {
+        await api.post("/onboarding/restaurant", {
+          merchant_category_slug: initialMerchantCategory,
+          status: "category_selected",
+        });
+        setMerchantCategory(initialMerchantCategory);
+        setCategoryLocked(true);
+        const agrRes = await api.get("/agreements/me", { params: { merchant_category: initialMerchantCategory } });
+        setAgreements(Array.isArray(agrRes?.data) ? agrRes.data : []);
+      } catch {
+        // category preselect is best-effort; user can still pick manually
+      }
+    })();
+  }, [user, role, initialMerchantCategory, categoryLocked]);
 
   useEffect(() => {
     if (!user) return;
@@ -56,12 +75,13 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) 
         const hasCategory = Boolean(appData?.merchant_category_slug);
 
         if (role === "vendor") {
-          setMerchantCategory(slug);
+          const nextCategory = initialMerchantCategory || slug;
+          setMerchantCategory(nextCategory);
           if (hasCategory && hasApplication) {
             setCategoryLocked(true);
             setSteps(VENDOR_STEPS_RESTAURANT);
-          } else if (hasCategory) {
-            setCategoryLocked(true);
+          } else if (hasCategory || initialMerchantCategory) {
+            setCategoryLocked(Boolean(initialMerchantCategory || hasCategory));
             setSteps(["application", "agreements"]);
           } else {
             setSteps(VENDOR_STEPS_WITH_CATEGORY);
@@ -69,7 +89,7 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) 
         }
 
         const agrRes = role === "vendor"
-          ? await api.get("/agreements/me", { params: { merchant_category: slug } })
+          ? await api.get("/agreements/me", { params: { merchant_category: initialMerchantCategory || slug } })
           : await api.get("/agreements/me");
         const list = Array.isArray(agrRes?.data) ? agrRes.data : [];
         setAgreements(list);
@@ -90,7 +110,7 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) 
         setError(e?.message || "Failed to load");
       }
     })();
-  }, [user, role, onAllComplete]);
+  }, [user, role, onAllComplete, initialMerchantCategory]);
 
   const currentStep = steps[step];
   const pending = agreements.filter((a) => a.required && !a.accepted);
@@ -201,7 +221,7 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete }) 
         <div className="space-y-4">
           <p className="text-sm" style={{ color: "var(--muted)" }}>
             Review each agreement, sign electronically, and check the consent box.
-            {isDispensary && " Licensed dispensary merchants require additional compliance agreements."}
+            {isAgeRestrictedCategory(merchantCategory) && ` ${categoryLabel(merchantCategory)} merchants require additional compliance agreements.`}
           </p>
           {agreements.map((a) => (
             <div key={a.type} className="card p-5">

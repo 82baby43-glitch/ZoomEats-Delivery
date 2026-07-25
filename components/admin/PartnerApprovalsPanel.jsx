@@ -1,5 +1,22 @@
 "use client";
 
+import { categoryLabel } from "@/lib/merchant/categoryConfig";
+
+function categoryBadge(slug) {
+  if (!slug || slug === "restaurants") return null;
+  const icons = {
+    licensed_dispensary: "🌿",
+    liquor_stores: "🍷",
+    convenience_stores: "🛒",
+    local_retail: "🏪",
+  };
+  return (
+    <span className="badge" style={{ color: "var(--primary)" }}>
+      {icons[slug] || "🏪"} {categoryLabel(slug)}
+    </span>
+  );
+}
+
 import { useCallback, useEffect, useState } from "react";
 import { Bike, Check, Store, X, FileQuestion, Shield, RotateCcw } from "lucide-react";
 import { api } from "@/lib/api";
@@ -117,9 +134,7 @@ export default function PartnerApprovalsPanel({
                         <span className={`badge ${agreementsDone ? "text-green-400" : "text-amber-400"}`}>
                           Agreements: {agreementsDone ? "complete" : "incomplete"}
                         </span>
-                        {item.restaurant?.merchant_category_slug === "licensed_dispensary" && (
-                          <span className="badge" style={{ color: "var(--primary)" }}>🌿 Licensed Dispensary</span>
-                        )}
+                        {categoryBadge(item.restaurant?.merchant_category_slug)}
                         {item.restaurant?.name && (
                           <span className="badge">Store: {item.restaurant.name}</span>
                         )}

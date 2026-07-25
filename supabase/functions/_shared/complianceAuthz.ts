@@ -98,10 +98,15 @@ export function computeComplianceStatus(opts: {
   driver?: ComplianceRecord | null;
   restaurant?: ComplianceRecord | null;
   acceptedTypes?: string[];
+  merchantCategory?: string | null;
 }): ComplianceStatus {
   const role = normalizeRole(opts.role);
   const accepted = new Set(opts.acceptedTypes || []);
-  const missing = requiredAgreementTypes(role).filter((t) => !accepted.has(t));
+  const merchantCategory =
+    opts.merchantCategory ||
+    (opts.restaurant as { merchant_category_slug?: string } | null | undefined)?.merchant_category_slug ||
+    null;
+  const missing = requiredAgreementTypes(role, merchantCategory).filter((t) => !accepted.has(t));
 
   const base: ComplianceStatus = {
     authenticated: true,
