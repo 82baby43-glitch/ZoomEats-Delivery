@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isTestRestaurant } from "../orders/isTestOrder";
 import { getStripeApiKey } from "../server/stripeEnv";
 
 export interface StripePayoutReadiness {
@@ -96,11 +97,12 @@ export async function evaluateStripePayoutReadiness(
 export async function findSimulationRestaurant(db: SupabaseClient) {
   const { data: approved } = await db
     .from("restaurants")
-    .select("restaurant_id,name,latitude,longitude,approved,accepting_orders")
+    .select("restaurant_id,name,latitude,longitude,approved,accepting_orders,is_test_account,restaurant_type")
     .eq("approved", true)
     .limit(50);
 
   for (const r of approved || []) {
+    if (isTestRestaurant(r)) continue;
     const lat = Number(r.latitude);
     const lng = Number(r.longitude);
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat === 0 || lng === 0) continue;
