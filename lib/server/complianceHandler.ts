@@ -1063,7 +1063,36 @@ async function syncAgreementComplete(db: SupabaseClient, user: Record<string, un
     .select("agreement_type")
     .eq("user_id", user.user_id);
   const acceptedTypes = (accepted || []).map((a) => a.agreement_type as string);
-  const status = computeComplianceStatus({ role, user: user as never, acceptedTypes });
+
+  let merchantCategory: string | null = null;
+  let restaurant = null;
+  if (role === "vendor" || role === "restaurant") {
+    const { data: rest } = await db
+      .from("restaurants")
+      .select("*")
+      .eq("owner_id", user.user_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    restaurant = rest;
+    merchantCategory = (rest?.merchant_category_slug as string) || null;
+    if (!merchantCategory) {
+      const { data: ob } = await db
+        .from("restaurant_onboarding")
+        .select("merchant_category_slug")
+        .eq("user_id", user.user_id)
+        .maybeSingle();
+      merchantCategory = (ob?.merchant_category_slug as string) || null;
+    }
+  }
+
+  const status = computeComplianceStatus({
+    role,
+    user: user as never,
+    restaurant,
+    acceptedTypes,
+    merchantCategory,
+  });
   const complete = status.missing_agreements.length === 0;
 
   if (role === "delivery") {

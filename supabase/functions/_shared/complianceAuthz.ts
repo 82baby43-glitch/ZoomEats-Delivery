@@ -204,7 +204,7 @@ function resolveGate(
     return {
       ...s,
       can_access_dashboard: false,
-      redirect_to: "/agreements",
+      redirect_to: s.entity_type === "restaurant" ? "/signup/merchant" : "/agreements",
       message: "Agreement required",
     };
   }

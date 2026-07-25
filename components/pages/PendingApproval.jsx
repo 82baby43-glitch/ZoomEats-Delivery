@@ -81,7 +81,7 @@ export default function PendingApproval() {
         )}
         {!status?.agreement_complete && approval !== "approved" && (
           <Link
-            href={user?.role === "vendor" || user?.role === "restaurant" ? "/restaurant/onboarding" : "/agreements"}
+            href={user?.role === "vendor" || user?.role === "restaurant" ? "/signup/merchant" : "/agreements"}
             className="btn-primary inline-block mt-8"
           >
             Complete agreements &amp; forms

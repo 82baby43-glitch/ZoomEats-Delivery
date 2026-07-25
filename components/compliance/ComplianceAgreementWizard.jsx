@@ -107,7 +107,6 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete, in
         const bgData = bg?.data ?? bg;
         setBgDone(Boolean(bgData?.submitted));
         const stillPending = list.filter((a) => a.required && !a.accepted);
-        if (stillPending.length === 0 && list.length > 0) onAllComplete?.();
       } catch (e) {
         setError(e?.message || "Failed to load");
       }
