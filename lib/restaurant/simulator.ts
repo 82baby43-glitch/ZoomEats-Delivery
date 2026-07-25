@@ -8,6 +8,7 @@ import {
   TEST_CUSTOMER_USER_ID,
   TEST_RESTAURANT_ID,
   TEST_VENDOR_USER_ID,
+  type TestOrderLike,
 } from "../orders/isTestOrder";
 import { internalDispatchHeaders, resolveEdgeFunctionSecretFromEnv } from "../launchAudit/edgeInternal";
 import { getSupabasePublicUrl } from "../supabaseEnv";

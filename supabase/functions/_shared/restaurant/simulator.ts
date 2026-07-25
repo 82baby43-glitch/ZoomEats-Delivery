@@ -8,6 +8,7 @@ import {
   TEST_CUSTOMER_USER_ID,
   TEST_RESTAURANT_ID,
   TEST_VENDOR_USER_ID,
+  type TestOrderLike,
 } from "../orders/isTestOrder.ts";
 import { internalDispatchHeaders } from "../launchAudit/edgeInternal.ts";
 import { getSupabasePublicUrl } from "../supabaseEnv.ts";
