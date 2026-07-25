@@ -41,6 +41,18 @@ function savePrefs(prefs: AudioPreferences) {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
 }
 
+export function syncAudioPreferences(prefs: AudioPreferences) {
+  savePrefs(prefs);
+  if (!duckingState.ducked) {
+    duckingState.volume = prefs.musicVolume;
+    emit();
+  }
+}
+
+export function getAudioPreferences(): AudioPreferences {
+  return loadPrefs();
+}
+
 export function subscribeAudioDucking(fn: Listener) {
   listeners.push(fn);
   fn({ ...duckingState });
@@ -77,8 +89,23 @@ export function triggerAudioDucking(event: DuckingEvent, prefs?: AudioPreference
     window.speechSynthesis.speak(utter);
   }
 
-  const restoreMs = event.priority === "high" ? 6000 : 4000;
-  restoreTimer = setTimeout(() => restoreAudioVolume(p), restoreMs);
+  if (event.autoRestore !== false) {
+    const restoreMs = event.priority === "high" ? 6000 : 4000;
+    restoreTimer = setTimeout(() => restoreAudioVolume(p), restoreMs);
+  }
+}
+
+/** Lower music while a driver order-offer alert is showing. */
+export function duckForDriverOffer(orderId?: string, prefs?: AudioPreferences) {
+  triggerAudioDucking(
+    {
+      type: "delivery_created",
+      priority: "high",
+      order_id: orderId,
+      autoRestore: false,
+    },
+    prefs
+  );
 }
 
 export function restoreAudioVolume(prefs?: AudioPreferences) {

@@ -34,6 +34,8 @@ export interface DuckingEvent {
   priority: DuckingPriority;
   message?: string;
   order_id?: string;
+  /** When false, volume stays ducked until restoreAudioVolume() is called. */
+  autoRestore?: boolean;
 }
 
 export const DEFAULT_AUDIO_PREFERENCES: AudioPreferences = {

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { triggerAudioDucking } from "@/lib/companionMode/audioDucking";
+import { duckForDriverOffer, triggerAudioDucking } from "@/lib/companionMode/audioDucking";
 import type { AudioPreferences, CompanionEventType } from "@/lib/companionMode/types";
 
 const HIGH_PRIORITY: CompanionEventType[] = [
@@ -63,6 +63,18 @@ export function useCompanionRealtime({
     const channels: ReturnType<typeof supabase.channel>[] = [];
 
     if (role === "driver") {
+      if (driverId) {
+        const offersChannel = supabase
+          .channel(`companion-driver-offers-${driverId}`)
+          .on("broadcast", { event: "new_order_offer" }, (msg) => {
+            const payload = (msg.payload ?? {}) as { offer_id?: string; order_id?: string };
+            duckForDriverOffer(payload.order_id || payload.offer_id, prefsRef.current || undefined);
+            onRefresh?.();
+          })
+          .subscribe();
+        channels.push(offersChannel);
+      }
+
       const ordersChannel = supabase
         .channel(`companion-driver-orders-${userId}`)
         .on(
