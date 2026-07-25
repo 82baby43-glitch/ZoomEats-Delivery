@@ -8,8 +8,7 @@ import DriverBackgroundCheckForm from "@/components/compliance/DriverBackgroundC
 import RestaurantApplicationForm from "@/components/compliance/RestaurantApplicationForm";
 import DriverApplicationForm from "@/components/compliance/DriverApplicationForm";
 import MerchantCategoryPicker from "@/components/compliance/MerchantCategoryPicker";
-import DispensaryApplicationForm from "@/components/compliance/DispensaryApplicationForm";
-import { categoryLabel, isAgeRestrictedCategory } from "@/lib/merchant/categoryConfig";
+import { categoryLabel, isAgeRestrictedCategory, isSignupExcludedSlug, resolveSignupCategorySlug, RESTAURANT_SLUG } from "@/lib/merchant/categoryConfig";
 
 function clientMeta() {
   if (typeof window === "undefined") return {};
@@ -41,6 +40,7 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete, in
   const [error, setError] = useState("");
   const [appDone, setAppDone] = useState(false);
   const [bgDone, setBgDone] = useState(false);
+  const [storedCategoryExcluded, setStoredCategoryExcluded] = useState(false);
 
   useEffect(() => {
     if (!user || role !== "vendor" || !initialMerchantCategory || categoryLocked) return;
@@ -70,26 +70,28 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete, in
           api.get(appEndpoint),
         ]);
         const appData = app?.data ?? app;
-        const slug = appData?.merchant_category_slug || "restaurants";
+        const storedSlug = appData?.merchant_category_slug || null;
+        const signupSlug = resolveSignupCategorySlug(storedSlug, initialMerchantCategory);
         const hasApplication = Boolean(appData?.business_name);
-        const hasCategory = Boolean(appData?.merchant_category_slug);
+        const hasValidCategory = Boolean(signupSlug);
 
         if (role === "vendor") {
-          const nextCategory = initialMerchantCategory || slug;
-          setMerchantCategory(nextCategory);
-          if (hasCategory && hasApplication) {
+          setStoredCategoryExcluded(Boolean(storedSlug && isSignupExcludedSlug(storedSlug)));
+          setMerchantCategory(signupSlug || RESTAURANT_SLUG);
+          if (hasValidCategory && hasApplication) {
             setCategoryLocked(true);
             setSteps(VENDOR_STEPS_RESTAURANT);
-          } else if (hasCategory || initialMerchantCategory) {
-            setCategoryLocked(Boolean(initialMerchantCategory || hasCategory));
+          } else if (hasValidCategory) {
+            setCategoryLocked(Boolean(initialMerchantCategory));
             setSteps(["application", "agreements"]);
           } else {
+            setCategoryLocked(false);
             setSteps(VENDOR_STEPS_WITH_CATEGORY);
           }
         }
 
         const agrRes = role === "vendor"
-          ? await api.get("/agreements/me", { params: { merchant_category: initialMerchantCategory || slug } })
+          ? await api.get("/agreements/me", { params: { merchant_category: signupSlug || RESTAURANT_SLUG } })
           : await api.get("/agreements/me");
         const list = Array.isArray(agrRes?.data) ? agrRes.data : [];
         setAgreements(list);
@@ -114,7 +116,6 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete, in
 
   const currentStep = steps[step];
   const pending = agreements.filter((a) => a.required && !a.accepted);
-  const isDispensary = merchantCategory === "licensed_dispensary";
 
   const allAgreementsReady = pending.every((a) => {
     const sig = esign[a.type] || {};
@@ -191,22 +192,25 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete, in
       {error && <p className="text-sm text-red-400">{error}</p>}
 
       {currentStep === "category" && role === "vendor" && !categoryLocked && (
-        <MerchantCategoryPicker
-          value={merchantCategory}
-          onChange={setMerchantCategory}
-          onContinue={saveCategory}
-        />
+        <>
+          {storedCategoryExcluded && (
+            <p className="text-sm text-amber-400">
+              Your previous business type is no longer available for public signup. Please choose a restaurant or retail category below.
+            </p>
+          )}
+          <MerchantCategoryPicker
+            value={merchantCategory}
+            onChange={setMerchantCategory}
+            onContinue={saveCategory}
+          />
+        </>
       )}
 
       {currentStep === "application" && role === "delivery" && (
         <DriverApplicationForm onComplete={() => { setAppDone(true); goNext(); }} />
       )}
 
-      {currentStep === "application" && role === "vendor" && isDispensary && (
-        <DispensaryApplicationForm onComplete={() => { setAppDone(true); goNext(); }} />
-      )}
-
-      {currentStep === "application" && role === "vendor" && !isDispensary && (
+      {currentStep === "application" && role === "vendor" && (
         <RestaurantApplicationForm
           merchantCategorySlug={merchantCategory}
           onComplete={() => { setAppDone(true); goNext(); }}
