@@ -51,8 +51,8 @@ export const ROLE_ROUTE_ACCESS: Record<string, string[]> = {
     "/pending-approval",
     "/onboarding",
   ],
-  restaurant_owner: ["/restaurant", "/vendor", "/account", "/agreements", "/pending-approval", "/onboarding"],
-  restaurant_staff: ["/restaurant", "/vendor", "/account", "/agreements", "/pending-approval", "/onboarding"],
+  restaurant_owner: ["/restaurant", "/vendor", "/account", "/agreements", "/pending-approval", "/onboarding", "/signup", "/claim"],
+  restaurant_staff: ["/restaurant", "/vendor", "/account", "/agreements", "/pending-approval", "/onboarding", "/signup", "/claim"],
   admin: ["/admin", "/account", "/agreements", "/onboarding"],
   super_admin: ["/admin", "/account", "/agreements", "/onboarding"],
   dispatcher: ["/admin", "/dispatcher", "/account"],
@@ -75,6 +75,7 @@ const PUBLIC_PREFIXES = [
   "/onboarding",
   "/agreements",
   "/pending-approval",
+  "/signup",
 ];
 
 export function isPublicPath(pathname: string): boolean {
