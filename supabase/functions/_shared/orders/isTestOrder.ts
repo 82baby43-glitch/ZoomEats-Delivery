@@ -38,3 +38,16 @@ export function isTestOrder(row: TestOrderLike | null | undefined): boolean {
   if (SIMULATION_CUSTOMERS.has(String(row.customer_id || ""))) return true;
   return false;
 }
+
+/** Sandbox orders excluded from production ledger writes (not launch audit simulations). */
+export function shouldSkipFinancialLedger(row: TestOrderLike | null | undefined): boolean {
+  if (!row) return false;
+  const orderId = String(row.order_id || "");
+  if (/^ord_test_/i.test(orderId)) return true;
+  if (/^ord_(audit|launch|sim)_/i.test(orderId)) return false;
+  if (SIMULATION_CUSTOMERS.has(String(row.customer_id || ""))) return false;
+  if (row.restaurant_id === TEST_RESTAURANT_ID) return true;
+  if (isTestRestaurant({ restaurant_id: row.restaurant_id })) return true;
+  if (row.test_order) return true;
+  return false;
+}

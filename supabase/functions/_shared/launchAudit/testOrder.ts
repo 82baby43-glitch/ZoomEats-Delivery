@@ -79,7 +79,7 @@ export async function runFullDeliverySimulation(db: SupabaseClient): Promise<Ful
   }
   checks.push(mk(`${prefix}_menu`, "Customer adds item to cart", "pass", "low", menuItem.name));
 
-  const testOrderId = `ord_${simulationId.slice(4)}`;
+  const testOrderId = `ord_${simulationId}`;
   const subtotal = Number(menuItem.price);
   const deliveryFee = 2.99;
   const total = Math.round((subtotal + deliveryFee) * 100) / 100;
@@ -193,6 +193,10 @@ export async function runFullDeliverySimulation(db: SupabaseClient): Promise<Ful
   ));
 
   const financialResult = await recordOrderFinancials(db, testOrderId);
+  const financialDetail =
+    financialResult.skipped
+      ? "ledger write skipped for sandbox order"
+      : financialResult.error || "calculation failed";
   const { data: driverEarning } = await db
     .from("driver_earnings")
     .select("id,final_driver_pay")
@@ -201,11 +205,11 @@ export async function runFullDeliverySimulation(db: SupabaseClient): Promise<Ful
   checks.push(mk(
     `${prefix}_earnings`,
     "Driver earnings calculation",
-    financialResult.ok && driverEarning?.id && Number(driverEarning.final_driver_pay) > 0 ? "pass" : "fail",
+    financialResult.ok && !financialResult.skipped && driverEarning?.id && Number(driverEarning.final_driver_pay) > 0 ? "pass" : "fail",
     "medium",
-    financialResult.ok && driverEarning?.id
+    financialResult.ok && !financialResult.skipped && driverEarning?.id
       ? `driver pay $${Number(driverEarning.final_driver_pay).toFixed(2)}`
-      : financialResult.error || "calculation failed"
+      : financialDetail
   ));
 
   const { data: settlement } = await db
@@ -216,11 +220,11 @@ export async function runFullDeliverySimulation(db: SupabaseClient): Promise<Ful
   checks.push(mk(
     `${prefix}_payout`,
     "Restaurant payout calculation",
-    financialResult.ok && settlement?.id && Number(settlement.net_payout) > 0 ? "pass" : "fail",
+    financialResult.ok && !financialResult.skipped && settlement?.id && Number(settlement.net_payout) > 0 ? "pass" : "fail",
     "medium",
-    financialResult.ok && settlement?.id
+    financialResult.ok && !financialResult.skipped && settlement?.id
       ? `restaurant payout $${Number(settlement.net_payout).toFixed(2)} · commission $${Number(settlement.commission_amount).toFixed(2)}`
-      : financialResult.error || "calculation failed"
+      : financialDetail
   ));
 
   const { data: platformRow } = await db
@@ -231,11 +235,11 @@ export async function runFullDeliverySimulation(db: SupabaseClient): Promise<Ful
   checks.push(mk(
     `${prefix}_commission`,
     "Platform commission",
-    financialResult.ok && platformRow?.id ? "pass" : "fail",
+    financialResult.ok && !financialResult.skipped && platformRow?.id ? "pass" : "fail",
     "low",
-    financialResult.ok && platformRow?.id
+    financialResult.ok && !financialResult.skipped && platformRow?.id
       ? `commission $${Number(platformRow.commission_revenue).toFixed(2)} · net $${Number(platformRow.net_profit).toFixed(2)}`
-      : financialResult.error || "calculation failed"
+      : financialDetail
   ));
 
   await db.from("driver_earnings").delete().eq("order_id", testOrderId);
