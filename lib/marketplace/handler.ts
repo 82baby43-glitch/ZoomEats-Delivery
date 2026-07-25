@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MerchantCategory } from "./types";
+import { PRIMARY_SIGNUP_SLUGS, DISPENSARY_SLUG } from "../merchant/categoryConfig";
 
 function throwErr(message: string, status = 400): never {
   const e = new Error(message) as Error & { status?: number };
@@ -135,7 +136,9 @@ export async function handleMarketplaceRequest(db: SupabaseClient, ctx: HandlerC
   const { path, method, body = {}, params = {} } = ctx;
 
   if (path === "/marketplace/categories" && method === "GET") {
-    return listCategories(db, { enabledOnly: true, visibleOnly: true });
+    const categories = await listCategories(db, { enabledOnly: true, visibleOnly: true });
+    const allowed = new Set<string>(PRIMARY_SIGNUP_SLUGS);
+    return categories.filter((cat) => allowed.has(cat.slug) && cat.slug !== DISPENSARY_SLUG);
   }
 
   if (path === "/marketplace/search" && method === "GET") {

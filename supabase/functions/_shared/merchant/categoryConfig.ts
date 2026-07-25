@@ -111,6 +111,20 @@ export function isPrimarySignupSlug(slug?: string | null): slug is PrimarySignup
   return PRIMARY_SIGNUP_SLUGS.includes(slug as PrimarySignupSlug);
 }
 
+/** Public merchant signup excludes licensed dispensary and other admin-only categories. */
+export function isSignupExcludedSlug(slug?: string | null): boolean {
+  return slug === DISPENSARY_SLUG;
+}
+
+export function resolveSignupCategorySlug(
+  slug?: string | null,
+  preferred?: string | null
+): PrimarySignupSlug | null {
+  if (preferred && isPrimarySignupSlug(preferred)) return preferred;
+  if (isPrimarySignupSlug(slug)) return slug as PrimarySignupSlug;
+  return null;
+}
+
 export function categoryApplicationConfig(slug?: string | null): CategoryApplicationConfig {
   return CATEGORY_APPLICATION_CONFIG[slug || RESTAURANT_SLUG] || CATEGORY_APPLICATION_CONFIG[RESTAURANT_SLUG];
 }
