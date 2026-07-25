@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { getDriverDeviceId } from "@/lib/driverDeviceId";
 import { playNewOrderOfferSound, playOfferTimeoutSound, primeDriverOfferSound } from "@/lib/driverOfferSound";
+import { duckForDriverOffer, getAudioPreferences, restoreAudioVolume } from "@/lib/companionMode/audioDucking";
 import { useWebPush } from "@/lib/useWebPush";
 import { MapPin, DollarSign, Clock, Truck } from "lucide-react";
 import DriverEarningsBreakdown from "@/components/driver/DriverEarningsBreakdown";
@@ -19,6 +20,8 @@ export default function DriverOrderOfferModal({ offer, onClear, onRefresh }) {
   const deviceId = getDriverDeviceId();
 
   useEffect(() => {
+    const prefs = getAudioPreferences();
+    duckForDriverOffer(offer?.order_id || offer?.offer_id, prefs);
     primeDriverOfferSound();
     playNewOrderOfferSound();
     if (typeof navigator !== "undefined" && "vibrate" in navigator) {
@@ -29,7 +32,8 @@ export default function DriverOrderOfferModal({ offer, onClear, onRefresh }) {
       `Pickup: ${offer?.restaurant_name || offer?.meta?.restaurant_name || "Restaurant"}`,
       { tag: `offer-${offer?.offer_id}`, requireInteraction: true }
     );
-  }, [offer?.offer_id, fire, offer?.restaurant_name, offer?.meta?.restaurant_name]);
+    return () => restoreAudioVolume(prefs);
+  }, [offer?.offer_id, fire, offer?.restaurant_name, offer?.meta?.restaurant_name, offer?.order_id]);
 
   useEffect(() => {
     if (!offer?.expires_at) return;

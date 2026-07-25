@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { AudioPreferences, CompanionSettings, MusicProvider } from "@/lib/companionMode/types";
 import { DEFAULT_AUDIO_PREFERENCES } from "@/lib/companionMode/types";
-import { setBaseVolume } from "@/lib/companionMode/audioDucking";
+import { setBaseVolume, syncAudioPreferences } from "@/lib/companionMode/audioDucking";
 import { getCompanionOAuthRedirectUri } from "@/lib/companionMode/redirectUri";
 
 const LOCAL_FALLBACK_SETTINGS: CompanionSettings = {
@@ -43,8 +43,11 @@ export function useCompanionMode() {
       setProviders(
         (p?.data as { providers: MusicProvider[]; oauth_available: Record<string, boolean> }) || null,
       );
-      if (normalized.audio_preferences?.musicVolume != null) {
-        setBaseVolume(normalized.audio_preferences.musicVolume, normalized.audio_preferences);
+      if (normalized.audio_preferences) {
+        syncAudioPreferences(normalized.audio_preferences);
+        if (normalized.audio_preferences.musicVolume != null) {
+          setBaseVolume(normalized.audio_preferences.musicVolume, normalized.audio_preferences);
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not load Companion Mode";
@@ -70,6 +73,7 @@ export function useCompanionMode() {
       }
       const data = r?.data as CompanionSettings;
       setSettings(data);
+      if (data?.audio_preferences) syncAudioPreferences(data.audio_preferences);
       if (patch.musicVolume != null) setBaseVolume(patch.musicVolume, data?.audio_preferences);
       return data;
     } catch (e) {
@@ -81,6 +85,7 @@ export function useCompanionMode() {
           ...base,
           audio_preferences: { ...base.audio_preferences, ...patch },
         };
+        syncAudioPreferences(merged.audio_preferences);
         if (patch.musicVolume != null) setBaseVolume(patch.musicVolume, merged.audio_preferences);
         return merged;
       });
