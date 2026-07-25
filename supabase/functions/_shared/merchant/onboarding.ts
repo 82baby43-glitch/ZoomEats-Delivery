@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { DISPENSARY_SLUG, categoryApplicationConfig } from "./categoryConfig.ts";
 
 function uid(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -56,6 +57,7 @@ export async function ensureMerchantStub(
       active: false,
       accepting_orders: false,
       merchant_category_slug: slug,
+      business_category: categoryApplicationConfig(slug).businessCategory,
       rating: 4.6,
       delivery_time_min: 30,
     })
@@ -66,8 +68,13 @@ export async function ensureMerchantStub(
   return data.restaurant_id as string;
 }
 
-export const DISPENSARY_SLUG = "licensed_dispensary";
+export { DISPENSARY_SLUG } from "./categoryConfig.ts";
+export { isLiquorCategory, isAgeRestrictedCategory, isRetailCategory } from "./categoryConfig.ts";
 
 export function isDispensaryCategory(slug?: string | null): boolean {
   return slug === DISPENSARY_SLUG;
+}
+
+export function businessCategoryForSlug(slug?: string | null): string {
+  return categoryApplicationConfig(slug).businessCategory;
 }

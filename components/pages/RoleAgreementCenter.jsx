@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
 import ComplianceAgreementWizard from "@/components/compliance/ComplianceAgreementWizard";
 
-export default function RoleAgreementCenter({ roleLabel }) {
+export default function RoleAgreementCenter({ roleLabel, initialMerchantCategory = null }) {
   const { user, refresh } = useAuth();
   const router = useRouter();
 
@@ -30,9 +30,9 @@ export default function RoleAgreementCenter({ roleLabel }) {
     <div>
       <Header />
       <div className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="font-display text-3xl font-bold">{label} Agreement Center</h1>
+        <h1 className="font-display text-3xl font-bold">{label} Partner Agreement Center</h1>
         <p className="mt-2" style={{ color: "var(--muted)" }}>
-          Complete your application, background authorization (drivers), and electronically sign all required agreements.
+          Complete your merchant application and electronically sign all required agreements for your business type.
         </p>
         {(label === "Restaurant" || user?.role === "vendor") && (
           <div className="mt-4 p-4 rounded-xl text-sm" style={{ background: "var(--surface-2)" }}>
@@ -44,7 +44,7 @@ export default function RoleAgreementCenter({ roleLabel }) {
           </div>
         )}
         <div className="mt-8">
-          <ComplianceAgreementWizard roleLabel={label} onAllComplete={handleComplete} />
+          <ComplianceAgreementWizard roleLabel={label} onAllComplete={handleComplete} initialMerchantCategory={initialMerchantCategory} />
         </div>
       </div>
     </div>
