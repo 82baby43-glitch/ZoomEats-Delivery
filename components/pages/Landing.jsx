@@ -390,7 +390,10 @@ export default function Landing() {
 
       <footer className="max-w-7xl mx-auto px-6 md:px-12 pb-10 pt-4 text-center space-y-3">
         <div className="flex flex-wrap justify-center gap-3 text-sm">
-          <Link href="/for-merchants" className="btn-ghost" data-testid="footer-for-merchants">
+          <Link href="/for-merchants" className="btn-ghost md:hidden" data-testid="footer-try-demo-merchant">
+            Try Demo Merchant
+          </Link>
+          <Link href="/for-merchants" className="btn-ghost hidden md:inline-flex" data-testid="footer-for-merchants">
             For Merchants
           </Link>
         </div>
