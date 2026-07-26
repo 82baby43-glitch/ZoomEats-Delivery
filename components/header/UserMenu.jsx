@@ -17,7 +17,7 @@ export default function UserMenu({ user, logout }) {
 
   if (!user) {
     return (
-      <button className="btn-primary login-header-btn" onClick={startLogin} data-testid="login-button">
+      <button className="btn-primary login-header-btn header-mobile-btn" onClick={startLogin} data-testid="login-button">
         Sign in
       </button>
     );

@@ -47,7 +47,7 @@ export default function NavLinks({ user }) {
     <>
       <Link
         href="/for-merchants"
-        className="md:hidden btn-ghost text-sm shrink-0 px-2"
+        className="md:hidden header-mobile-btn btn-ghost shrink-0"
         data-testid="nav-for-merchants-mobile"
       >
         Merchants

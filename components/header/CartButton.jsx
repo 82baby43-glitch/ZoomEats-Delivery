@@ -11,7 +11,7 @@ export default function CartButton() {
 
   return (
     <button
-      className="btn-ghost relative flex items-center gap-2"
+      className="btn-ghost relative flex items-center gap-2 header-mobile-icon-btn"
       onClick={() => router.push("/cart")}
       data-testid="cart-button"
     >
