@@ -90,7 +90,13 @@ export async function handleLaunchAuditRequest(
 
   if (path === "/admin/system-health/events" && method === "GET") {
     const limit = Number(params.limit || 100);
-    return fetchSystemEvents(db, limit);
+    const result = await fetchSystemEvents(db, limit);
+    const events = (result.events || []).filter(
+      (e) =>
+        e.event_type !== "admin_test" &&
+        e.metadata?.kind !== "merchant_notification_test"
+    );
+    return { ...result, events };
   }
 
   if (path === "/admin/system-health/rate-limits" && method === "GET") {

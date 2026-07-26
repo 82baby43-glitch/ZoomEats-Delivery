@@ -89,11 +89,23 @@ export default function MerchantNotificationAdminPanel() {
       </div>
 
       <div className="space-y-2 max-h-48 overflow-y-auto text-xs" style={{ color: "var(--muted)" }}>
-        {(status?.events || []).map((e) => (
-          <div key={e.id || e.created_at} className="border-b pb-2" style={{ borderColor: "var(--border)" }}>
-            <span className="font-mono">{e.event_type}</span> · {e.message}
-          </div>
-        ))}
+        {(status?.events || []).map((e) => {
+          const isTest = e.event_type === "admin_test" || e.metadata?.kind === "merchant_notification_test";
+          const isFailure = e.event_type === "merchant_notification_failure" || e.metadata?.kind === "merchant_notification_failure";
+          const label = isTest ? "Sound test" : isFailure ? "Delivery failure" : e.event_type;
+          return (
+            <div key={e.event_id || e.id || e.created_at} className="border-b pb-2" style={{ borderColor: "var(--border)" }}>
+              <span
+                className="font-mono"
+                style={{ color: isTest ? "var(--success)" : isFailure ? "var(--error)" : undefined }}
+              >
+                {label}
+              </span>
+              {" · "}
+              {e.message}
+            </div>
+          );
+        })}
         {!status?.events?.length && <div>No notification events logged yet.</div>}
       </div>
     </div>

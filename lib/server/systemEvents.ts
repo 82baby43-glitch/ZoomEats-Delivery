@@ -10,6 +10,8 @@ export type SystemEventType =
   | "api_error"
   | "driver_disconnect"
   | "restaurant_error"
+  | "merchant_notification_failure"
+  | "admin_test"
   | "database_error"
   | "rate_limit_blocked"
   | "simulation_complete";
