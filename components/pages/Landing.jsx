@@ -95,7 +95,7 @@ export default function Landing() {
         if (cuisine) params.cuisine = cuisine;
         if (merchantCategory) params.merchant_category = merchantCategory;
         if (openNow) params.open_now = "1";
-        const data = await safeGet("/restaurants", [], { params });
+        const data = await safeGet("/homepage/merchants", [], { params });
         setRestaurants(sanitizeRestaurants(data));
         if (q.trim().length >= 2) {
           const search = await safeGet("/marketplace/search", { products: [] }, { params: { q: q.trim() } });

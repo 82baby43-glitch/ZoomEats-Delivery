@@ -258,6 +258,7 @@ Deno.serve(async (req) => {
       path,
       method,
       body,
+      params,
       requireAuth,
       requireRole,
     });
