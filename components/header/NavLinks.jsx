@@ -44,15 +44,7 @@ function AdminLink({ role }) {
 
 export default function NavLinks({ user }) {
   return (
-    <>
-      <Link
-        href="/for-merchants"
-        className="md:hidden header-mobile-btn btn-ghost shrink-0"
-        data-testid="nav-for-merchants-mobile"
-      >
-        Merchants
-      </Link>
-      <nav className="hidden md:flex items-center gap-6" aria-label="Main navigation">
+    <nav className="hidden md:flex items-center gap-6" aria-label="Main navigation">
       <Link href="/" className="btn-ghost" data-testid="nav-home">Discover</Link>
       <Link href="/for-merchants" className="btn-ghost" data-testid="nav-for-merchants">For Merchants</Link>
       {user && <Link href="/orders" className="btn-ghost" data-testid="nav-orders">My Orders</Link>}
@@ -67,7 +59,6 @@ export default function NavLinks({ user }) {
         </Link>
       )}
       {user?.role === "admin" && <AdminLink role={user.role} />}
-      </nav>
-    </>
+    </nav>
   );
 }
