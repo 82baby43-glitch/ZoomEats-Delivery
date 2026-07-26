@@ -8,14 +8,7 @@ function splitEmails(raw: string | undefined): string[] {
 }
 
 export function getAdminEmails(): string[] {
-  const seen = new Set<string>();
-  for (const e of [
-    ...splitEmails(process.env.ADMIN_EMAILS),
-    ...splitEmails(process.env.NEXT_PUBLIC_ADMIN_EMAILS),
-  ]) {
-    seen.add(e);
-  }
-  return [...seen];
+  return splitEmails(process.env.ADMIN_EMAILS);
 }
 
 export function isAdminEmailsConfigured(): boolean {

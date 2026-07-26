@@ -150,8 +150,8 @@ async function main() {
     const review = reviews?.[0];
     if (!review) throw new Error("no compliance review");
 
-    const adminEmail = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "").split(",")[0]?.trim();
-    if (!adminEmail) throw new Error("set NEXT_PUBLIC_ADMIN_EMAILS for admin test");
+    const adminEmail = (process.env.ADMIN_EMAILS || "").split(",")[0]?.trim();
+    if (!adminEmail) throw new Error("set ADMIN_EMAILS for admin test");
     const { data: adminUsers } = await admin.from("users").select("user_id").eq("email", adminEmail).limit(1);
     const adminUserId = adminUsers?.[0]?.user_id;
     if (!adminUserId) throw new Error("admin user not found");

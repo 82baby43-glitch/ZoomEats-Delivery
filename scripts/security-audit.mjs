@@ -6,6 +6,8 @@
  * Usage: node scripts/security-audit.mjs
  */
 import { createClient } from "@supabase/supabase-js";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
@@ -265,13 +267,42 @@ async function testServiceRoleNotPublic() {
 
 async function testAdminEmailsPublic() {
   const publicAdmin = process.env.NEXT_PUBLIC_ADMIN_EMAILS || "";
-  const hasPublicAdmin = publicAdmin.trim().length > 0;
+  const serverAdmin = process.env.ADMIN_EMAILS || "";
+  const clientPaths = ["lib/auth.js", "components"];
+  const clientRefs = [];
+  for (const rel of clientPaths) {
+    const abs = join(process.cwd(), rel);
+    try {
+      const st = statSync(abs);
+      if (st.isFile()) {
+        if (readFileSync(abs, "utf8").includes("NEXT_PUBLIC_ADMIN_EMAILS")) clientRefs.push(rel);
+      } else {
+        for (const name of readdirSync(abs, { recursive: true })) {
+          const file = join(abs, String(name));
+          if (!file.match(/\.(js|jsx|ts|tsx)$/)) continue;
+          if (readFileSync(file, "utf8").includes("NEXT_PUBLIC_ADMIN_EMAILS")) clientRefs.push(join(rel, String(name)));
+        }
+      }
+    } catch {
+      /* ignore missing paths */
+    }
+  }
+  const hasClientExposure = clientRefs.length > 0;
+  const legacyEnv = publicAdmin.trim().length > 0;
+  const passed = !hasClientExposure;
+  const detail = hasClientExposure
+    ? `client references: ${clientRefs.join(", ")}`
+    : legacyEnv
+      ? `client clean; remove legacy NEXT_PUBLIC_ADMIN_EMAILS from Vercel (use ADMIN_EMAILS)`
+      : serverAdmin.trim()
+        ? "server-only ADMIN_EMAILS"
+        : "not configured";
   record(
     "secrets",
     "ADMIN_EMAILS not client-exposed",
-    !hasPublicAdmin,
-    hasPublicAdmin ? `NEXT_PUBLIC_ADMIN_EMAILS is set (${publicAdmin.split(",").length} email(s))` : "not set in this env",
-    hasPublicAdmin ? "medium" : "info"
+    passed,
+    detail,
+    hasClientExposure ? "medium" : "info"
   );
 }
 

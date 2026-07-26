@@ -207,7 +207,7 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
             <p className="font-bold text-amber-400">Admin Security Warning</p>
             <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>{adminWarning}</p>
             <p className="text-xs mt-2" style={{ color: "var(--muted)" }}>
-              Set <code>ADMIN_EMAILS</code> and <code>NEXT_PUBLIC_ADMIN_EMAILS</code> in Vercel and Supabase secrets.
+              Set <code>ADMIN_EMAILS</code> in Vercel and Supabase secrets (server-only).
             </p>
           </div>
         </div>
