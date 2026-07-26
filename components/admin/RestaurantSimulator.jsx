@@ -17,6 +17,7 @@ import Header from "@/components/Header";
 import { api } from "@/lib/api";
 import { LoadingSkeleton } from "@/components/ui/PageStates";
 import TestRestaurantDashboard from "@/components/admin/TestRestaurantDashboard";
+import MerchantNotificationAdminPanel from "@/components/admin/MerchantNotificationAdminPanel";
 
 export default function RestaurantSimulator() {
   const [status, setStatus] = useState(null);
@@ -81,6 +82,10 @@ export default function RestaurantSimulator() {
             <Link href="/admin" className="text-sm" style={{ color: "var(--muted)" }}>
               ← Admin dashboard
             </Link>
+            <span className="text-sm mx-2" style={{ color: "var(--muted)" }}>·</span>
+            <Link href="/admin/testing-tools" className="text-sm" style={{ color: "var(--muted)" }}>
+              Testing Tools
+            </Link>
             <h1 className="font-display text-3xl font-bold mt-2 flex items-center gap-3">
               <ChefHat size={28} /> Restaurant Simulator
             </h1>
@@ -117,6 +122,7 @@ export default function RestaurantSimulator() {
           </div>
         ) : (
           <div className="mt-8 space-y-6">
+            <MerchantNotificationAdminPanel />
             <div className="grid md:grid-cols-2 gap-4">
               <div className="card p-6">
                 <div className="flex items-center gap-2 text-sm font-bold">

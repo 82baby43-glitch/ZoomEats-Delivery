@@ -79,6 +79,8 @@ import { handleCompanionRequest } from "../_shared/companionMode/handler.ts";
 import { recordOrderFinancials } from "../_shared/financial/engine.ts";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "../_shared/restaurantAdminHandler.ts";
 import { handleRestaurantSimulatorRequest } from "../_shared/restaurantSimulatorHandler.ts";
+import { handleVendorDashboardRequest } from "../_shared/vendorDashboardHandler.ts";
+import { handleMerchantNotificationAdminRequest } from "../_shared/merchantNotificationAdminHandler.ts";
 import { handleMerchantClaimRequest } from "../_shared/merchantClaimHandler.ts";
 import { isTestOrder } from "../_shared/orders/isTestOrder.ts";
 import { isSandboxRestaurant } from "../_shared/restaurants.ts";
@@ -297,6 +299,25 @@ Deno.serve(async (req) => {
     const restaurantSimulatorResult = await handleRestaurantSimulatorRequest(db, complianceCtx);
     if (restaurantSimulatorResult !== null) return json(restaurantSimulatorResult);
 
+    const vendorDashboardResult = await handleVendorDashboardRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+      runtime: { supabaseUrl, serviceKey },
+    });
+    if (vendorDashboardResult !== null) return json(vendorDashboardResult);
+
+    const merchantNotificationAdminResult = await handleMerchantNotificationAdminRequest(db, {
+      path,
+      method,
+      body,
+      requireRole,
+    });
+    if (merchantNotificationAdminResult !== null) return json(merchantNotificationAdminResult);
+
     const merchantClaimResult = await handleMerchantClaimRequest(db, {
       path,
       method,
@@ -511,14 +532,25 @@ Deno.serve(async (req) => {
     if (path === "/vendor/restaurant" && method === "POST") {
       const u = requireRole("vendor");
       const { data: existing } = await db.from("restaurants").select("*").eq("owner_id", u.user_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-      const restData = {
-        name: body.name,
-        description: body.description || "",
-        cuisine: body.cuisine || "",
-        image_url: body.image_url || "",
-        cover_url: body.cover_url || "",
-        address: body.address || "",
-      };
+      const patchKeys = [
+        "name", "description", "cuisine", "image_url", "cover_url", "address", "phone",
+        "accepting_orders", "active", "delivery_enabled", "delivery_time_min",
+        "delivery_radius_km", "minimum_order", "business_hours", "busy_mode",
+        "holiday_schedule", "temporary_closure", "online_status",
+      ];
+      const restData: Record<string, unknown> = {};
+      if (existing) {
+        for (const key of patchKeys) {
+          if (body[key] !== undefined) restData[key] = body[key];
+        }
+      } else {
+        restData.name = body.name;
+        restData.description = body.description || "";
+        restData.cuisine = body.cuisine || "";
+        restData.image_url = body.image_url || "";
+        restData.cover_url = body.cover_url || "";
+        restData.address = body.address || "";
+      }
       if (existing) {
         const { data } = await db.from("restaurants").update(restData).eq("restaurant_id", existing.restaurant_id).select().single();
         return json(data);

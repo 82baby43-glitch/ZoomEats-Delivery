@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ChefHat,
@@ -15,7 +15,12 @@ import {
 import { api } from "@/lib/api";
 import { formatMoney, sanitizeOrders } from "@/lib/safeData";
 import { isPaymentConfirmed } from "@/lib/orderState";
-import { playChime } from "@/lib/chime";
+import { acceptMinutesRemaining, isIncomingUnacknowledged } from "@/lib/merchant/incomingOrderAlerts";
+import { useMerchantIncomingOrderAlerts } from "@/lib/hooks/useMerchantIncomingOrderAlerts";
+import IncomingOrderAlertBanner from "@/components/merchant/IncomingOrderAlertBanner";
+import MerchantAlertSettingsPanel from "@/components/merchant/MerchantAlertSettingsPanel";
+import { useWebPush } from "@/lib/useWebPush";
+import { primeChime } from "@/lib/chime";
 
 const STATUS_NEXT = {
   placed: "accepted",
@@ -60,33 +65,41 @@ export default function TestRestaurantDashboard() {
   const [restaurant, setRestaurant] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(null);
-  const notifiedRef = useRef(new Set());
-  const primedRef = useRef(false);
+  const [dataPrimed, setDataPrimed] = useState(false);
+  const { fire, request, permission } = useWebPush("ZoomEats Sandbox Merchant");
 
   const load = useCallback(async () => {
     try {
       const res = await api.get("/admin/restaurant-simulator/dashboard");
       const data = res?.data || res;
       setRestaurant(data?.restaurant || null);
-      const orderList = sanitizeOrders(data?.orders);
-      setOrders(orderList);
-
-      const fresh = orderList.filter(
-        (o) => o.status === "placed" && isPaymentConfirmed(o) && !notifiedRef.current.has(o.order_id)
-      );
-      if (primedRef.current && fresh.length > 0) {
-        playChime();
-      }
-      orderList.forEach((o) => {
-        if (o.status === "placed") notifiedRef.current.add(o.order_id);
-      });
-      primedRef.current = true;
+      setOrders(sanitizeOrders(data?.orders));
+      setDataPrimed(true);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const {
+    settings: alertSettings,
+    updateSettings: updateAlertSettings,
+    testSound,
+    banner,
+    dismissBanner,
+    unacknowledgedCount,
+    sortedOrders,
+    isPulsing,
+  } = useMerchantIncomingOrderAlerts({
+    merchantId: restaurant?.restaurant_id,
+    sandbox: true,
+    orders,
+    prepMinutes: 20,
+    primed: dataPrimed,
+    onPush: fire,
+    onViewOrder: dismissBanner,
+  });
 
   useEffect(() => {
     load();
@@ -98,6 +111,7 @@ export default function TestRestaurantDashboard() {
     setBusy(orderId);
     try {
       await api.post(`/admin/restaurant-simulator/orders/${orderId}/status`, { status });
+      if (status === "accepted" || status === "cancelled") dismissBanner(orderId);
       await load();
     } catch (e) {
       alert(e?.message || "Update failed");
@@ -133,26 +147,40 @@ export default function TestRestaurantDashboard() {
     );
   }
 
-  const incoming = orders.filter((o) => ["placed", "accepted", "preparing", "ready"].includes(o.status));
+  const incoming = sortedOrders.filter((o) => ["placed", "accepted", "preparing", "ready"].includes(o.status));
 
   return (
     <div className="space-y-6">
+      <IncomingOrderAlertBanner alert={banner} onDismiss={dismissBanner} onView={dismissBanner} />
+
       <div className="card p-6 flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>
-            <Store size={14} /> Test Restaurant Mode
+            <Store size={14} /> Sandbox merchant · {restaurant.merchant_category_slug || "restaurants"}
           </div>
           <h2 className="font-display text-2xl font-bold mt-1">{restaurant.name}</h2>
           <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
             {restaurant.address} · {restaurant.phone || "Test Number"}
           </p>
         </div>
-        <button type="button" className="btn-ghost text-sm inline-flex items-center gap-2" onClick={load}>
-          <RefreshCw size={14} /> Refresh
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {permission !== "granted" && (
+            <button type="button" className="btn-ghost text-sm" onClick={() => { primeChime(); request(); }}>
+              Enable push
+            </button>
+          )}
+          <button type="button" className="btn-ghost text-sm" onClick={testSound}>Test sound</button>
+          <button type="button" className="btn-ghost text-sm inline-flex items-center gap-2" onClick={load}>
+            <RefreshCw size={14} /> Refresh
+          </button>
+        </div>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-4">
+      <div className="grid md:grid-cols-4 gap-4">
+        <div className="card p-4">
+          <div className="text-xs uppercase" style={{ color: "var(--muted)" }}>Unacknowledged</div>
+          <div className="text-3xl font-bold mt-1" style={{ color: unacknowledgedCount ? "#C6FF00" : undefined }}>{unacknowledgedCount}</div>
+        </div>
         <div className="card p-4">
           <div className="text-xs uppercase" style={{ color: "var(--muted)" }}>Incoming queue</div>
           <div className="text-3xl font-bold mt-1">{incoming.length}</div>
@@ -167,26 +195,53 @@ export default function TestRestaurantDashboard() {
         </div>
       </div>
 
+      <MerchantAlertSettingsPanel
+        settings={alertSettings}
+        onChange={updateAlertSettings}
+        onTest={testSound}
+      />
+
       <div className="card p-6">
         <div className="flex items-center gap-2 mb-4">
           <UtensilsCrossed size={18} />
           <h3 className="font-bold">Incoming Orders</h3>
+          {unacknowledgedCount > 0 && (
+            <span className="badge" style={{ background: "#C6FF00", color: "#0A0A0A" }}>{unacknowledgedCount} new</span>
+          )}
         </div>
 
-        {orders.length === 0 ? (
+        {sortedOrders.length === 0 ? (
           <p className="text-sm py-8 text-center" style={{ color: "var(--muted)" }}>
             No test orders yet. Create one from the simulator home page.
           </p>
         ) : (
           <div className="space-y-4">
-            {orders.map((order) => (
-              <div key={order.order_id} className="p-4 rounded-xl" style={{ background: "var(--surface-2)" }}>
+            {sortedOrders.map((order) => {
+              const isNew = isIncomingUnacknowledged(order);
+              const pulsing = isPulsing(order.order_id);
+              return (
+              <div
+                key={order.order_id}
+                className={`p-4 rounded-xl ${pulsing ? "animate-pulse" : ""}`}
+                style={{
+                  background: "var(--surface-2)",
+                  border: pulsing ? "2px solid #C6FF00" : "2px solid transparent",
+                }}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="font-bold">{order.customer_name}</div>
+                    <div className="font-bold flex items-center gap-2">
+                      {order.customer_name}
+                      {isNew && <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: "#C6FF00", color: "#0A0A0A" }}>NEW</span>}
+                    </div>
                     <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>
                       #{String(order.order_id).slice(-8).toUpperCase()} · ${formatMoney(order.total)}
                     </div>
+                    {isNew && (
+                      <div className="text-xs mt-1 font-bold" style={{ color: "#C6FF00" }}>
+                        Accept within {acceptMinutesRemaining(order)} min
+                      </div>
+                    )}
                     <div className="text-xs mt-1 flex items-center gap-1" style={{ color: "var(--muted)" }}>
                       <Clock size={12} /> {new Date(order.created_at).toLocaleString()}
                     </div>
@@ -241,7 +296,8 @@ export default function TestRestaurantDashboard() {
                   )}
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>
