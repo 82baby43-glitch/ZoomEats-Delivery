@@ -45,11 +45,11 @@ export const RESTAURANT_AGREEMENTS: AgreementDef[] = [
 export const DISPENSARY_EXTRA_AGREEMENTS: AgreementDef[] = [
   {
     type: "cannabis_merchant_compliance",
-    title: "Licensed Cannabis Merchant Compliance",
+    title: "Regulated Marketplace Merchant Compliance",
     kind: "signature",
     required: true,
     role: "vendor",
-    body: "You certify that you hold valid state and local cannabis licenses, will sell only within licensed scope, and will comply with all applicable cannabis delivery regulations.",
+    body: "You certify that your business holds all required state and local licenses, maintains product and inventory compliance, and operates fulfillment through approved processes. ZoomEats provides marketplace software and logistics coordination technology only — not licensed cannabis retail or fulfillment operations.",
   },
   {
     type: "age_verification_merchant",
@@ -57,7 +57,7 @@ export const DISPENSARY_EXTRA_AGREEMENTS: AgreementDef[] = [
     kind: "checkbox",
     required: true,
     role: "vendor",
-    body: "I confirm this is an age-restricted merchant and I will verify customer age and valid identification before fulfilling restricted product orders.",
+    body: "I confirm this is an age-restricted merchant and I will verify customer age and valid identification before fulfilling restricted product orders per applicable law.",
   },
 ];
 

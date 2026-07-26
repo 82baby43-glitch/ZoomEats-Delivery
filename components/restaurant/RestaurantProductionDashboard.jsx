@@ -42,6 +42,8 @@ import RestaurantAnalyticsPanel from "@/components/restaurant/RestaurantAnalytic
 import RestaurantMenuManager from "@/components/restaurant/RestaurantMenuManager";
 import RestaurantStoreSettings from "@/components/restaurant/RestaurantStoreSettings";
 import RestaurantMessaging from "@/components/restaurant/RestaurantMessaging";
+import MerchantComplianceCenter from "@/components/merchant/MerchantComplianceCenter";
+import { DISPENSARY_SLUG } from "@/lib/merchant/categoryConfig";
 import { RestaurantNotificationProvider, useRestaurantNotify } from "@/components/restaurant/RestaurantNotifications";
 
 const FOOD_IMG = "https://images.pexels.com/photos/32594346/pexels-photo-32594346.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
@@ -54,6 +56,7 @@ const TABS = [
   { id: "analytics", label: "Analytics" },
   { id: "menu", label: "Menu" },
   { id: "store", label: "Store" },
+  { id: "compliance", label: "Compliance" },
   { id: "messages", label: "Messages" },
   { id: "settlements", label: "Payouts" },
   { id: "companion", label: "Companion" },
@@ -92,6 +95,7 @@ function RestaurantProductionDashboardInner() {
   const [setupForm, setSetupForm] = useState({ name: "", description: "", cuisine: "", image_url: "", cover_url: "", address: "" });
   const [dataPrimed, setDataPrimed] = useState(false);
   const [highlightOrderId, setHighlightOrderId] = useState(null);
+  const [fulfillmentType, setFulfillmentType] = useState("");
 
   const { permission, request, fire } = useWebPush("ZoomEats Merchant");
   const { notify } = useRestaurantNotify();
@@ -103,6 +107,8 @@ function RestaurantProductionDashboardInner() {
   const stats = dashboard?.stats || {};
   const prepMinutes = restaurant?.delivery_time_min || 20;
   const isSandbox = Boolean(restaurant?.is_test_account || restaurant?.restaurant_type === "test");
+  const isDispensary = restaurant?.merchant_category_slug === DISPENSARY_SLUG;
+  const visibleTabs = TABS.filter((t) => t.id !== "compliance" || isDispensary);
 
   const handleViewOrder = useCallback((orderId) => {
     setTab("orders");
@@ -186,6 +192,16 @@ function RestaurantProductionDashboardInner() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (!isDispensary || !restaurant?.restaurant_id) return;
+    api.get("/vendor/compliance")
+      .then((res) => {
+        const data = res?.data ?? res;
+        setFulfillmentType(data?.compliance_profile?.fulfillment_type || "");
+      })
+      .catch(() => {});
+  }, [isDispensary, restaurant?.restaurant_id]);
+
   const onRealtime = useCallback(() => {
     setLivePulse((p) => p + 1);
     load();
@@ -249,6 +265,12 @@ function RestaurantProductionDashboardInner() {
     await api.patch("/vendor/restaurant/settings", patch);
     await load();
     notify("Store updated", "Your settings have been saved");
+  };
+
+  const saveFulfillmentType = async (type) => {
+    await api.patch("/vendor/compliance", { fulfillment_type: type });
+    setFulfillmentType(type);
+    notify("Fulfillment updated", "Your fulfillment method has been saved");
   };
 
   const addMenuItem = async (item) => {
@@ -399,7 +421,7 @@ function RestaurantProductionDashboardInner() {
           )}
 
           <div className="flex gap-1 mt-8 overflow-x-auto pb-2 border-b" style={{ borderColor: "var(--border)" }}>
-            {TABS.map((t) => (
+            {visibleTabs.map((t) => (
               <button
                 key={t.id}
                 type="button"
@@ -472,13 +494,23 @@ function RestaurantProductionDashboardInner() {
 
             {tab === "store" && (
               <div className="space-y-6">
-                <RestaurantStoreSettings restaurant={restaurant} onSave={saveStoreSettings} />
+                <RestaurantStoreSettings
+                  restaurant={restaurant}
+                  onSave={saveStoreSettings}
+                  isDispensary={isDispensary}
+                  fulfillmentType={fulfillmentType}
+                  onSaveFulfillment={isDispensary ? saveFulfillmentType : undefined}
+                />
                 <MerchantAlertSettingsPanel
                   settings={alertSettings}
                   onChange={updateAlertSettings}
                   onTest={testAlertSound}
                 />
               </div>
+            )}
+
+            {tab === "compliance" && isDispensary && (
+              <MerchantComplianceCenter restaurant={restaurant} />
             )}
 
             {tab === "messages" && <RestaurantMessaging />}

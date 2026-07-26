@@ -501,7 +501,24 @@ export async function handleApiRequest(
         q = q.in("merchant_category_slug", enabledSlugs);
       }
       const { data } = await q;
-      return finalizePublicRestaurantList(data || [], params);
+      let rows = data || [];
+      const dispensaryIds = rows
+        .filter((r) => r.merchant_category_slug === "licensed_dispensary")
+        .map((r) => r.restaurant_id as string);
+      if (dispensaryIds.length) {
+        const { data: profiles } = await db
+          .from("merchant_compliance_profiles")
+          .select("merchant_id, verification_status")
+          .in("merchant_id", dispensaryIds)
+          .eq("verification_status", "approved");
+        const approvedDispensaries = new Set((profiles || []).map((p) => p.merchant_id));
+        rows = rows.filter(
+          (r) =>
+            r.merchant_category_slug !== "licensed_dispensary" ||
+            approvedDispensaries.has(r.restaurant_id as string)
+        );
+      }
+      return finalizePublicRestaurantList(rows, params);
     }
 
     const restMatch = path.match(/^\/restaurants\/([^/]+)$/);
@@ -509,8 +526,27 @@ export async function handleApiRequest(
       const rid = restMatch[1];
       const { data: restaurant } = await db.from("restaurants").select("*").eq("restaurant_id", rid).maybeSingle();
       if (!restaurant || isSandboxRestaurant(restaurant)) throwErr("Not found", 404);
+      if (!restaurant.approved || !restaurant.active) throwErr("Not found", 404);
+
+      let complianceVerificationStatus = null;
+      if (restaurant.merchant_category_slug === "licensed_dispensary") {
+        const { data: profile } = await db
+          .from("merchant_compliance_profiles")
+          .select("verification_status")
+          .eq("merchant_id", rid)
+          .maybeSingle();
+        complianceVerificationStatus = profile?.verification_status || null;
+        if (complianceVerificationStatus !== "approved") throwErr("Not found", 404);
+      }
+
       const { data: menu } = await db.from("menu_items").select("*").eq("restaurant_id", rid).eq("available", true);
-      return { restaurant, menu: menu || [] };
+      return {
+        restaurant: {
+          ...restaurant,
+          compliance_verification_status: complianceVerificationStatus,
+        },
+        menu: menu || [],
+      };
     }
 
     // ---- Vendor ----

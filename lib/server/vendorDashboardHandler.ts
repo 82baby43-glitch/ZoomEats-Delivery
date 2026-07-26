@@ -5,6 +5,8 @@ import { buildRestaurantLogisticsView } from "../logistics/engine";
 import { getWeeklyPayoutSummary } from "../restaurantCommission/engine";
 import { syncRestaurantLaunchState } from "../restaurant/readiness";
 import { isPaymentConfirmed } from "../orderState";
+import { loadMerchantComplianceProfile, syncMerchantComplianceProfile } from "../merchant/complianceProfile";
+import { DISPENSARY_SLUG } from "../merchant/categoryConfig";
 
 type HandlerCtx = {
   path: string;
@@ -452,6 +454,47 @@ export async function handleVendorDashboardRequest(
       .update({ last_message_at: now, updated_at: now })
       .eq("conversation_id", convMessagesMatch[1]);
     return data;
+  }
+
+  if (path === "/vendor/compliance" && method === "GET") {
+    const u = ctx.requireRole("vendor", "restaurant_owner", "restaurant_staff");
+    const rest = await vendorRestaurant(db, String(u.user_id));
+    const [{ data: onboarding }, complianceProfile] = await Promise.all([
+      db.from("restaurant_onboarding").select("*").eq("user_id", u.user_id).maybeSingle(),
+      loadMerchantComplianceProfile(db, String(rest.restaurant_id)),
+    ]);
+    const { data: documents } = await db
+      .from("restaurant_documents")
+      .select("*")
+      .eq("restaurant_id", rest.restaurant_id)
+      .order("uploaded_at", { ascending: false });
+    return {
+      restaurant_id: rest.restaurant_id,
+      merchant_category_slug: rest.merchant_category_slug,
+      approved: rest.approved,
+      onboarding,
+      compliance_profile: complianceProfile,
+      documents: documents || [],
+    };
+  }
+
+  if (path === "/vendor/compliance" && method === "PATCH") {
+    const u = ctx.requireRole("vendor", "restaurant_owner", "restaurant_staff");
+    const rest = await vendorRestaurant(db, String(u.user_id));
+    if (rest.merchant_category_slug !== DISPENSARY_SLUG) {
+      throwErr("Compliance center is only available for licensed dispensary merchants", 403);
+    }
+    const fulfillmentType = body.fulfillment_type != null ? String(body.fulfillment_type) : null;
+    const allowed = new Set(["merchant_managed", "third_party_transport", "integrated_logistics"]);
+    if (fulfillmentType && !allowed.has(fulfillmentType)) {
+      throwErr("Invalid fulfillment type");
+    }
+    const profile = await syncMerchantComplianceProfile(db, {
+      merchant_id: String(rest.restaurant_id),
+      merchant_category: DISPENSARY_SLUG,
+      fulfillment_type: fulfillmentType,
+    });
+    return { compliance_profile: profile };
   }
 
   return null;
