@@ -8,10 +8,11 @@ import { useCart } from "@/lib/cart";
 import { useAuth } from "@/lib/auth";
 import Header from "@/components/Header";
 import Chatbot from "@/components/Chatbot";
-import { Star, Clock, Plus, ArrowLeft } from "lucide-react";
+import { Star, Clock, Plus, ArrowLeft, Shield } from "lucide-react";
 import { formatMoney, safeArray } from "@/lib/safeData";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { logClientError } from "@/lib/clientErrorLog";
+import { VERIFIED_MARKETPLACE_MERCHANT_BADGE, isVerifiedDispensaryMerchant } from "@/lib/merchant/dispensaryPositioning";
 
 export default function RestaurantDetail() {
   const { rid } = useParams();
@@ -120,6 +121,11 @@ export default function RestaurantDetail() {
   }
 
   const r = data.restaurant;
+  const showVerifiedBadge = isVerifiedDispensaryMerchant(
+    r.merchant_category_slug,
+    r.compliance_verification_status,
+    r.approved
+  );
   const selectedItem = selectedItemId
     ? (data.menu || []).find((m) => String(m.item_id) === String(selectedItemId))
     : null;
@@ -202,6 +208,11 @@ export default function RestaurantDetail() {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h1 className="font-display text-4xl font-black tracking-tighter">{r.name || "Restaurant"}</h1>
+              {showVerifiedBadge && (
+                <div className="inline-flex items-center gap-1.5 mt-2 text-sm font-bold text-green-400" data-testid="verified-marketplace-merchant-badge">
+                  <Shield size={16} /> {VERIFIED_MARKETPLACE_MERCHANT_BADGE}
+                </div>
+              )}
               <p className="mt-2 max-w-2xl" style={{ color: "var(--muted)" }}>{r.description || ""}</p>
               <div className="flex items-center gap-4 mt-3 text-sm">
                 <span className="flex items-center gap-1"><Star size={14} style={{ color: "var(--primary)" }} /> {r.rating ?? "—"}</span>

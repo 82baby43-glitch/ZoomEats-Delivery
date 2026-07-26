@@ -9,6 +9,11 @@ import { computeComplianceStatus, normalizeRole, VALID_ROLES } from "../complian
 import { encryptTaxPayload, maskTaxId } from "../compliance/taxCrypto";
 import { syncRestaurantLaunchState } from "../restaurant/readiness";
 import { ensureMerchantStub, isDispensaryCategory, isLiquorCategory, businessCategoryForSlug } from "../merchant/onboarding";
+import {
+  loadMerchantComplianceProfile,
+  mapApprovalToVerificationStatus,
+  syncMerchantComplianceProfile,
+} from "../merchant/complianceProfile";
 
 function uid(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -173,24 +178,32 @@ async function applyUserApproval(
       restaurantUpdates.merchant_category_slug = onboarding.merchant_category_slug;
     }
     if (approvalStatus === "approved") restaurantUpdates.agreement_complete = true;
-    if (approvalStatus === "pending" || approvalStatus === "rejected") {
+    if (approvalStatus === "pending" || approvalStatus === "rejected" || approvalStatus === "suspended") {
       restaurantUpdates.approved = false;
       restaurantUpdates.active = false;
       restaurantUpdates.accepting_orders = false;
     }
     await db.from("restaurants").update(restaurantUpdates).eq("owner_id", userId);
-    const verificationStatus =
-      approvalStatus === "approved"
-        ? "approved"
-        : approvalStatus === "rejected"
-          ? "rejected"
-          : approvalStatus === "documents_missing"
-            ? "info_requested"
-            : "pending";
+    const verificationStatus = mapApprovalToVerificationStatus(approvalStatus);
     await db
       .from("restaurant_onboarding")
       .update({ verification_status: verificationStatus, updated_at: new Date().toISOString() })
       .eq("user_id", userId);
+    if (rest?.restaurant_id && onboarding?.merchant_category_slug === "licensed_dispensary") {
+      const { data: obFull } = await db
+        .from("restaurant_onboarding")
+        .select("business_license_number, state_license_number, license_expiration_date, business_address")
+        .eq("user_id", userId)
+        .maybeSingle();
+      await syncMerchantComplianceProfile(db, {
+        merchant_id: rest.restaurant_id,
+        merchant_category: "licensed_dispensary",
+        license_number: obFull?.business_license_number || obFull?.state_license_number || null,
+        license_expiration: obFull?.license_expiration_date || null,
+        verification_status: verificationStatus,
+        business_address: obFull?.business_address || null,
+      });
+    }
     if (approvalStatus === "approved" && rest?.restaurant_id) {
       await syncRestaurantLaunchState(db, rest.restaurant_id);
     }
@@ -653,11 +666,15 @@ export async function handleComplianceRequest(
     });
 
     let restaurantDocs = restDocs || [];
+    let complianceProfile = null;
     if (role === "vendor") {
-      const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", userId).maybeSingle();
+      const { data: rest } = await db.from("restaurants").select("restaurant_id, merchant_category_slug, approved").eq("owner_id", userId).maybeSingle();
       if (rest?.restaurant_id) {
         const { data: rd } = await db.from("restaurant_documents").select("*").eq("restaurant_id", rest.restaurant_id);
         restaurantDocs = rd || [];
+        if (rest.merchant_category_slug === "licensed_dispensary") {
+          complianceProfile = await loadMerchantComplianceProfile(db, rest.restaurant_id);
+        }
       }
     }
 
@@ -684,10 +701,13 @@ export async function handleComplianceRequest(
             license_expiration_date: restOnboarding.license_expiration_date,
             delivery_agreement_accepted: restOnboarding.delivery_agreement_accepted,
             age_restricted_confirmed: restOnboarding.age_restricted_confirmed,
+            licensing_responsibility_confirmed: restOnboarding.licensing_responsibility_confirmed,
             business_name: restOnboarding.business_name,
             owner_name: restOnboarding.owner_name,
+            business_address: restOnboarding.business_address,
           }
         : null,
+      compliance_profile: complianceProfile,
       tax: tax ? { ...tax, masked_id: tax.last_four ? `***-**-${tax.last_four}` : null } : null,
       background_check: bg || null,
     };
@@ -879,6 +899,7 @@ export async function handleComplianceRequest(
       "sales_tax_id", "ein", "food_permit_number", "status", "application_signature",
       "merchant_category_slug", "business_license_number", "state_license_number",
       "license_expiration_date", "delivery_agreement_accepted", "age_restricted_confirmed",
+      "licensing_responsibility_confirmed",
       "verification_status",
     ];
     const payload: Record<string, unknown> = {
@@ -897,8 +918,11 @@ export async function handleComplianceRequest(
       if (body.status === "submitted" || body.verification_status === "documents_submitted") {
         if (!body.business_license_number) throwErr("Business license number required");
         if (!body.license_expiration_date) throwErr("License expiration date required");
+        if (!body.licensing_responsibility_confirmed) {
+          throwErr("Licensing responsibility acknowledgment required");
+        }
         if (!body.delivery_agreement_accepted || !body.age_restricted_confirmed) {
-          throwErr("Delivery agreement and age-restricted confirmation required");
+          throwErr("Marketplace terms and age-restricted confirmation required");
         }
         payload.verification_status = "documents_submitted";
       }
@@ -925,7 +949,7 @@ export async function handleComplianceRequest(
     const { data } = await db.from("restaurant_onboarding").upsert(payload, { onConflict: "user_id" }).select().single();
 
     if (categorySlug) {
-      await ensureMerchantStub(db, String(u.user_id), {
+      const restaurantId = await ensureMerchantStub(db, String(u.user_id), {
         merchant_category_slug: categorySlug,
         name: String(body.business_name || data?.business_name || ""),
       });
@@ -937,6 +961,17 @@ export async function handleComplianceRequest(
           updated_at: new Date().toISOString(),
         })
         .eq("owner_id", u.user_id);
+
+      if (isDispensaryCategory(categorySlug)) {
+        await syncMerchantComplianceProfile(db, {
+          merchant_id: restaurantId,
+          merchant_category: categorySlug,
+          license_number: String(body.business_license_number || data?.business_license_number || body.state_license_number || ""),
+          license_expiration: String(body.license_expiration_date || data?.license_expiration_date || ""),
+          verification_status: String(payload.verification_status || data?.verification_status || "pending"),
+          business_address: String(body.business_address || data?.business_address || ""),
+        });
+      }
     }
 
     return data;

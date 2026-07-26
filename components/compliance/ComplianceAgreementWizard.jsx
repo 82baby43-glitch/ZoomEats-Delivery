@@ -6,9 +6,10 @@ import { useAuth } from "@/lib/auth";
 import ElectronicSignature from "@/components/compliance/ElectronicSignature";
 import DriverBackgroundCheckForm from "@/components/compliance/DriverBackgroundCheckForm";
 import RestaurantApplicationForm from "@/components/compliance/RestaurantApplicationForm";
+import DispensaryApplicationForm from "@/components/compliance/DispensaryApplicationForm";
 import DriverApplicationForm from "@/components/compliance/DriverApplicationForm";
 import MerchantCategoryPicker from "@/components/compliance/MerchantCategoryPicker";
-import { categoryLabel, isAgeRestrictedCategory, isSignupExcludedSlug, resolveSignupCategorySlug, RESTAURANT_SLUG } from "@/lib/merchant/categoryConfig";
+import { categoryLabel, isAgeRestrictedCategory, isSignupExcludedSlug, resolveSignupCategorySlug, RESTAURANT_SLUG, DISPENSARY_SLUG } from "@/lib/merchant/categoryConfig";
 
 function clientMeta() {
   if (typeof window === "undefined") return {};
@@ -76,9 +77,13 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete, in
         const hasValidCategory = Boolean(signupSlug);
 
         if (role === "vendor") {
-          setStoredCategoryExcluded(Boolean(storedSlug && isSignupExcludedSlug(storedSlug)));
-          setMerchantCategory(signupSlug || RESTAURANT_SLUG);
-          if (hasValidCategory && hasApplication) {
+          const isDispensary = storedSlug === DISPENSARY_SLUG || initialMerchantCategory === DISPENSARY_SLUG;
+          setStoredCategoryExcluded(Boolean(storedSlug && isSignupExcludedSlug(storedSlug) && !isDispensary));
+          setMerchantCategory(isDispensary ? DISPENSARY_SLUG : (signupSlug || RESTAURANT_SLUG));
+          if (isDispensary && (hasApplication || initialMerchantCategory === DISPENSARY_SLUG)) {
+            setCategoryLocked(true);
+            setSteps(VENDOR_STEPS_RESTAURANT);
+          } else if (hasValidCategory && hasApplication) {
             setCategoryLocked(true);
             setSteps(VENDOR_STEPS_RESTAURANT);
           } else if (hasValidCategory) {
@@ -209,7 +214,11 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete, in
         <DriverApplicationForm onComplete={() => { setAppDone(true); goNext(); }} />
       )}
 
-      {currentStep === "application" && role === "vendor" && (
+      {currentStep === "application" && role === "vendor" && merchantCategory === DISPENSARY_SLUG && (
+        <DispensaryApplicationForm onComplete={() => { setAppDone(true); goNext(); }} />
+      )}
+
+      {currentStep === "application" && role === "vendor" && merchantCategory !== DISPENSARY_SLUG && (
         <RestaurantApplicationForm
           merchantCategorySlug={merchantCategory}
           onComplete={() => { setAppDone(true); goNext(); }}

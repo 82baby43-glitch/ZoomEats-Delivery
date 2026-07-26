@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Save } from "lucide-react";
+import { FULFILLMENT_OPTIONS } from "@/lib/merchant/dispensaryPositioning";
 
 const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DAY_LABELS = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
@@ -10,7 +11,13 @@ function defaultHours() {
   return Object.fromEntries(DAY_KEYS.map((d) => [d, { open: "09:00", close: "22:00", closed: false }]));
 }
 
-export default function RestaurantStoreSettings({ restaurant, onSave }) {
+export default function RestaurantStoreSettings({
+  restaurant,
+  onSave,
+  isDispensary = false,
+  fulfillmentType = "",
+  onSaveFulfillment,
+}) {
   const [form, setForm] = useState({
     address: restaurant?.address || "",
     phone: restaurant?.phone || "",
@@ -23,7 +30,9 @@ export default function RestaurantStoreSettings({ restaurant, onSave }) {
       : defaultHours(),
     temporary_closure: restaurant?.temporary_closure?.reason || "",
   });
+  const [selectedFulfillment, setSelectedFulfillment] = useState(fulfillmentType || "");
   const [saving, setSaving] = useState(false);
+  const [savingFulfillment, setSavingFulfillment] = useState(false);
 
   const setHour = (day, field, value) => {
     setForm((f) => ({
@@ -55,6 +64,16 @@ export default function RestaurantStoreSettings({ restaurant, onSave }) {
     }
   };
 
+  const handleSaveFulfillment = async () => {
+    if (!onSaveFulfillment || !selectedFulfillment) return;
+    setSavingFulfillment(true);
+    try {
+      await onSaveFulfillment(selectedFulfillment);
+    } finally {
+      setSavingFulfillment(false);
+    }
+  };
+
   return (
     <div className="card p-6 max-w-2xl space-y-5">
       <h3 className="font-display text-xl font-bold">Store management</h3>
@@ -62,18 +81,59 @@ export default function RestaurantStoreSettings({ restaurant, onSave }) {
       <input className="input-field" placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
       <input className="input-field" placeholder="Phone number" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="label-eyebrow">Prep time (min)</label>
-          <input className="input-field" type="number" value={form.delivery_time_min} onChange={(e) => setForm({ ...form, delivery_time_min: e.target.value })} />
-        </div>
-        <div>
-          <label className="label-eyebrow">Delivery radius (km)</label>
-          <input className="input-field" type="number" step="0.1" value={form.delivery_radius_km} onChange={(e) => setForm({ ...form, delivery_radius_km: e.target.value })} />
-        </div>
-        <div>
-          <label className="label-eyebrow">Minimum order ($)</label>
-          <input className="input-field" type="number" step="0.01" value={form.minimum_order} onChange={(e) => setForm({ ...form, minimum_order: e.target.value })} />
+      <div>
+        <h4 className="font-bold mb-3">Fulfillment &amp; Logistics Settings</h4>
+        <p className="text-sm mb-4" style={{ color: "var(--muted)" }}>
+          Configure prep times and service area. ZoomEats provides logistics coordination technology — merchants and approved partners remain responsible for regulated fulfillment.
+        </p>
+
+        {isDispensary && (
+          <div className="space-y-2 mb-5">
+            {FULFILLMENT_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className="flex items-start gap-2 p-3 rounded-lg border cursor-pointer"
+                style={{ borderColor: selectedFulfillment === opt.value ? "var(--primary)" : "var(--border)" }}
+              >
+                <input
+                  type="radio"
+                  name="store_fulfillment_type"
+                  value={opt.value}
+                  checked={selectedFulfillment === opt.value}
+                  onChange={() => setSelectedFulfillment(opt.value)}
+                />
+                <span>
+                  <span className="font-medium block">{opt.label}</span>
+                  <span className="text-xs" style={{ color: "var(--muted)" }}>{opt.description}</span>
+                </span>
+              </label>
+            ))}
+            {onSaveFulfillment && (
+              <button
+                type="button"
+                className="btn-secondary text-sm"
+                disabled={savingFulfillment || !selectedFulfillment}
+                onClick={handleSaveFulfillment}
+              >
+                {savingFulfillment ? "Saving…" : "Save fulfillment method"}
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label-eyebrow">Prep time (min)</label>
+            <input className="input-field" type="number" value={form.delivery_time_min} onChange={(e) => setForm({ ...form, delivery_time_min: e.target.value })} />
+          </div>
+          <div>
+            <label className="label-eyebrow">Service radius (km)</label>
+            <input className="input-field" type="number" step="0.1" value={form.delivery_radius_km} onChange={(e) => setForm({ ...form, delivery_radius_km: e.target.value })} />
+          </div>
+          <div>
+            <label className="label-eyebrow">Minimum order ($)</label>
+            <input className="input-field" type="number" step="0.01" value={form.minimum_order} onChange={(e) => setForm({ ...form, minimum_order: e.target.value })} />
+          </div>
         </div>
       </div>
 

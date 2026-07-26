@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { X, FileText, Check, Shield, Download, ExternalLink } from "lucide-react";
 import { api } from "@/lib/api";
+import { DISPENSARY_CATEGORY_LABEL } from "@/lib/merchant/dispensaryPositioning";
 
 export default function ComplianceDossier({ userId, onClose, onAction }) {
   const [data, setData] = useState(null);
@@ -180,24 +181,62 @@ export default function ComplianceDossier({ userId, onClose, onAction }) {
 
             {data.merchant_verification && (
               <section className="mt-6 p-4 rounded-lg border" style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}>
-                <h3 className="font-bold mb-3">Merchant verification</h3>
+                <h3 className="font-bold mb-3 flex items-center gap-2"><Shield size={18} /> Admin Compliance Center</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                  <div><span style={{ color: "var(--muted)" }}>Category:</span> <strong>{data.merchant_verification.merchant_category_slug || "—"}</strong></div>
-                  <div><span style={{ color: "var(--muted)" }}>Status:</span> <strong>{data.merchant_verification.verification_status || "pending"}</strong></div>
+                  <div><span style={{ color: "var(--muted)" }}>Merchant Category:</span> <strong>{data.merchant_verification.merchant_category_slug === "licensed_dispensary" ? DISPENSARY_CATEGORY_LABEL : (data.merchant_verification.merchant_category_slug || "—")}</strong></div>
+                  <div>
+                    <span style={{ color: "var(--muted)" }}>Verification Status:</span>{" "}
+                    <strong>{data.compliance_profile?.verification_status || data.merchant_verification.verification_status || "pending"}</strong>
+                  </div>
                   <div><span style={{ color: "var(--muted)" }}>Business:</span> {data.merchant_verification.business_name || "—"}</div>
                   <div><span style={{ color: "var(--muted)" }}>Owner:</span> {data.merchant_verification.owner_name || "—"}</div>
-                  <div><span style={{ color: "var(--muted)" }}>License #:</span> {data.merchant_verification.business_license_number || "—"}</div>
-                  <div><span style={{ color: "var(--muted)" }}>State license:</span> {data.merchant_verification.state_license_number || "—"}</div>
-                  <div><span style={{ color: "var(--muted)" }}>Expires:</span> {data.merchant_verification.license_expiration_date || "—"}</div>
+                  <div><span style={{ color: "var(--muted)" }}>Business license:</span> {data.merchant_verification.business_license_number || "—"}</div>
+                  <div><span style={{ color: "var(--muted)" }}>State license #:</span> {data.merchant_verification.state_license_number || "—"}</div>
+                  <div><span style={{ color: "var(--muted)" }}>License expiration:</span> {data.merchant_verification.license_expiration_date || "—"}</div>
+                  <div><span style={{ color: "var(--muted)" }}>Business address:</span> {data.merchant_verification.business_address || "—"}</div>
                   <div>
-                    <span style={{ color: "var(--muted)" }}>Delivery agreement:</span>{" "}
-                    {data.merchant_verification.delivery_agreement_accepted ? "✓" : "—"}
+                    <span style={{ color: "var(--muted)" }}>Licensing acknowledgment:</span>{" "}
+                    {data.merchant_verification.licensing_responsibility_confirmed ? "✓" : "—"}
                   </div>
                   <div>
-                    <span style={{ color: "var(--muted)" }}>Age-restricted confirmed:</span>{" "}
-                    {data.merchant_verification.age_restricted_confirmed ? "✓" : "—"}
+                    <span style={{ color: "var(--muted)" }}>Fulfillment method:</span>{" "}
+                    {data.compliance_profile?.fulfillment_type?.replace(/_/g, " ") || "—"}
                   </div>
                 </div>
+
+                <div className="mt-4">
+                  <div className="text-sm font-semibold mb-2">Required Compliance Data</div>
+                  <ul className="text-sm space-y-1" style={{ color: "var(--muted)" }}>
+                    <li>Business license: {data.merchant_verification.business_license_number ? "provided" : "missing"}</li>
+                    <li>State license number: {data.merchant_verification.state_license_number ? "provided" : "optional / missing"}</li>
+                    <li>License expiration: {data.merchant_verification.license_expiration_date ? "provided" : "missing"}</li>
+                    <li>Business address: {data.merchant_verification.business_address ? "provided" : "missing"}</li>
+                    <li>Compliance documents: {(data.documents?.restaurant || []).length ? `${data.documents.restaurant.length} uploaded` : "none uploaded"}</li>
+                  </ul>
+                </div>
+
+                {data.merchant_verification.merchant_category_slug === "licensed_dispensary" && (
+                  <div className="flex flex-wrap gap-2 mt-4">
+                    {data.user?.approval_status !== "approved" && (
+                      <button className="btn-primary !py-2 text-sm" disabled={busy} onClick={() => setApproval("approve")}>
+                        Approve merchant
+                      </button>
+                    )}
+                    {data.user?.approval_status === "approved" && (
+                      <button className="btn-ghost !py-2 text-sm text-amber-400" disabled={busy} onClick={() => setApproval("suspend")}>
+                        Suspend merchant
+                      </button>
+                    )}
+                    <button className="btn-ghost !py-2 text-sm" disabled={busy} onClick={() => setApproval("request_info")}>
+                      Request info
+                    </button>
+                    {data.user?.approval_status !== "rejected" && (
+                      <button className="btn-ghost !py-2 text-sm text-red-400" disabled={busy} onClick={() => setApproval("reject")}>
+                        Reject merchant
+                      </button>
+                    )}
+                  </div>
+                )}
               </section>
             )}
 

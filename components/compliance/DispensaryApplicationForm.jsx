@@ -4,6 +4,13 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import ElectronicSignature from "@/components/compliance/ElectronicSignature";
 import MerchantDocumentUpload from "@/components/compliance/MerchantDocumentUpload";
+import MerchantComplianceResponsibilities from "@/components/compliance/MerchantComplianceResponsibilities";
+import {
+  DISPENSARY_CATEGORY_LABEL,
+  DISPENSARY_MERCHANT_TYPE,
+  DISPENSARY_PLATFORM_ROLE,
+  MARKETPLACE_SIGNUP_CTA,
+} from "@/lib/merchant/dispensaryPositioning";
 
 export default function DispensaryApplicationForm({ onComplete, initial = {} }) {
   const [form, setForm] = useState({
@@ -16,6 +23,7 @@ export default function DispensaryApplicationForm({ onComplete, initial = {} }) 
     license_expiration_date: "",
     delivery_agreement_accepted: false,
     age_restricted_confirmed: false,
+    licensing_responsibility_confirmed: false,
     ...initial,
   });
   const [signature, setSignature] = useState({ typed_name: "", signature_image: "" });
@@ -38,8 +46,11 @@ export default function DispensaryApplicationForm({ onComplete, initial = {} }) 
       if (!form.license_expiration_date) {
         throw new Error("License expiration date is required");
       }
+      if (!form.licensing_responsibility_confirmed) {
+        throw new Error("You must confirm licensing responsibility");
+      }
       if (!form.delivery_agreement_accepted || !form.age_restricted_confirmed) {
-        throw new Error("You must accept the delivery agreement and age-restricted merchant confirmation");
+        throw new Error("You must accept marketplace terms and age-restricted merchant confirmation");
       }
       if (!docsUploaded.license_document) {
         throw new Error("Please upload your license document");
@@ -58,6 +69,7 @@ export default function DispensaryApplicationForm({ onComplete, initial = {} }) 
         license_expiration_date: form.license_expiration_date,
         delivery_agreement_accepted: true,
         age_restricted_confirmed: true,
+        licensing_responsibility_confirmed: true,
         application_signature: name.trim(),
         signature_image: signature.signature_image || null,
         verification_status: "documents_submitted",
@@ -74,11 +86,21 @@ export default function DispensaryApplicationForm({ onComplete, initial = {} }) 
   return (
     <div className="space-y-4" data-testid="dispensary-application-form">
       <div>
-        <h3 className="font-bold text-lg">Licensed dispensary application</h3>
+        <h3 className="font-bold text-lg">{DISPENSARY_CATEGORY_LABEL} application</h3>
         <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
-          Provide license and business verification. Your application stays pending until an administrator reviews and approves it.
+          {MARKETPLACE_SIGNUP_CTA}. Your application stays pending until an administrator reviews and approves it.
         </p>
+        <div className="mt-3 grid sm:grid-cols-2 gap-2 text-sm">
+          <div><span style={{ color: "var(--muted)" }}>Merchant Type:</span> <strong>{DISPENSARY_MERCHANT_TYPE}</strong></div>
+          <div><span style={{ color: "var(--muted)" }}>Platform Role:</span> <strong>{DISPENSARY_PLATFORM_ROLE}</strong></div>
+        </div>
       </div>
+
+      <MerchantComplianceResponsibilities
+        showAcknowledgment
+        acknowledged={form.licensing_responsibility_confirmed}
+        onAcknowledgeChange={(v) => set("licensing_responsibility_confirmed", v)}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <input className="input-field md:col-span-2" placeholder="Legal business name *" value={form.business_name} onChange={(e) => set("business_name", e.target.value)} data-testid="dispensary-business-name" />
@@ -102,7 +124,7 @@ export default function DispensaryApplicationForm({ onComplete, initial = {} }) 
       <div className="space-y-2 p-4 rounded-xl border" style={{ borderColor: "var(--border)" }}>
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" checked={form.delivery_agreement_accepted} onChange={(e) => set("delivery_agreement_accepted", e.target.checked)} />
-          I agree to ZoomEats delivery service terms for licensed, age-restricted merchants, including ID verification at delivery where required.
+          I agree to ZoomEats marketplace software terms for regulated merchants, including ID verification at fulfillment where required.
         </label>
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" checked={form.age_restricted_confirmed} onChange={(e) => set("age_restricted_confirmed", e.target.checked)} />

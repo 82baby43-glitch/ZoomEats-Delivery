@@ -96,7 +96,8 @@ export const CATEGORY_APPLICATION_CONFIG: Record<string, CategoryApplicationConf
   },
   [DISPENSARY_SLUG]: {
     title: "Licensed dispensary application",
-    subtitle: "Provide license and business verification for age-restricted cannabis delivery.",
+    subtitle:
+      "ZoomEats provides licensed merchants with marketplace software, digital ordering tools, merchant management systems, and logistics coordination technology. Merchants remain responsible for their own licenses, inventory compliance, and regulatory operations.",
     businessCategory: "pharmacy",
     showCuisine: false,
     showFoodPermit: false,
