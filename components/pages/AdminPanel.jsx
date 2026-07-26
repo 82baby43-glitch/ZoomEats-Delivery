@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { Download, Truck, CreditCard, MapPin, Activity, DollarSign, Sparkles, Shield, Store, Calculator, Percent, SlidersHorizontal, BarChart3, Brain } from "lucide-react";
+import { Download, Truck, CreditCard, MapPin, Activity, DollarSign, Sparkles, Shield, Store, Calculator, Percent, SlidersHorizontal, BarChart3, Brain, ImageIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import Header from "@/components/Header";
 import PulseHeader, { MetricsTiles } from "@/components/admin/PulseHeader";
@@ -197,6 +197,9 @@ export default function AdminPanel() {
           </Link>
           <Link href="/admin/spotlight" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-spotlight-link">
             <Sparkles size={16} /> Local Partner Spotlight
+          </Link>
+          <Link href="/admin/hero" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-hero-link">
+            <ImageIcon size={16} /> Homepage Hero
           </Link>
           <Link href="/admin/dreamland" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-dreamland-link">
             <Sparkles size={16} /> Dreamland AI

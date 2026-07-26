@@ -7,7 +7,7 @@ import { safeGet, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { signInWithGoogle } from "@/lib/auth";
 import Header from "@/components/Header";
-import { Search, Star, Clock, Sparkles, Heart, Shield } from "lucide-react";
+import { Search, Star, Clock, Sparkles, Heart, Shield, Store } from "lucide-react";
 import Chatbot from "@/components/Chatbot";
 import { LocalBusinessJsonLd } from "@/components/seo/StructuredData";
 import LocalPartnerSpotlight from "@/components/spotlight/LocalPartnerSpotlight";
@@ -34,7 +34,15 @@ export default function Landing() {
   const [openNow, setOpenNow] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [heroFeature, setHeroFeature] = useState(null);
   const { user } = useAuth();
+
+  useEffect(() => {
+    safeGet("/homepage/hero", null).then((data) => {
+      if (data?.enabled && data?.restaurant) setHeroFeature(data);
+      else setHeroFeature(null);
+    }).catch(() => setHeroFeature(null));
+  }, []);
 
   useEffect(() => {
     safeGet("/marketplace/categories", []).then((data) => {
@@ -177,16 +185,46 @@ export default function Landing() {
             transition={{ duration: 0.7, delay: 0.15 }}
             className="md:col-span-5"
           >
-            <div
-              className="rounded-3xl overflow-hidden border"
-              style={{ borderColor: "var(--border)" }}
-            >
-              <img
-                src={HERO_IMG}
-                alt="Friends ordering ZoomEats delivery together at home"
-                className="w-full h-[400px] object-cover"
-              />
-            </div>
+            {heroFeature?.restaurant ? (
+              <Link
+                href={`/r/${heroFeature.restaurant.restaurant_id}`}
+                className="block rounded-3xl overflow-hidden border relative group"
+                style={{ borderColor: "var(--border)" }}
+                data-testid="hero-featured-store"
+              >
+                <img
+                  src={heroFeature.image_url || HERO_IMG}
+                  alt={heroFeature.restaurant.name}
+                  className="w-full h-[400px] object-cover transition-transform group-hover:scale-[1.02]"
+                />
+                <div className="absolute inset-x-0 bottom-0 p-6 bg-gradient-to-t from-black/85 via-black/40 to-transparent">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-white/80">
+                    <Store size={14} /> Featured local partner
+                  </div>
+                  <h3 className="font-display text-2xl md:text-3xl font-black text-white mt-2">
+                    {heroFeature.restaurant.name}
+                  </h3>
+                  <p className="text-sm text-white/85 mt-2 line-clamp-2">
+                    {heroFeature.restaurant.description || heroFeature.restaurant.cuisine || "Order from this local merchant on ZoomEats."}
+                  </p>
+                  <div className="mt-4 flex items-center gap-3 text-sm text-white">
+                    <span className="badge"><Star size={14} /> {heroFeature.restaurant.rating ?? "—"}</span>
+                    <span className="badge"><Clock size={14} /> {heroFeature.restaurant.delivery_time_min ?? "—"} min</span>
+                  </div>
+                </div>
+              </Link>
+            ) : (
+              <div
+                className="rounded-3xl overflow-hidden border"
+                style={{ borderColor: "var(--border)" }}
+              >
+                <img
+                  src={HERO_IMG}
+                  alt="Friends ordering ZoomEats delivery together at home"
+                  className="w-full h-[400px] object-cover"
+                />
+              </div>
+            )}
           </motion.div>
         </div>
       </section>

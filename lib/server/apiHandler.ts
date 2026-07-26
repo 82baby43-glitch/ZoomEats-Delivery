@@ -18,6 +18,7 @@ import {
 } from "../dispatch/routing/uber-routing-ai";
 import { handleMenuImageRequest } from "../menuImages/handler";
 import { handleSpotlightRequest } from "../spotlight/handler";
+import { handleHeroRequest } from "../hero/handler";
 import { handleProfileRequest } from "../profiles/handler";
 import { handleVehicleRequest } from "../vehicles/handler";
 import { handleComplianceRequest } from "./complianceHandler";
@@ -231,6 +232,15 @@ export async function handleApiRequest(
       requireRole,
     });
     if (spotlightResult !== null) return spotlightResult;
+
+    const heroResult = await handleHeroRequest(db, {
+      path,
+      method,
+      body,
+      requireAuth,
+      requireRole,
+    });
+    if (heroResult !== null) return heroResult;
 
     const profileResult = await handleProfileRequest(db, {
       path,
