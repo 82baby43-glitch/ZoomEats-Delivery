@@ -388,7 +388,15 @@ export default function Landing() {
         )}
       </section>
 
-      <footer className="max-w-7xl mx-auto px-6 md:px-12 pb-10 pt-4 text-center">
+      <footer className="max-w-7xl mx-auto px-6 md:px-12 pb-10 pt-4 text-center space-y-3">
+        <div className="flex flex-wrap justify-center gap-3 text-sm">
+          <Link href="/for-merchants" className="btn-ghost" data-testid="footer-for-merchants">
+            For Merchants
+          </Link>
+          <Link href="/demo/merchant" className="btn-ghost" data-testid="footer-merchant-demo">
+            Try Merchant Demo
+          </Link>
+        </div>
         <p className="text-xs max-w-3xl mx-auto leading-relaxed" style={{ color: "var(--muted)" }}>
           Built in Columbia, Missouri. ZoomEats™ was created by Quantum Rise Labs LLC to empower local restaurants, drivers, and customers through next-generation delivery technology. 2026
         </p>
