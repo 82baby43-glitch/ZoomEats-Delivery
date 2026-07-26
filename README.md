@@ -15,7 +15,6 @@ Production food delivery platform built with **Next.js** (Vercel) and **Supabase
 ```env
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
-NEXT_PUBLIC_ADMIN_EMAILS=admin@example.com
 ```
 
 Edge Function secrets (set via `supabase secrets set`):

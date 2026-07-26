@@ -11,11 +11,7 @@ function env(name: string): string | undefined {
 }
 
 export function getAdminEmails(): string[] {
-  const seen = new Set<string>();
-  for (const e of [...splitEmails(env("ADMIN_EMAILS")), ...splitEmails(env("NEXT_PUBLIC_ADMIN_EMAILS"))]) {
-    seen.add(e);
-  }
-  return [...seen];
+  return splitEmails(env("ADMIN_EMAILS"));
 }
 
 export function isAdminEmailsConfigured(): boolean {

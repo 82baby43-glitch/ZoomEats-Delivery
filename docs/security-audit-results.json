@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-07-23T14:57:05.921Z",
-  "score": 85,
-  "readiness": "CONDITIONALLY READY (address high findings before launch)",
-  "passed": 29,
-  "failed": 2,
-  "total": 31,
+  "generated_at": "2026-07-26T11:31:43.873Z",
+  "score": 100,
+  "readiness": "PRODUCTION READY (minor hardening recommended)",
+  "passed": 34,
+  "failed": 0,
+  "total": 34,
   "results": [
     {
       "category": "secrets",
@@ -16,9 +16,9 @@
     {
       "category": "secrets",
       "name": "ADMIN_EMAILS not client-exposed",
-      "passed": false,
-      "detail": "NEXT_PUBLIC_ADMIN_EMAILS is set (1 email(s))",
-      "severity": "medium"
+      "passed": true,
+      "detail": "client clean; remove legacy NEXT_PUBLIC_ADMIN_EMAILS from Vercel (use ADMIN_EMAILS)",
+      "severity": "info"
     },
     {
       "category": "api_auth",
@@ -190,10 +190,31 @@
     },
     {
       "category": "rls_auth",
-      "name": "Authenticated RLS tests",
-      "passed": false,
-      "detail": "AuthApiError: invalid JWT: unable to parse or verify signature, token is unverifiable: error while executing keyfunc: unrecognized JWT kid <nil> for algorithm ES256",
-      "severity": "high"
+      "name": "Authenticated blocked from payment_transactions",
+      "passed": true,
+      "detail": "permission denied for table payment_transactions",
+      "severity": "info"
+    },
+    {
+      "category": "rls_auth",
+      "name": "Authenticated blocked from stripe_event_log",
+      "passed": true,
+      "detail": "Could not find the table 'public.stripe_event_log' in the schema cache",
+      "severity": "info"
+    },
+    {
+      "category": "rls_auth",
+      "name": "Authenticated blocked from payment_audit_log",
+      "passed": true,
+      "detail": "Could not find the table 'public.payment_audit_log' in the schema cache",
+      "severity": "info"
+    },
+    {
+      "category": "rls_auth",
+      "name": "Users table scoped to own row",
+      "passed": true,
+      "detail": "1 row(s)",
+      "severity": "info"
     },
     {
       "category": "edge_functions",

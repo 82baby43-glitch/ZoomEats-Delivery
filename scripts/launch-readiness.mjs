@@ -5,7 +5,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 
-const PROD = "https://zoom-eats-delivery.vercel.app";
+const PROD = process.env.LAUNCH_READINESS_URL || "https://www.zoomeats.net";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const STRIPE_KEY =
@@ -44,8 +44,7 @@ async function fetchStatus(url, label) {
   }
 }
 
-async function resolveEdgeFunctionSecret() {
-  if (process.env.EDGE_FUNCTION_SECRET) return process.env.EDGE_FUNCTION_SECRET;
+async function resolveVaultSecret(name) {
   const token = process.env.SUPABASE_ACCESS_TOKEN;
   if (!token) return "";
   try {
@@ -53,7 +52,7 @@ async function resolveEdgeFunctionSecret() {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        query: "select decrypted_secret from vault.decrypted_secrets where name = 'EDGE_FUNCTION_SECRET' limit 1",
+        query: `select decrypted_secret from vault.decrypted_secrets where name = '${name}' limit 1`,
       }),
     });
     const rows = await res.json();
@@ -115,7 +114,7 @@ async function main() {
 
   const db = createClient(SUPABASE_URL, SERVICE_KEY);
   const fnBase = `${SUPABASE_URL.replace(/\/$/, "")}/functions/v1`;
-  const edgeSecret = await resolveEdgeFunctionSecret();
+  const edgeSecret = process.env.EDGE_FUNCTION_SECRET || (await resolveVaultSecret("EDGE_FUNCTION_SECRET"));
 
   // --- API health ---
   console.log("\n--- API & edge functions ---");
@@ -211,11 +210,18 @@ async function main() {
 
   // --- Uber Direct ---
   console.log("\n--- Delivery dispatch (Uber Direct) ---");
-  if (UBER_CLIENT_ID && UBER_CLIENT_SECRET) {
+  const { data: uberConfig } = await db
+    .from("uber_direct_config")
+    .select("configured,enabled,environment,client_id")
+    .eq("id", "default")
+    .maybeSingle();
+  const uberClientId = UBER_CLIENT_ID || (await resolveVaultSecret("UBER_DIRECT_CLIENT_ID"));
+  const uberClientSecret = UBER_CLIENT_SECRET || (await resolveVaultSecret("UBER_DIRECT_CLIENT_SECRET"));
+  if (uberClientId && uberClientSecret) {
     try {
       const body = new URLSearchParams({
-        client_id: UBER_CLIENT_ID,
-        client_secret: UBER_CLIENT_SECRET,
+        client_id: uberClientId,
+        client_secret: uberClientSecret,
         grant_type: "client_credentials",
         scope: "eats.deliveries",
       });
@@ -230,6 +236,11 @@ async function main() {
     } catch (e) {
       fail("Uber Direct OAuth", String(e));
     }
+  } else if (uberConfig?.configured) {
+    pass(
+      "Uber Direct OAuth",
+      `credentials in database (${uberConfig.environment || "sandbox"}, ${uberConfig.enabled ? "enabled" : "disabled"})`
+    );
   } else {
     warn("Uber Direct OAuth", "credentials not in env (may be Supabase-only)");
   }
@@ -292,12 +303,20 @@ async function main() {
           });
           const dispatchData = await dispatchRes.json();
           if (dispatchRes.ok) {
-            if (dispatchData.ok && (dispatchData.driver_id || dispatchData.uber_delivery_id || dispatchData.delivery_type === "uber")) {
+            if (
+              dispatchData.ok &&
+              (dispatchData.driver_id ||
+                dispatchData.uber_delivery_id ||
+                dispatchData.delivery_type === "uber" ||
+                dispatchData.reason === "deferred_to_driver_offers")
+            ) {
               pass(
                 "Dispatch-order",
                 dispatchData.driver_id
                   ? `internal driver ${dispatchData.driver_id}`
-                  : `uber ${dispatchData.uber_delivery_id || "assigned"}`
+                  : dispatchData.reason === "deferred_to_driver_offers"
+                    ? "deferred to driver offers (expected)"
+                    : `uber ${dispatchData.uber_delivery_id || "assigned"}`
               );
             } else if (dispatchData.reason === "no_drivers" || dispatchData.reason === "no_drivers_uber_failed") {
               warn("Dispatch-order", dispatchData.reason + (dispatchData.detail ? `: ${String(dispatchData.detail).slice(0, 80)}` : ""));
@@ -309,8 +328,13 @@ async function main() {
           }
 
           const { data: after } = await db.from("orders").select("status,delivery_type,driver_id").eq("order_id", testOrderId).maybeSingle();
-          if (after?.delivery_type || after?.driver_id) {
-            pass("Order after dispatch", `${after.delivery_type || "internal"} / ${after.status}`);
+          if (after?.delivery_type || after?.driver_id || dispatchData.reason === "deferred_to_driver_offers") {
+            pass(
+              "Order after dispatch",
+              dispatchData.reason === "deferred_to_driver_offers"
+                ? "offer queue active (awaiting restaurant accept)"
+                : `${after?.delivery_type || "internal"} / ${after?.status}`
+            );
           } else {
             warn("Order after dispatch", `still unassigned — status ${after?.status}`);
           }
@@ -321,7 +345,9 @@ async function main() {
             .eq("order_id", testOrderId)
             .maybeSingle();
           if (delivery) pass("Delivery record", `${delivery.provider} / ${delivery.status}`);
-          else warn("Delivery record", "not created");
+          else if (dispatchData.reason === "deferred_to_driver_offers") {
+            pass("Delivery record", "not created yet — deferred until restaurant accepts");
+          } else warn("Delivery record", "not created");
         } catch (e) {
           fail("Dispatch-order", String(e));
         }

@@ -21,14 +21,7 @@ function splitEmails(raw: string | undefined): string[] {
 }
 
 function getAdminEmails(): string[] {
-  const seen = new Set<string>();
-  for (const e of [
-    ...splitEmails(Deno.env.get("ADMIN_EMAILS")),
-    ...splitEmails(Deno.env.get("NEXT_PUBLIC_ADMIN_EMAILS")),
-  ]) {
-    seen.add(e);
-  }
-  return [...seen];
+  return splitEmails(Deno.env.get("ADMIN_EMAILS"));
 }
 
 export function resolveUserRoles(user: FounderUser | null | undefined): string[] {

@@ -56,19 +56,19 @@ async function main() {
     const email = `driver-${Date.now()}@zoomeats.test`;
     const user = await createAuthUser(email, { name: "Driver Test", role: "driver" });
     const profile = await getProfile(user.id);
-    if (profile.role !== "delivery") throw new Error(`role=${profile.role}`);
+    if (profile.role !== "driver") throw new Error(`role=${profile.role}`);
     if (profile.approval_status !== "pending") throw new Error(`approval=${profile.approval_status}`);
-    pass("Driver metadata → delivery role + pending approval");
-  } catch (e) { fail("Driver metadata → delivery role + pending approval", e); }
+    pass("Driver metadata → driver role + pending approval");
+  } catch (e) { fail("Driver metadata → driver role + pending approval", e); }
 
-  // 3. Restaurant metadata maps to vendor
+  // 3. Restaurant metadata maps to restaurant_owner
   try {
     const email = `restaurant-${Date.now()}@zoomeats.test`;
     const user = await createAuthUser(email, { name: "Restaurant Test", role: "restaurant" });
     const profile = await getProfile(user.id);
-    if (profile.role !== "vendor") throw new Error(`role=${profile.role}`);
-    pass("Restaurant metadata → vendor role");
-  } catch (e) { fail("Restaurant metadata → vendor role", e); }
+    if (profile.role !== "restaurant_owner") throw new Error(`role=${profile.role}`);
+    pass("Restaurant metadata → restaurant_owner role");
+  } catch (e) { fail("Restaurant metadata → restaurant_owner role", e); }
 
   // 4. Dispatcher signup
   try {

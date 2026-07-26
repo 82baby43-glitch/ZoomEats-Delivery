@@ -25,7 +25,7 @@ loadEnv();
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const adminEmail = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || process.env.ADMIN_EMAILS || "")
+const adminEmail = (process.env.ADMIN_EMAILS || "")
   .split(",")[0]
   ?.trim();
 
@@ -141,7 +141,7 @@ async function createVendorUser() {
 }
 
 async function getAdminToken() {
-  if (!adminEmail) throw new Error("set NEXT_PUBLIC_ADMIN_EMAILS for admin approval test");
+  if (!adminEmail) throw new Error("set ADMIN_EMAILS for admin approval test");
   const { data: adminUsers } = await admin.from("users").select("user_id, role").eq("email", adminEmail).limit(1);
   const adminUser = adminUsers?.[0];
   if (!adminUser) throw new Error(`admin user not found for ${adminEmail}`);
