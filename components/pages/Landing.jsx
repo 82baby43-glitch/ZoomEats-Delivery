@@ -7,13 +7,14 @@ import { safeGet, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { signInWithGoogle } from "@/lib/auth";
 import Header from "@/components/Header";
-import { Search, Star, Clock, Sparkles, Heart } from "lucide-react";
+import { Search, Star, Clock, Sparkles, Heart, Shield } from "lucide-react";
 import Chatbot from "@/components/Chatbot";
 import { LocalBusinessJsonLd } from "@/components/seo/StructuredData";
 import LocalPartnerSpotlight from "@/components/spotlight/LocalPartnerSpotlight";
 import { sanitizeRestaurants } from "@/lib/safeData";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { logClientError } from "@/lib/clientErrorLog";
+import { VERIFIED_MARKETPLACE_MERCHANT_BADGE, isDispensarySlug } from "@/lib/merchant/dispensaryPositioning";
 
 const startLogin = () => {
   signInWithGoogle().catch((e) => console.error("[auth] login failed:", e));
