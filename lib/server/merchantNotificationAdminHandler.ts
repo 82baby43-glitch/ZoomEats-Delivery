@@ -32,7 +32,7 @@ export async function handleMerchantNotificationAdminRequest(
     const u = ctx.requireRole("admin");
     const environment = String(body.environment || "sandbox");
     await logSystemEvent(db, {
-      event_type: "restaurant_error",
+      event_type: "admin_test",
       severity: "info",
       source: "merchant_notifications",
       message: `Admin tested merchant notification sound (${environment})`,
@@ -49,7 +49,7 @@ export async function handleMerchantNotificationAdminRequest(
   if (path === "/admin/merchant-notifications/log-failure" && method === "POST") {
     ctx.requireRole("admin", "vendor", "restaurant_owner", "restaurant_staff");
     await logSystemEvent(db, {
-      event_type: "restaurant_error",
+      event_type: "merchant_notification_failure",
       severity: "warn",
       source: "merchant_notifications",
       message: String(body.message || "Merchant notification delivery failed"),
