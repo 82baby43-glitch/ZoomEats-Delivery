@@ -1,17 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { getClientAppType, getPwaConfig } from "@/lib/pwa/appContext";
 
+function shouldSkipSplash(pathname) {
+  return pathname?.startsWith("/demo") || pathname?.startsWith("/for-merchants");
+}
+
 export default function AppSplash() {
-  const [show, setShow] = useState(true);
+  const pathname = usePathname();
+  const [show, setShow] = useState(false);
 
   useEffect(() => {
+    if (shouldSkipSplash(pathname)) return;
+    setShow(true);
     const t = setTimeout(() => setShow(false), 900);
     return () => clearTimeout(t);
-  }, []);
+  }, [pathname]);
 
-  if (!show) return null;
+  if (!show || shouldSkipSplash(pathname)) return null;
 
   const cfg = getPwaConfig(getClientAppType());
 

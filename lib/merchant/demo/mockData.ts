@@ -95,8 +95,10 @@ export function createInitialMenu(): DemoMenuItem[] {
   ];
 }
 
+const DEMO_NOW = "2026-07-26T12:00:00.000Z";
+
 export function createInitialOrders(): DemoOrder[] {
-  const now = Date.now();
+  const now = new Date(DEMO_NOW).getTime();
   return [
     {
       order_id: "demo_ord_1001",
@@ -176,21 +178,21 @@ export const DEMO_REVIEWS: DemoReview[] = [
     customer_name: "Avery L.",
     rating: 5,
     comment: "Food arrived hot and perfectly packaged. The brisket bowl is incredible!",
-    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    created_at: "2026-07-24T12:00:00.000Z",
   },
   {
     id: "rev_2",
     customer_name: "Drew H.",
     rating: 5,
     comment: "Fast delivery and friendly driver updates through ZoomEats Connect.",
-    created_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+    created_at: "2026-07-22T12:00:00.000Z",
   },
   {
     id: "rev_3",
     customer_name: "Sam W.",
     rating: 4,
     comment: "Great menu variety. Fries were a little soft but still tasty.",
-    created_at: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
+    created_at: "2026-07-20T12:00:00.000Z",
   },
 ];
 
@@ -208,8 +210,8 @@ export const DEMO_PAYOUTS: DemoPayouts = {
   available: 1842.35,
   pending: 326.8,
   last_payout: 2120.5,
-  last_payout_date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-  next_payout_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+  last_payout_date: "2026-07-19T12:00:00.000Z",
+  next_payout_date: "2026-07-29T12:00:00.000Z",
 };
 
 export const ORDER_STATUS_LABELS: Record<string, string> = {
