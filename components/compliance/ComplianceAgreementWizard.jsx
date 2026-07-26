@@ -29,9 +29,14 @@ export default function ComplianceAgreementWizard({ roleLabel, onAllComplete, in
   const { user } = useAuth();
   const role = user?.role === "vendor" || user?.role === "restaurant" ? "vendor" : "delivery";
 
+  const skipCategoryPicker = role === "vendor" && initialMerchantCategory === DISPENSARY_SLUG;
   const [merchantCategory, setMerchantCategory] = useState(initialMerchantCategory || "restaurants");
-  const [categoryLocked, setCategoryLocked] = useState(false);
-  const [steps, setSteps] = useState(role === "vendor" ? VENDOR_STEPS_WITH_CATEGORY : DRIVER_STEPS);
+  const [categoryLocked, setCategoryLocked] = useState(skipCategoryPicker);
+  const [steps, setSteps] = useState(
+    role === "vendor"
+      ? (skipCategoryPicker ? VENDOR_STEPS_RESTAURANT : VENDOR_STEPS_WITH_CATEGORY)
+      : DRIVER_STEPS
+  );
   const [step, setStep] = useState(0);
   const [agreements, setAgreements] = useState([]);
   const [checks, setChecks] = useState({});
