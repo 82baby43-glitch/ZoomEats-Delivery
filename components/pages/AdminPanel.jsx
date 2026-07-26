@@ -168,12 +168,6 @@ export default function AdminPanel() {
           <Link href="/admin/merchant-claims" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-merchant-claims-link">
             <Store size={16} /> Merchant Claims
           </Link>
-          <Link href="/admin/logistics" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-logistics-link">
-            <MapPin size={16} /> Live Logistics Map
-          </Link>
-          <Link href="/admin/founder-driver" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-founder-driver-link">
-            <Truck size={16} /> Founder Driver Mode
-          </Link>
           <Link href="/admin/marketplace" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-marketplace-link">
             <Store size={16} /> Marketplace Manager
           </Link>

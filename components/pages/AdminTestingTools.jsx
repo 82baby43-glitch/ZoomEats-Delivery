@@ -9,22 +9,16 @@ import {
   Truck,
 } from "lucide-react";
 import Header from "@/components/Header";
+import DeliverySimulationPanel from "@/components/admin/DeliverySimulationPanel";
 import MerchantNotificationAdminPanel from "@/components/admin/MerchantNotificationAdminPanel";
 
 const TOOLS = [
   {
     href: "/admin/restaurant-simulator",
     title: "Restaurant Simulator",
-    description: "End-to-end sandbox kitchen with fake restaurants, customers, drivers, orders, and payments. Never touches production data or Stripe.",
+    description: "Sandbox kitchen with fake restaurants, customers, drivers, orders, and payments. Never touches production data or Stripe.",
     icon: ChefHat,
     testId: "testing-tools-restaurant-simulator",
-  },
-  {
-    href: "/admin/system-health",
-    title: "System Health & Launch Audit",
-    description: "Launch readiness checks, delivery simulation, and test order workflows.",
-    icon: Activity,
-    testId: "testing-tools-system-health",
   },
   {
     href: "/admin/founder-driver",
@@ -55,8 +49,12 @@ export default function AdminTestingTools() {
           <h1 className="font-display text-3xl font-bold">Testing Tools</h1>
         </div>
         <p className="text-sm mt-3 max-w-2xl" style={{ color: "var(--muted)" }}>
-          Internal admin-only sandboxes for validating order flows, logistics, and restaurant operations.
-          Production restaurant accounts never see these tools.
+          Sandboxes and simulations for validating order flows, logistics, and restaurant operations.
+          For production monitoring and launch audits, use{" "}
+          <Link href="/admin/system-health" className="underline" data-testid="testing-tools-system-health-link">
+            System Health
+          </Link>
+          .
         </p>
 
         <div className="grid md:grid-cols-2 gap-4 mt-8">
@@ -75,6 +73,14 @@ export default function AdminTestingTools() {
               </span>
             </Link>
           ))}
+        </div>
+
+        <div className="mt-10">
+          <div className="flex items-center gap-2 mb-4">
+            <Activity size={20} style={{ color: "var(--primary)" }} />
+            <h2 className="font-display text-xl font-bold">Flow simulations</h2>
+          </div>
+          <DeliverySimulationPanel />
         </div>
 
         <div className="mt-10">
