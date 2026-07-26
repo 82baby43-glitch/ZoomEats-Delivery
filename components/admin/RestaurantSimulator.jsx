@@ -83,7 +83,7 @@ export default function RestaurantSimulator() {
               ← Admin dashboard
             </Link>
             <span className="text-sm mx-2" style={{ color: "var(--muted)" }}>·</span>
-            <Link href="/admin/testing-tools" className="text-sm" style={{ color: "var(--muted)" }}>
+            <Link href="/admin/system-health?tab=testing" className="text-sm" style={{ color: "var(--muted)" }}>
               Testing Tools
             </Link>
             <h1 className="font-display text-3xl font-bold mt-2 flex items-center gap-3">
