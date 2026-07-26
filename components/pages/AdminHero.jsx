@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, clearApiCache } from "@/lib/api";
 import Header from "@/components/Header";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { ImageIcon, Trash2, Upload, Store } from "lucide-react";
@@ -20,6 +20,16 @@ export default function AdminHero() {
   const [useRestaurantImage, setUseRestaurantImage] = useState(true);
   const [customImageUrl, setCustomImageUrl] = useState("");
 
+  const [message, setMessage] = useState("");
+
+  const applyHeroState = (data) => {
+    setHero(data);
+    setEnabled(Boolean(data?.enabled));
+    setRestaurantId(data?.restaurant_id || "");
+    setUseRestaurantImage(data?.use_restaurant_image !== false);
+    setCustomImageUrl(data?.custom_image_url || "");
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -28,11 +38,7 @@ export default function AdminHero() {
         api.get("/admin/restaurants"),
       ]);
       const data = heroRes?.data ?? heroRes;
-      setHero(data);
-      setEnabled(Boolean(data?.enabled));
-      setRestaurantId(data?.restaurant_id || "");
-      setUseRestaurantImage(data?.use_restaurant_image !== false);
-      setCustomImageUrl(data?.custom_image_url || "");
+      applyHeroState(data);
       setRestaurants(Array.isArray(restRes?.data) ? restRes.data : []);
       setError(false);
     } catch {
@@ -47,8 +53,8 @@ export default function AdminHero() {
   }, [load]);
 
   const selectedRestaurant = useMemo(
-    () => restaurants.find((r) => r.restaurant_id === restaurantId) || hero?.restaurant || null,
-    [restaurants, restaurantId, hero]
+    () => restaurants.find((r) => r.restaurant_id === restaurantId) || null,
+    [restaurants, restaurantId]
   );
 
   const previewImage = useMemo(() => {
@@ -58,19 +64,19 @@ export default function AdminHero() {
   }, [enabled, restaurantId, useRestaurantImage, customImageUrl, selectedRestaurant]);
 
   const save = async () => {
-    if (enabled && !restaurantId) {
-      alert("Choose a restaurant/store to feature on the hero, or turn the hero feature off.");
-      return;
-    }
+    const wantsEnabled = enabled && Boolean(restaurantId);
     setBusy(true);
+    setMessage("");
     try {
-      await api.put("/admin/hero", {
-        enabled,
-        restaurant_id: restaurantId || null,
+      const res = await api.put("/admin/hero", {
+        enabled: wantsEnabled,
+        restaurant_id: wantsEnabled ? restaurantId : null,
         use_restaurant_image: useRestaurantImage,
-        image_url: customImageUrl || null,
+        image_url: wantsEnabled ? (customImageUrl || null) : null,
       });
-      await load();
+      clearApiCache();
+      applyHeroState(res?.data ?? res);
+      setMessage(wantsEnabled ? "Hero updated." : "Hero cleared. Default homepage image is active.");
     } catch (e) {
       alert(e?.message || "Could not save hero settings");
     } finally {
@@ -81,13 +87,12 @@ export default function AdminHero() {
   const removeFromHero = async () => {
     if (!confirm("Remove the featured store from the homepage hero?")) return;
     setBusy(true);
+    setMessage("");
     try {
-      await api.post("/admin/hero/clear", {});
-      setEnabled(false);
-      setRestaurantId("");
-      setCustomImageUrl("");
-      setUseRestaurantImage(true);
-      await load();
+      const res = await api.post("/admin/hero/clear", {});
+      clearApiCache();
+      applyHeroState(res?.data ?? res);
+      setMessage("Removed from hero. The homepage now uses the default image.");
     } catch (e) {
       alert(e?.message || "Could not clear hero");
     } finally {
@@ -162,7 +167,11 @@ export default function AdminHero() {
                 <select
                   className="input-field"
                   value={restaurantId}
-                  onChange={(e) => setRestaurantId(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setRestaurantId(next);
+                    if (!next) setEnabled(false);
+                  }}
                   data-testid="hero-restaurant-select"
                 >
                   <option value="">Choose a store…</option>
@@ -223,6 +232,9 @@ export default function AdminHero() {
                   <Trash2 size={16} /> Remove from hero
                 </button>
               </div>
+              {message && (
+                <p className="text-sm text-green-400" data-testid="hero-status-message">{message}</p>
+              )}
             </div>
 
             <div className="card p-6" data-testid="admin-hero-preview">

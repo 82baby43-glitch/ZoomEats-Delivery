@@ -22,10 +22,48 @@ function publicStorageUrl(storagePath: string): string {
   return `${base}/storage/v1/object/public/${HERO_BUCKET}/${storagePath}`;
 }
 
+async function ensureHeroRow(db: SupabaseClient) {
+  const { data } = await db.from("homepage_hero").select("id").eq("id", HERO_ID).maybeSingle();
+  if (data?.id) return;
+  await db.from("homepage_hero").insert({ id: HERO_ID, enabled: false });
+}
+
 async function getHeroRow(db: SupabaseClient) {
+  await ensureHeroRow(db);
   const { data, error } = await db.from("homepage_hero").select("*").eq("id", HERO_ID).maybeSingle();
   if (error) throwErr(error.message, 500);
   return data;
+}
+
+async function clearHeroRow(db: SupabaseClient, updatedBy: string) {
+  await ensureHeroRow(db);
+  const cleared = {
+    enabled: false,
+    restaurant_id: null,
+    image_url: null,
+    image_storage_path: null,
+    use_restaurant_image: true,
+    updated_by: updatedBy,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await db
+    .from("homepage_hero")
+    .update(cleared)
+    .eq("id", HERO_ID)
+    .select()
+    .maybeSingle();
+
+  if (error) throwErr(error.message, 500);
+  if (data) return data;
+
+  const { data: inserted, error: insertError } = await db
+    .from("homepage_hero")
+    .insert({ id: HERO_ID, ...cleared })
+    .select()
+    .single();
+  if (insertError) throwErr(insertError.message, 500);
+  return inserted;
 }
 
 async function enrichHero(db: SupabaseClient, row: Record<string, unknown> | null) {
@@ -40,8 +78,9 @@ async function enrichHero(db: SupabaseClient, row: Record<string, unknown> | nul
     };
   }
 
+  const enabled = row.enabled === true;
   let restaurant = null;
-  if (row.restaurant_id) {
+  if (enabled && row.restaurant_id) {
     const { data } = await db
       .from("restaurants")
       .select("restaurant_id,name,description,cuisine,image_url,cover_url,rating,delivery_time_min,merchant_category_slug")
@@ -52,18 +91,18 @@ async function enrichHero(db: SupabaseClient, row: Record<string, unknown> | nul
 
   const customImage = row.image_url ? String(row.image_url) : null;
   const restaurantImage = restaurant?.image_url || restaurant?.cover_url || null;
-  const resolvedImageUrl = row.use_restaurant_image === false
-    ? customImage
-    : (restaurantImage || customImage);
+  const resolvedImageUrl = enabled
+    ? (row.use_restaurant_image === false ? customImage : (restaurantImage || customImage))
+    : null;
 
   return {
     id: row.id,
-    enabled: row.enabled === true,
-    restaurant_id: row.restaurant_id || null,
+    enabled,
+    restaurant_id: enabled ? (row.restaurant_id || null) : null,
     image_url: resolvedImageUrl,
     custom_image_url: customImage,
     use_restaurant_image: row.use_restaurant_image !== false,
-    restaurant,
+    restaurant: enabled ? restaurant : null,
     updated_at: row.updated_at,
   };
 }
@@ -76,11 +115,7 @@ export async function handleHeroRequest(
 
   if (path === "/homepage/hero" && method === "GET") {
     const row = await getHeroRow(db);
-    const hero = await enrichHero(db, row as Record<string, unknown> | null);
-    if (!hero.enabled || !hero.restaurant_id) {
-      return { ...hero, enabled: false, restaurant: null, image_url: null };
-    }
-    return hero;
+    return enrichHero(db, row as Record<string, unknown> | null);
   }
 
   if (path === "/admin/hero" && method === "GET") {
@@ -92,8 +127,9 @@ export async function handleHeroRequest(
   if (path === "/admin/hero" && method === "PUT") {
     const admin = ctx.requireRole("admin");
     const restaurantId = body.restaurant_id ? String(body.restaurant_id) : null;
+    const wantsEnabled = body.enabled === true && Boolean(restaurantId);
 
-    if (restaurantId) {
+    if (wantsEnabled && restaurantId) {
       const { data: restaurant } = await db
         .from("restaurants")
         .select("restaurant_id")
@@ -102,8 +138,13 @@ export async function handleHeroRequest(
       if (!restaurant) throwErr("Restaurant not found", 404);
     }
 
+    if (!wantsEnabled) {
+      const data = await clearHeroRow(db, String(admin.user_id));
+      return enrichHero(db, data as Record<string, unknown>);
+    }
+
     const patch: Record<string, unknown> = {
-      enabled: body.enabled === true,
+      enabled: true,
       restaurant_id: restaurantId,
       use_restaurant_image: body.use_restaurant_image !== false,
       updated_by: admin.user_id,
@@ -117,9 +158,11 @@ export async function handleHeroRequest(
       patch.image_storage_path = body.image_storage_path ? String(body.image_storage_path) : null;
     }
 
+    await ensureHeroRow(db);
     const { data, error } = await db
       .from("homepage_hero")
-      .upsert({ id: HERO_ID, ...patch }, { onConflict: "id" })
+      .update(patch)
+      .eq("id", HERO_ID)
       .select()
       .single();
     if (error) throwErr(error.message, 500);
@@ -128,21 +171,7 @@ export async function handleHeroRequest(
 
   if (path === "/admin/hero/clear" && method === "POST") {
     const admin = ctx.requireRole("admin");
-    const { data, error } = await db
-      .from("homepage_hero")
-      .upsert({
-        id: HERO_ID,
-        enabled: false,
-        restaurant_id: null,
-        image_url: null,
-        image_storage_path: null,
-        use_restaurant_image: true,
-        updated_by: admin.user_id,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: "id" })
-      .select()
-      .single();
-    if (error) throwErr(error.message, 500);
+    const data = await clearHeroRow(db, String(admin.user_id));
     return enrichHero(db, data as Record<string, unknown>);
   }
 
