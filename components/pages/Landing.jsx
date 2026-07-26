@@ -324,6 +324,11 @@ export default function Landing() {
                   <div className="p-5">
                     <div className="label-eyebrow">{r.cuisine || "—"}</div>
                     <h3 className="font-display text-xl font-bold mt-1">{r.name}</h3>
+                    {isDispensarySlug(r.merchant_category_slug) && (
+                      <div className="inline-flex items-center gap-1 mt-1 text-xs font-bold text-green-400">
+                        <Shield size={12} /> {VERIFIED_MARKETPLACE_MERCHANT_BADGE}
+                      </div>
+                    )}
                     <p className="text-sm mt-1 line-clamp-2" style={{ color: "var(--muted)" }}>
                       {r.description || ""}
                     </p>
