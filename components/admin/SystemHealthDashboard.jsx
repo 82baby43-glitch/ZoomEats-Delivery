@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Activity,
   AlertTriangle,
   CheckCircle2,
   Download,
+  FlaskConical,
   RefreshCw,
   Shield,
   XCircle,
@@ -17,7 +19,6 @@ import { ADMIN_EMAILS_WARNING } from "@/lib/adminEnv";
 
 const TABS = [
   { id: "readiness", label: "Launch Readiness", icon: Zap },
-  { id: "simulation", label: "Delivery Simulation", icon: Activity },
   { id: "events", label: "System Events", icon: AlertTriangle },
   { id: "status", label: "Live System Status", icon: Activity },
   { id: "failed", label: "Failed Checks", icon: XCircle },
@@ -83,7 +84,6 @@ function CheckRow({ check }) {
 export default function SystemHealthDashboard({ initialTab = "readiness" }) {
   const [tab, setTab] = useState(initialTab);
   const [report, setReport] = useState(null);
-  const [testResult, setTestResult] = useState(null);
   const [systemEvents, setSystemEvents] = useState([]);
   const [rateLimits, setRateLimits] = useState(null);
   const [adminConfig, setAdminConfig] = useState(null);
@@ -91,15 +91,10 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(false);
 
-  const load = useCallback(async (refresh = false, simulate = false) => {
+  const load = useCallback(async (refresh = false) => {
     setRunning(true);
     try {
-      const path = simulate
-        ? "/admin/launch-audit/run"
-        : `/admin/launch-audit${refresh ? "?refresh=true" : ""}`;
-      const r = simulate
-        ? await api.post(path, { simulate_e2e: true, probe_frontend: true })
-        : await api.get(path);
+      const r = await api.get(`/admin/launch-audit${refresh ? "?refresh=true" : ""}`);
       setReport(r?.data || r);
       setError(false);
     } catch (e) {
@@ -116,18 +111,6 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
   useEffect(() => {
     api.get("/admin/system-health/admin-config").then((r) => setAdminConfig(r?.data || r)).catch(() => {});
   }, []);
-
-  const runFullTest = async () => {
-    setRunning(true);
-    try {
-      const r = await api.post("/admin/system-health/simulation");
-      setTestResult(r?.data || r);
-    } catch (e) {
-      alert(e?.message || "Delivery simulation failed");
-    } finally {
-      setRunning(false);
-    }
-  };
 
   const loadEvents = async () => {
     try {
@@ -191,16 +174,16 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
           <div className="label-eyebrow">System Health</div>
           <h1 className="font-display text-3xl font-bold mt-1">Launch Readiness Audit</h1>
           <p className="text-sm mt-2 max-w-2xl" style={{ color: "var(--muted)" }}>
-            Automated inspection of every major ZoomEats subsystem. Read-only — does not modify production data unless E2E simulation is run.
+            Production monitoring and launch readiness for every major ZoomEats subsystem. Read-only — does not run sandboxes or modify production data.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn-ghost text-sm inline-flex items-center gap-2" disabled={running} onClick={() => load(true)}>
-            <RefreshCw size={14} className={running ? "animate-spin" : ""} /> Refresh
+            <RefreshCw size={14} className={running ? "animate-spin" : ""} /> Refresh audit
           </button>
-          <button type="button" className="btn-secondary text-sm" disabled={running} onClick={() => load(true, true)}>
-            Run E2E Simulation
-          </button>
+          <Link href="/admin/testing-tools" className="btn-secondary text-sm inline-flex items-center gap-2" data-testid="system-health-testing-tools-link">
+            <FlaskConical size={14} /> Open testing tools
+          </Link>
         </div>
       </div>
 
@@ -285,28 +268,6 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
               ))}
             </div>
           </div>
-        </div>
-      )}
-
-      {tab === "simulation" && (
-        <div className="card p-6 space-y-4">
-          <h2 className="font-bold">Launch Simulation Mode</h2>
-          <p className="text-sm" style={{ color: "var(--muted)" }}>
-            Simulates customer order → restaurant acceptance → driver assignment → pickup → delivery → payment capture → earnings/payout verification. Generates a simulation ID and pass/fail report, then cleans up test data.
-          </p>
-          <button type="button" className="btn-primary" disabled={running} onClick={runFullTest} aria-label="Run delivery simulation">
-            {running ? "Running simulation…" : "Run Delivery Simulation"}
-          </button>
-          {testResult && (
-            <div className="space-y-2 mt-4">
-              <div className="p-3 rounded-lg text-sm" style={{ background: "var(--surface-2)" }}>
-                <p><strong>Simulation ID:</strong> {testResult.simulation_id}</p>
-                <p className="mt-1"><strong>Completed:</strong> {testResult.completed_at ? new Date(testResult.completed_at).toLocaleString() : "—"}</p>
-                <p className="mt-1"><strong>Report:</strong> {testResult.report_summary || (testResult.success ? "PASS" : "FAIL")}</p>
-              </div>
-              {testResult.checks?.map((c) => <CheckRow key={c.id} check={c} />)}
-            </div>
-          )}
         </div>
       )}
 
