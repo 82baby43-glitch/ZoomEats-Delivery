@@ -160,10 +160,7 @@ export default function AdminPanel() {
         <PulseHeader since={since} onRefresh={retryAll} />
         <div className="mt-4 flex flex-wrap gap-3">
           <Link href="/admin/system-health" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-system-health-link">
-            <Activity size={16} /> System Health
-          </Link>
-          <Link href="/admin/testing-tools" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-testing-tools-link">
-            <Store size={16} /> Testing Tools
+            <Activity size={16} /> System Health &amp; Testing
           </Link>
           <Link href="/admin/merchant-claims" className="btn-primary inline-flex items-center gap-2 text-sm" data-testid="admin-merchant-claims-link">
             <Store size={16} /> Merchant Claims

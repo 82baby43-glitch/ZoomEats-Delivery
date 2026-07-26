@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
@@ -16,15 +16,17 @@ import {
 import { api } from "@/lib/api";
 import { LoadingSkeleton, ErrorState } from "@/components/ui/PageStates";
 import { ADMIN_EMAILS_WARNING } from "@/lib/adminEnv";
+import TestingToolsSection from "@/components/admin/TestingToolsSection";
 
 const TABS = [
   { id: "readiness", label: "Launch Readiness", icon: Zap },
   { id: "events", label: "System Events", icon: AlertTriangle },
-  { id: "status", label: "Live System Status", icon: Activity },
+  { id: "status", label: "Live Status", icon: Activity },
   { id: "failed", label: "Failed Checks", icon: XCircle },
-  { id: "performance", label: "Performance Metrics", icon: Activity },
-  { id: "security", label: "Security Audit", icon: Shield },
-  { id: "report", label: "Download Report", icon: Download },
+  { id: "performance", label: "Performance", icon: Activity },
+  { id: "security", label: "Security", icon: Shield },
+  { id: "report", label: "Reports", icon: Download },
+  { id: "testing", label: "Testing & Sandboxes", icon: FlaskConical },
 ];
 
 function ScoreRing({ score, status }) {
@@ -82,6 +84,7 @@ function CheckRow({ check }) {
 }
 
 export default function SystemHealthDashboard({ initialTab = "readiness" }) {
+  const router = useRouter();
   const [tab, setTab] = useState(initialTab);
   const [report, setReport] = useState(null);
   const [systemEvents, setSystemEvents] = useState([]);
@@ -105,6 +108,15 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
       setRunning(false);
     }
   }, []);
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
+
+  const selectTab = useCallback((nextTab) => {
+    setTab(nextTab);
+    router.replace(`/admin/system-health?tab=${nextTab}`, { scroll: false });
+  }, [router]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -161,8 +173,8 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
     }
   };
 
-  if (loading && !report) return <LoadingSkeleton rows={8} />;
-  if (error && !report) return <ErrorState message="Could not load launch audit" onRetry={() => load(true)} />;
+  if (loading && !report && tab !== "testing") return <LoadingSkeleton rows={8} />;
+  if (error && !report && tab !== "testing") return <ErrorState message="Could not load launch audit" onRetry={() => load(true)} />;
 
   const failedChecks = (report?.checks || []).filter((c) => c.status === "fail");
   const securityChecks = (report?.checks || []).filter((c) => c.category === "security");
@@ -171,19 +183,16 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="label-eyebrow">System Health</div>
-          <h1 className="font-display text-3xl font-bold mt-1">Launch Readiness Audit</h1>
+          <div className="label-eyebrow">Admin Operations</div>
+          <h1 className="font-display text-3xl font-bold mt-1">System Health &amp; Testing</h1>
           <p className="text-sm mt-2 max-w-2xl" style={{ color: "var(--muted)" }}>
-            Production monitoring and launch readiness for every major ZoomEats subsystem. Read-only — does not run sandboxes or modify production data.
+            Production monitoring, launch readiness audits, and internal sandboxes in one place.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn-ghost text-sm inline-flex items-center gap-2" disabled={running} onClick={() => load(true)}>
             <RefreshCw size={14} className={running ? "animate-spin" : ""} /> Refresh audit
           </button>
-          <Link href="/admin/testing-tools" className="btn-secondary text-sm inline-flex items-center gap-2" data-testid="system-health-testing-tools-link">
-            <FlaskConical size={14} /> Open testing tools
-          </Link>
         </div>
       </div>
 
@@ -209,10 +218,11 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
           <button
             key={t.id}
             type="button"
-            onClick={() => setTab(t.id)}
+            onClick={() => selectTab(t.id)}
             className={`text-sm px-3 py-2 rounded-lg inline-flex items-center gap-2 transition-colors ${
               tab === t.id ? "bg-[var(--accent)]/15 text-[var(--accent)]" : "hover:bg-white/5"
             }`}
+            data-testid={t.id === "testing" ? "system-health-testing-tab" : undefined}
           >
             <t.icon size={14} /> {t.label}
           </button>
@@ -418,6 +428,8 @@ export default function SystemHealthDashboard({ initialTab = "readiness" }) {
           </div>
         </div>
       )}
+
+      {tab === "testing" && <TestingToolsSection />}
     </div>
   );
 }
