@@ -80,6 +80,7 @@ import { recordOrderFinancials } from "../_shared/financial/engine.ts";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "../_shared/restaurantAdminHandler.ts";
 import { handleRestaurantSimulatorRequest } from "../_shared/restaurantSimulatorHandler.ts";
 import { handleVendorDashboardRequest } from "../_shared/vendorDashboardHandler.ts";
+import { handleMerchantNotificationAdminRequest } from "../_shared/merchantNotificationAdminHandler.ts";
 import { handleMerchantClaimRequest } from "../_shared/merchantClaimHandler.ts";
 import { isTestOrder } from "../_shared/orders/isTestOrder.ts";
 import { isSandboxRestaurant } from "../_shared/restaurants.ts";
@@ -308,6 +309,14 @@ Deno.serve(async (req) => {
       runtime: { supabaseUrl, serviceKey },
     });
     if (vendorDashboardResult !== null) return json(vendorDashboardResult);
+
+    const merchantNotificationAdminResult = await handleMerchantNotificationAdminRequest(db, {
+      path,
+      method,
+      body,
+      requireRole,
+    });
+    if (merchantNotificationAdminResult !== null) return json(merchantNotificationAdminResult);
 
     const merchantClaimResult = await handleMerchantClaimRequest(db, {
       path,

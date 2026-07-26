@@ -68,6 +68,7 @@ import { recordOrderFinancials } from "../financial/engine";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "./restaurantAdminHandler";
 import { handleRestaurantSimulatorRequest } from "./restaurantSimulatorHandler";
 import { handleVendorDashboardRequest } from "./vendorDashboardHandler";
+import { handleMerchantNotificationAdminRequest } from "./merchantNotificationAdminHandler";
 import { handleMerchantClaimRequest } from "./merchantClaimHandler";
 import { isTestOrder } from "../orders/isTestOrder";
 import { isSandboxRestaurant } from "../restaurants";
@@ -290,6 +291,14 @@ export async function handleApiRequest(
       },
     });
     if (vendorDashboardResult !== null) return vendorDashboardResult;
+
+    const merchantNotificationAdminResult = await handleMerchantNotificationAdminRequest(db, {
+      path,
+      method,
+      body,
+      requireRole,
+    });
+    if (merchantNotificationAdminResult !== null) return merchantNotificationAdminResult;
 
     const merchantClaimResult = await handleMerchantClaimRequest(db, {
       path,

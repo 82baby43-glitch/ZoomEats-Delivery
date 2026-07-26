@@ -24,6 +24,10 @@ import { useWebPush } from "@/lib/useWebPush";
 import { primeChime, playChime } from "@/lib/chime";
 import { formatMoney, sanitizeOrders, sanitizeWallet, safeArray } from "@/lib/safeData";
 import { isPaymentConfirmed } from "@/lib/orderState";
+import { acceptMinutesRemaining, isIncomingUnacknowledged } from "@/lib/merchant/incomingOrderAlerts";
+import { useMerchantIncomingOrderAlerts } from "@/lib/hooks/useMerchantIncomingOrderAlerts";
+import IncomingOrderAlertBanner from "@/components/merchant/IncomingOrderAlertBanner";
+import MerchantAlertSettingsPanel from "@/components/merchant/MerchantAlertSettingsPanel";
 import { logClientError } from "@/lib/clientErrorLog";
 import { useAuth } from "@/lib/auth";
 import { useCompanionRealtime } from "@/lib/hooks/useCompanionRealtime";
@@ -86,17 +90,45 @@ function RestaurantProductionDashboardInner() {
   const [livePulse, setLivePulse] = useState(0);
   const [busyOrder, setBusyOrder] = useState(null);
   const [setupForm, setSetupForm] = useState({ name: "", description: "", cuisine: "", image_url: "", cover_url: "", address: "" });
+  const [dataPrimed, setDataPrimed] = useState(false);
+  const [highlightOrderId, setHighlightOrderId] = useState(null);
 
-  const { permission, request, fire } = useWebPush("ZoomEats Kitchen");
+  const { permission, request, fire } = useWebPush("ZoomEats Merchant");
   const { notify } = useRestaurantNotify();
-  const notifiedRef = useRef(new Set());
   const driverAssignedRef = useRef(new Set());
-  const primedRef = useRef(false);
   const { user } = useAuth();
   const { settings: companionSettings } = useCompanionMode();
 
   const restaurant = dashboard?.restaurant;
   const stats = dashboard?.stats || {};
+  const prepMinutes = restaurant?.delivery_time_min || 20;
+  const isSandbox = Boolean(restaurant?.is_test_account || restaurant?.restaurant_type === "test");
+
+  const handleViewOrder = useCallback((orderId) => {
+    setTab("orders");
+    setHighlightOrderId(orderId);
+    setTimeout(() => setHighlightOrderId(null), 8000);
+  }, []);
+
+  const {
+    settings: alertSettings,
+    updateSettings: updateAlertSettings,
+    testSound: testAlertSound,
+    banner: alertBanner,
+    dismissBanner,
+    unacknowledgedCount,
+    sortedOrders,
+    isPulsing,
+    isOnline: alertsOnline,
+  } = useMerchantIncomingOrderAlerts({
+    merchantId: restaurant?.restaurant_id,
+    sandbox: isSandbox,
+    orders,
+    prepMinutes,
+    primed: dataPrimed,
+    onPush: fire,
+    onViewOrder: handleViewOrder,
+  });
 
   const load = useCallback(async () => {
     try {
@@ -128,23 +160,14 @@ function RestaurantProductionDashboardInner() {
       }
 
       const fresh = orderList.filter(
-        (x) => x.status === "placed" && isPaymentConfirmed(x) && !notifiedRef.current.has(x.order_id)
+        (x) => x.status === "placed" && isPaymentConfirmed(x)
       );
-      if (primedRef.current && fresh.length > 0) {
-        fresh.forEach((x) => {
-          fire(`New order · $${formatMoney(x.total)}`, `${x.customer_name} — order received`, { tag: `order-${x.order_id}` });
-          notify("New order", `${x.customer_name} · $${formatMoney(x.total)}`);
-          playChime();
-        });
-      }
-      orderList.forEach((x) => {
-        if (x.status === "placed") notifiedRef.current.add(x.order_id);
-      });
+      void fresh;
 
       const newlyAssigned = orderList.filter(
         (x) => (x.status === "assigned_internal" || x.driver_id) && !driverAssignedRef.current.has(x.order_id)
       );
-      if (primedRef.current && newlyAssigned.length > 0) {
+      if (dataPrimed && newlyAssigned.length > 0) {
         newlyAssigned.forEach((x) => {
           fire("Driver assigned", `Driver heading to pick up #${String(x.order_id).slice(-6)}`, { tag: `driver-${x.order_id}` });
           notify("Driver assigned", `Order #${String(x.order_id).slice(-6)}`);
@@ -155,11 +178,11 @@ function RestaurantProductionDashboardInner() {
         if (x.status === "assigned_internal" || x.driver_id) driverAssignedRef.current.add(x.order_id);
       });
 
-      primedRef.current = true;
+      setDataPrimed(true);
     } catch (e) {
       logClientError("restaurant.dashboard.load", e);
     }
-  }, [fire, notify]);
+  }, [fire, notify, dataPrimed]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -189,9 +212,19 @@ function RestaurantProductionDashboardInner() {
     setBusyOrder(orderId);
     try {
       await api.post(`/vendor/orders/${orderId}/status`, { status });
+      if (status === "accepted" || status === "cancelled") {
+        dismissBanner(orderId);
+      }
       await load();
     } catch (e) {
       notify("Action failed", getApiErrorMessage(e));
+      api.post("/admin/merchant-notifications/log-failure", {
+        merchant_id: restaurant?.restaurant_id,
+        order_id: orderId,
+        channel: "order_status",
+        message: getApiErrorMessage(e),
+        environment: isSandbox ? "sandbox" : "production",
+      }).catch(() => {});
     } finally {
       setBusyOrder(null);
     }
@@ -273,6 +306,11 @@ function RestaurantProductionDashboardInner() {
 
   return (
     <div className="restaurant-dashboard min-h-screen" style={{ "--primary": "#C6FF00", "--primary-hover": "#B0E600" }}>
+      <IncomingOrderAlertBanner
+        alert={alertBanner}
+        onDismiss={dismissBanner}
+        onView={handleViewOrder}
+      />
       <Header />
       <div className="relative">
         <div
@@ -308,8 +346,13 @@ function RestaurantProductionDashboardInner() {
                   className="badge flex items-center gap-1"
                   style={{ color: livePulse > 0 ? "var(--primary)" : "var(--muted)" }}
                 >
-                  <Wifi size={12} /> Live
+                  <Wifi size={12} /> Live{!alertsOnline ? " (offline queue)" : ""}
                 </span>
+                {unacknowledgedCount > 0 && (
+                  <span className="badge ring-2 ring-[#C6FF00] font-bold" data-testid="unacknowledged-orders-badge">
+                    {unacknowledgedCount} new
+                  </span>
+                )}
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -324,10 +367,10 @@ function RestaurantProductionDashboardInner() {
               </Link>
               {permission !== "granted" ? (
                 <button type="button" className="btn-ghost text-sm" onClick={() => { primeChime(); request(); }}>
-                  {permission === "denied" ? <BellOff size={14} /> : <Bell size={14} />} Alerts
+                  {permission === "denied" ? <BellOff size={14} /> : <Bell size={14} />} Enable push
                 </button>
               ) : (
-                <button type="button" className="btn-ghost text-sm" onClick={() => { primeChime(); playChime(); }}>
+                <button type="button" className="btn-ghost text-sm" onClick={() => { testAlertSound(); }}>
                   <Bell size={14} /> Test sound
                 </button>
               )}
@@ -361,13 +404,21 @@ function RestaurantProductionDashboardInner() {
                 key={t.id}
                 type="button"
                 onClick={() => setTab(t.id)}
-                className="px-3 py-2 text-sm font-bold whitespace-nowrap shrink-0"
+                className="px-3 py-2 text-sm font-bold whitespace-nowrap shrink-0 relative"
                 style={{
                   color: tab === t.id ? "var(--text)" : "var(--muted)",
                   borderBottom: tab === t.id ? "2px solid var(--primary)" : "2px solid transparent",
                 }}
               >
                 {t.label}
+                {t.id === "orders" && unacknowledgedCount > 0 && (
+                  <span
+                    className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
+                    style={{ background: "#C6FF00", color: "#0A0A0A" }}
+                  >
+                    {unacknowledgedCount}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -376,12 +427,27 @@ function RestaurantProductionDashboardInner() {
             {tab === "home" && (
               <div className="space-y-4">
                 <h2 className="font-display text-xl font-bold">Live orders</h2>
-                <OrdersList orders={orders.filter((o) => !["delivered", "cancelled"].includes(o.status)).slice(0, 5)} busyOrder={busyOrder} onStatusChange={updateOrderStatus} compact />
+                <OrdersList
+                  orders={sortedOrders.filter((o) => !["delivered", "cancelled"].includes(o.status)).slice(0, 5)}
+                  busyOrder={busyOrder}
+                  onStatusChange={updateOrderStatus}
+                  isPulsing={isPulsing}
+                  prepMinutes={prepMinutes}
+                  highlightOrderId={highlightOrderId}
+                  compact
+                />
               </div>
             )}
 
             {tab === "orders" && (
-              <OrdersList orders={orders} busyOrder={busyOrder} onStatusChange={updateOrderStatus} />
+              <OrdersList
+                orders={sortedOrders}
+                busyOrder={busyOrder}
+                onStatusChange={updateOrderStatus}
+                isPulsing={isPulsing}
+                prepMinutes={prepMinutes}
+                highlightOrderId={highlightOrderId}
+              />
             )}
 
             {tab === "kitchen" && (
@@ -405,7 +471,14 @@ function RestaurantProductionDashboardInner() {
             )}
 
             {tab === "store" && (
-              <RestaurantStoreSettings restaurant={restaurant} onSave={saveStoreSettings} />
+              <div className="space-y-6">
+                <RestaurantStoreSettings restaurant={restaurant} onSave={saveStoreSettings} />
+                <MerchantAlertSettingsPanel
+                  settings={alertSettings}
+                  onChange={updateAlertSettings}
+                  onTest={testAlertSound}
+                />
+              </div>
             )}
 
             {tab === "messages" && <RestaurantMessaging />}
@@ -435,7 +508,7 @@ function RestaurantProductionDashboardInner() {
   );
 }
 
-function OrdersList({ orders, busyOrder, onStatusChange, compact = false }) {
+function OrdersList({ orders, busyOrder, onStatusChange, isPulsing, prepMinutes = 20, highlightOrderId, compact = false }) {
   const active = orders.filter((o) => o.status !== "cancelled");
 
   if (!active.length) {
@@ -445,21 +518,47 @@ function OrdersList({ orders, busyOrder, onStatusChange, compact = false }) {
   return (
     <div className="space-y-3">
       <AnimatePresence initial={false}>
-        {active.map((o) => (
+        {active.map((o) => {
+          const isNew = isIncomingUnacknowledged(o);
+          const minsLeft = acceptMinutesRemaining(o, prepMinutes);
+          const pulsing = isPulsing?.(o.order_id);
+          return (
           <motion.div
             key={o.order_id}
             layout
             initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
+            animate={{
+              opacity: 1,
+              y: 0,
+              boxShadow: pulsing ? ["0 0 0 0 rgba(198,255,0,0.4)", "0 0 0 8px rgba(198,255,0,0)"] : undefined,
+            }}
+            transition={pulsing ? { repeat: Infinity, duration: 1.6 } : undefined}
             exit={{ opacity: 0 }}
             className="card p-5"
+            style={{
+              borderColor: highlightOrderId === o.order_id || pulsing ? "#C6FF00" : undefined,
+              borderWidth: highlightOrderId === o.order_id || pulsing ? 2 : undefined,
+            }}
+            data-testid={`incoming-order-${o.order_id}`}
           >
             <div className="flex flex-wrap justify-between gap-4">
               <div>
-                <div className="font-display text-lg font-bold">{o.customer_name}</div>
+                <div className="font-display text-lg font-bold flex items-center gap-2 flex-wrap">
+                  {o.customer_name}
+                  {isNew && (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse" style={{ background: "#C6FF00", color: "#0A0A0A" }}>
+                      NEW
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>
                   #{String(o.order_id).slice(-8).toUpperCase()} · {o.delivery_type || "delivery"} · ${formatMoney(o.total)}
                 </div>
+                {isNew && (
+                  <div className="text-xs mt-1 font-bold" style={{ color: "#C6FF00" }}>
+                    Accept within {minsLeft} min
+                  </div>
+                )}
                 <div className="mt-2 text-sm">
                   {(o.items || []).map((it, i) => (
                     <div key={i}>{it.quantity}× {it.name}</div>
@@ -497,7 +596,8 @@ function OrdersList({ orders, busyOrder, onStatusChange, compact = false }) {
             )}
             {!compact && isPaymentConfirmed(o) && <VendorOrderPricing orderId={o.order_id} />}
           </motion.div>
-        ))}
+          );
+        })}
       </AnimatePresence>
     </div>
   );

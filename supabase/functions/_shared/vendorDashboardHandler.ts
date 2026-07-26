@@ -293,9 +293,9 @@ export async function handleVendorDashboardRequest(
       .eq("restaurant_id", rest.restaurant_id)
       .maybeSingle();
     if (!source) throwErr("Menu item not found", 404);
-    const { item_id: _removed, ...rest } = source;
+    const { item_id: _removed, ...itemFields } = source;
     const row = {
-      ...rest,
+      ...itemFields,
       item_id: uid("item"),
       name: `${source.name} (Copy)`,
       created_at: new Date().toISOString(),

@@ -9,6 +9,7 @@ import {
   Truck,
 } from "lucide-react";
 import Header from "@/components/Header";
+import MerchantNotificationAdminPanel from "@/components/admin/MerchantNotificationAdminPanel";
 
 const TOOLS = [
   {
@@ -74,6 +75,10 @@ export default function AdminTestingTools() {
               </span>
             </Link>
           ))}
+        </div>
+
+        <div className="mt-10">
+          <MerchantNotificationAdminPanel />
         </div>
       </div>
     </div>
