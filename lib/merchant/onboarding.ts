@@ -45,6 +45,7 @@ export async function ensureMerchantStub(
     return existing.restaurant_id;
   }
 
+  const now = new Date().toISOString();
   const { data, error } = await db
     .from("restaurants")
     .insert({
@@ -60,6 +61,8 @@ export async function ensureMerchantStub(
       business_category: businessCategoryForSlug(slug),
       rating: 4.6,
       delivery_time_min: 30,
+      created_at: now,
+      updated_at: now,
     })
     .select("restaurant_id")
     .single();

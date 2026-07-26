@@ -17,6 +17,8 @@
     "stripe:supabase": "node scripts/setup-stripe-supabase.mjs",
     "stripe:webhook-register": "node scripts/register-stripe-webhook.mjs",
     "compliance:test": "node scripts/compliance-test.mjs",
+    "dispensary:compliance:test": "node scripts/dispensary-compliance-test.mjs",
+    "dispensary:compliance:unit": "npx tsx --test scripts/dispensary-compliance-unit.test.ts",
     "security:audit": "node scripts/security-audit.mjs",
     "auth:redirects": "node scripts/sync-auth-redirects.mjs",
     "auth:audit": "node scripts/audit-auth-env.mjs",
