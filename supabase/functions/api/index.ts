@@ -30,6 +30,7 @@ import { handleComplianceRequest } from "../_shared/complianceHandler.ts";
 import { handlePwaRequest } from "../_shared/pwaHandler.ts";
 import { handleMenuImageRequest } from "../_shared/menuImages/handler.ts";
 import { handleSpotlightRequest } from "../_shared/spotlight/handler.ts";
+import { handleHeroRequest } from "../_shared/hero/handler.ts";
 import { handleProfileRequest } from "../_shared/profiles/handler.ts";
 import { handleVehicleRequest } from "../_shared/vehicles/handler.ts";
 import { handleDreamlandRequest } from "../_shared/dreamlandHandler.ts";
@@ -252,6 +253,15 @@ Deno.serve(async (req) => {
       requireRole,
     });
     if (spotlightResult !== null) return json(spotlightResult);
+
+    const heroResult = await handleHeroRequest(db, {
+      path,
+      method,
+      body,
+      requireAuth,
+      requireRole,
+    });
+    if (heroResult !== null) return json(heroResult);
 
     const profileResult = await handleProfileRequest(db, {
       path,
