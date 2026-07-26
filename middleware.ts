@@ -11,6 +11,8 @@ const PUBLIC_PREFIXES = [
   "/manifest.webmanifest",
   "/r/",
   "/api/",
+  "/for-merchants",
+  "/demo",
 ];
 
 const ROLE_ROUTE_PREFIXES: Record<string, string[]> = {

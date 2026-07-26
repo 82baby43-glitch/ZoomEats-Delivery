@@ -76,6 +76,8 @@ const PUBLIC_PREFIXES = [
   "/agreements",
   "/pending-approval",
   "/signup",
+  "/for-merchants",
+  "/demo",
 ];
 
 export function isPublicPath(pathname: string): boolean {

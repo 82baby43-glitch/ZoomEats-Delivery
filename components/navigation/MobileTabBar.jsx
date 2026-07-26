@@ -32,7 +32,7 @@ export default function MobileTabBar() {
   const appType = getClientAppType();
   const role = normalizeRole(user?.role || "customer");
 
-  const hideOn = ["/login", "/auth/callback", "/checkout", "/agreements", "/pending-approval", "/onboarding"];
+  const hideOn = ["/login", "/auth/callback", "/checkout", "/agreements", "/pending-approval", "/onboarding", "/demo", "/for-merchants"];
   if (hideOn.some((p) => pathname.startsWith(p))) return null;
 
   const isActive = (href) => pathname === href || (href !== "/" && pathname.startsWith(href));
