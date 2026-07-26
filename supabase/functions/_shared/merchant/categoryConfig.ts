@@ -126,6 +126,16 @@ export function resolveSignupCategorySlug(
   return null;
 }
 
+/** Invite-only onboarding categories (e.g. licensed dispensary) plus public signup slugs. */
+export function resolveOnboardingCategorySlug(
+  slug?: string | null
+): PrimarySignupSlug | typeof DISPENSARY_SLUG | null {
+  if (!slug) return null;
+  if (slug === DISPENSARY_SLUG) return DISPENSARY_SLUG;
+  if (isPrimarySignupSlug(slug)) return slug;
+  return null;
+}
+
 export function categoryApplicationConfig(slug?: string | null): CategoryApplicationConfig {
   return CATEGORY_APPLICATION_CONFIG[slug || RESTAURANT_SLUG] || CATEGORY_APPLICATION_CONFIG[RESTAURANT_SLUG];
 }
