@@ -39,12 +39,31 @@ async function getSessionToken() {
     headers: { "Content-Type": "application/json", apikey: anon },
     body: JSON.stringify({ email: testEmail, password: testPassword }),
   });
-  if (!sessionRes.ok) {
-    const body = await sessionRes.text();
-    throw new Error(`Could not sign in test user: ${body}`);
+  if (sessionRes.ok) {
+    return sessionRes.json();
   }
-  const session = await sessionRes.json();
-  return session;
+
+  const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email: testEmail,
+  });
+  if (linkErr) throw linkErr;
+
+  const otp = linkData.properties?.email_otp;
+  if (!otp) {
+    throw new Error("Could not obtain magic-link OTP for test user");
+  }
+
+  const otpRes = await fetch(`${url}/auth/v1/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: anon },
+    body: JSON.stringify({ type: "magiclink", email: testEmail, token: otp }),
+  });
+  if (!otpRes.ok) {
+    const body = await otpRes.text();
+    throw new Error(`Could not verify magic link: ${body}`);
+  }
+  return otpRes.json();
 }
 
 function buildInjectScript(session) {
