@@ -67,6 +67,7 @@ import { handleCompanionRequest } from "../companionMode/handler";
 import { recordOrderFinancials } from "../financial/engine";
 import { handleRestaurantAdminRequest, approveRestaurantWithReadiness } from "./restaurantAdminHandler";
 import { handleRestaurantSimulatorRequest } from "./restaurantSimulatorHandler";
+import { handleVendorDashboardRequest } from "./vendorDashboardHandler";
 import { handleMerchantClaimRequest } from "./merchantClaimHandler";
 import { isTestOrder } from "../orders/isTestOrder";
 import { isSandboxRestaurant } from "../restaurants";
@@ -275,6 +276,20 @@ export async function handleApiRequest(
 
     const restaurantSimulatorResult = await handleRestaurantSimulatorRequest(db, complianceCtx);
     if (restaurantSimulatorResult !== null) return restaurantSimulatorResult;
+
+    const vendorDashboardResult = await handleVendorDashboardRequest(db, {
+      path,
+      method,
+      body,
+      params,
+      requireAuth,
+      requireRole,
+      runtime: {
+        supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+        serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      },
+    });
+    if (vendorDashboardResult !== null) return vendorDashboardResult;
 
     const merchantClaimResult = await handleMerchantClaimRequest(db, {
       path,
@@ -498,14 +513,25 @@ export async function handleApiRequest(
     if (path === "/vendor/restaurant" && method === "POST") {
       const u = requireRole("vendor");
       const { data: existing } = await db.from("restaurants").select("*").eq("owner_id", u.user_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-      const restData = {
-        name: body.name,
-        description: body.description || "",
-        cuisine: body.cuisine || "",
-        image_url: body.image_url || "",
-        cover_url: body.cover_url || "",
-        address: body.address || "",
-      };
+      const patchKeys = [
+        "name", "description", "cuisine", "image_url", "cover_url", "address", "phone",
+        "accepting_orders", "active", "delivery_enabled", "delivery_time_min",
+        "delivery_radius_km", "minimum_order", "business_hours", "busy_mode",
+        "holiday_schedule", "temporary_closure", "online_status",
+      ];
+      const restData: Record<string, unknown> = {};
+      if (existing) {
+        for (const key of patchKeys) {
+          if (body[key] !== undefined) restData[key] = body[key];
+        }
+      } else {
+        restData.name = body.name;
+        restData.description = body.description || "";
+        restData.cuisine = body.cuisine || "";
+        restData.image_url = body.image_url || "";
+        restData.cover_url = body.cover_url || "";
+        restData.address = body.address || "";
+      }
       if (existing) {
         const { data } = await db.from("restaurants").update(restData).eq("restaurant_id", existing.restaurant_id).select().single();
         return data;
