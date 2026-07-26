@@ -237,6 +237,7 @@ export async function handleApiRequest(
       path,
       method,
       body,
+      params,
       requireAuth,
       requireRole,
     });
