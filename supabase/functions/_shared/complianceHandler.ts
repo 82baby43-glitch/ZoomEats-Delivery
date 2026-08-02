@@ -847,52 +847,6 @@ export async function handleComplianceRequest(
     return { complete, account_id: accountId, charges_enabled: acct.charges_enabled, payouts_enabled: acct.payouts_enabled };
   }
 
-  if (path === "/onboarding/restaurant/menu-enhance" && method === "POST") {
-    const u = requireRole("vendor", "restaurant");
-    const { data: rest } = await db.from("restaurants").select("restaurant_id").eq("owner_id", u.user_id).maybeSingle();
-    if (!rest) throwErr("Create your restaurant profile first");
-
-    const enhancementId = uid("enh");
-    const originalPath = String(body.original_path || "");
-    const enhancedPath = String(body.enhanced_path || "");
-    const approved = Boolean(body.approved);
-
-    await db.from("menu_photo_enhancements").insert({
-      enhancement_id: enhancementId,
-      restaurant_id: rest.restaurant_id,
-      user_id: u.user_id,
-      original_path: originalPath,
-      enhanced_path: enhancedPath || null,
-      status: enhancedPath ? "enhanced" : "pending",
-      approved,
-    });
-
-    if (approved && body.menu_item) {
-      const item = body.menu_item as Record<string, unknown>;
-      await db.from("menu_items").insert({
-        item_id: uid("item"),
-        restaurant_id: rest.restaurant_id,
-        name: item.name || "Menu item",
-        description: item.description || "",
-        price: item.price || 0,
-        image_url: item.image_url || enhancedPath,
-        category: item.category || "Mains",
-        available: true,
-      });
-    }
-
-    const menuDraft = Array.isArray(body.menu_draft) ? body.menu_draft : [];
-    if (menuDraft.length) {
-      await db.from("restaurant_onboarding").upsert({
-        user_id: u.user_id,
-        menu_draft: menuDraft,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: "user_id" });
-    }
-
-    return { enhancement_id: enhancementId, approved };
-  }
-
   if (path.startsWith("/uploads") && method === "GET") {
     return { message: "Use POST /uploads/presign" };
   }

@@ -6,7 +6,6 @@ import Header from "@/components/Header";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import RoleAgreementCenter from "@/components/pages/RoleAgreementCenter";
-import { enhanceFoodPhoto } from "@/lib/compliance/imageEnhance";
 import { Check, ExternalLink, Sparkles } from "lucide-react";
 
 const STEPS = [
@@ -149,32 +148,21 @@ export default function RestaurantOnboardingWizard() {
     if (!file) return;
     setBusy(true);
     try {
-      const originalUrl = URL.createObjectURL(file);
-      const enhancedBlob = await enhanceFoodPhoto(file);
-      const enhancedUrl = URL.createObjectURL(enhancedBlob);
+      const presign = await api.post("/vendor/menu-images/presign", {
+        file_name: file.name,
+        content_type: file.type || "image/jpeg",
+      });
+      const { upload_url, storage_path, token } = presign?.data || {};
+      if (!upload_url) throw new Error("Upload URL unavailable");
+      await fetch(upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "image/jpeg", "x-upsert": "true", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: file,
+      });
 
-      const uploadBlob = async (blob, suffix) => {
-        const presign = await api.post("/uploads/presign", {
-          document_type: `menu_photo_${suffix}`,
-          file_name: `${suffix}.jpg`,
-          content_type: "image/jpeg",
-          entity_type: "restaurant",
-        });
-        const { upload_url, token } = presign?.data || {};
-        await fetch(upload_url, {
-          method: "PUT",
-          headers: { "Content-Type": "image/jpeg", "x-upsert": "true", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-          body: blob,
-        });
-        return presign?.data?.storage_path;
-      };
-
-      const [originalPath, enhancedPath] = await Promise.all([
-        uploadBlob(file, "original"),
-        uploadBlob(enhancedBlob, "enhanced"),
-      ]);
-
-      setPhotoPreview({ original: originalUrl, enhanced: enhancedUrl, originalPath, enhancedPath });
+      const enhance = await api.post("/vendor/menu-images/enhance", { storage_path });
+      const { original_url, enhanced_url } = enhance?.data || {};
+      setPhotoPreview({ original: original_url, enhanced: enhanced_url, enhancedUrl: enhanced_url });
     } catch (e) {
       alert(e?.message || "Enhancement failed");
     } finally {
@@ -185,15 +173,10 @@ export default function RestaurantOnboardingWizard() {
   const approveMenuPhoto = async () => {
     setBusy(true);
     try {
-      await api.post("/onboarding/restaurant/menu-enhance", {
-        original_path: photoPreview.originalPath,
-        enhanced_path: photoPreview.enhancedPath,
-        approved: true,
-        menu_item: {
-          ...menuItem,
-          price: parseFloat(menuItem.price) || 0,
-          image_url: photoPreview.enhancedPath,
-        },
+      await api.post("/vendor/menu-items", {
+        ...menuItem,
+        price: parseFloat(menuItem.price) || 0,
+        image_url: photoPreview.enhancedUrl,
       });
       setPhotoPreview({ original: null, enhanced: null });
       setMenuItem({ name: "", description: "", price: "", category: "Mains" });
