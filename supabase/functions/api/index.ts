@@ -640,6 +640,7 @@ Deno.serve(async (req) => {
         tip_amount: quote.customer.tip_amount,
         discount_amount: quote.customer.discount_amount,
         small_order_fee: quote.customer.small_order_fee,
+        regulatory_fee: Number(quote.customer.regulatory_fee ?? 0),
         pricing_version: quote.version,
         total,
         address: deliveryAddress,

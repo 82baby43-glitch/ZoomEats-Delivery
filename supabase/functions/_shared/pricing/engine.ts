@@ -417,6 +417,7 @@ export async function persistPricingSnapshot(
     distance_fee: quote.customer.distance_fee,
     surge_fee: quote.customer.surge_fee,
     weather_fee: quote.customer.weather_fee,
+    regulatory_fee: Number(quote.customer.regulatory_fee ?? 0),
     discount_amount: quote.customer.discount_amount,
     tip_amount: quote.customer.tip_amount,
     customer_total: quote.customer.customer_total,
