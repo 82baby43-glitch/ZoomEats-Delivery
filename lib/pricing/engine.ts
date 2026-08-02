@@ -188,8 +188,6 @@ export async function calculatePricingQuote(
     customer.customer_total = round2(customer.customer_total + (rawDiscount - cappedDiscount));
   }
 
-  await applyRegulatoryFee(db, customer, customer.subtotal);
-
   const driverCalc = await rpcJson(db, "calculate_driver_pay", {
     p_distance_miles: ctx.distanceMiles,
     p_duration_minutes: ctx.driveMinutes,
@@ -306,6 +304,8 @@ export async function calculatePricingQuote(
       distance_miles: ctx.distanceMiles,
     });
   }
+
+  await applyRegulatoryFee(db, customer, customer.subtotal);
 
   const baseQuote: PricingQuote = {
     version,
