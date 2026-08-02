@@ -130,7 +130,7 @@ export function computeComplianceStatus(opts: {
     const onboardingStatus = onboarding?.status || "incomplete";
     const onboardingComplete =
       ONBOARDING_DONE_STATUSES.has(onboardingStatus) ||
-      Boolean(restaurant?.approved && approval === "approved" && !onboarding);
+      Boolean(restaurant?.approved && approval === "approved");
     const onboardingStep = onboarding?.current_step ?? 1;
 
     return resolveGate({
@@ -180,15 +180,6 @@ function resolveGate(
       can_access_dashboard: false,
       redirect_to: s.onboardingPath || "/agreements",
       message: "Agreement required",
-    };
-  }
-
-  if (!s.stripe_connect_complete && s.role === "vendor") {
-    return {
-      ...s,
-      can_access_dashboard: false,
-      redirect_to: s.onboardingPath || "/restaurant/onboarding",
-      message: "Payout setup required",
     };
   }
 

@@ -915,12 +915,10 @@ async function upsertRestaurantFromOnboarding(
     address: body.business_address || body.address || "",
     image_url: body.logo_url || "",
     cover_url: body.logo_url || "",
-    approval_status: "pending",
-    approved: false,
-    active: false,
   };
 
   if (existing?.restaurant_id) {
+    // Do not reset approval state for an existing (possibly approved) restaurant.
     await db.from("restaurants").update(restData).eq("restaurant_id", existing.restaurant_id);
     return existing.restaurant_id;
   }
@@ -931,6 +929,9 @@ async function upsertRestaurantFromOnboarding(
     owner_id: userId,
     rating: 4.5,
     delivery_time_min: 30,
+    approval_status: "pending",
+    approved: false,
+    active: false,
     ...restData,
   });
   return restaurantId;
