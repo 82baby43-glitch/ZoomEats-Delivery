@@ -31,12 +31,13 @@ async function getRuleRow(db: SupabaseClient, ruleType: string) {
   return data;
 }
 
-async function applyRegulatoryFee(
-  db: SupabaseClient,
+type RegulatoryRule = Awaited<ReturnType<typeof getRuleRow>>;
+
+function applyRegulatoryFee(
   customer: PricingQuote["customer"],
-  orderSubtotal: number
-): Promise<number> {
-  const rule = await getRuleRow(db, "regulatory_fee");
+  orderSubtotal: number,
+  rule: RegulatoryRule
+): number {
   if (!rule) return 0;
   let fee = 0;
   if (rule.percentage != null && Number(rule.percentage) > 0) {
@@ -139,10 +140,11 @@ export async function calculatePricingQuote(
   const ctx = await resolveQuoteContext(db, input);
   const version = await getPricingVersion(db);
 
-  const [minProfit, subsidyRule, freeDeliveryThreshold] = await Promise.all([
+  const [minProfit, subsidyRule, freeDeliveryThreshold, regulatoryRule] = await Promise.all([
     getRuleValue(db, "min_platform_profit"),
     getRuleValue(db, "subsidy_enabled"),
     getRuleValue(db, "free_delivery_threshold"),
+    getRuleRow(db, "regulatory_fee"),
   ]);
   const subsidyAllowed = Boolean(input.allowSubsidy || subsidyRule > 0);
 
@@ -305,7 +307,7 @@ export async function calculatePricingQuote(
     });
   }
 
-  await applyRegulatoryFee(db, customer, customer.subtotal);
+  applyRegulatoryFee(customer, customer.subtotal, regulatoryRule);
 
   const baseQuote: PricingQuote = {
     version,
